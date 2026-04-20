@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest>
+  <control namespace="McDevStudios"
+           constructor="HtmlWordEditor"
+           version="1.0.0"
+           display-name-key="HtmlWordEditor"
+           description-key="HTML editor with A4 paged view and automatic pagination"
+           control-type="standard">
+
+    <!-- Bound field (opcional, para notificar cambios si se necesita) -->
+    <property name="htmlContent"
+              display-name-key="HTML Content"
+              description-key="Bound text field (optional, for change notification)"
+              of-type="SingleLine.Text"
+              usage="bound"
+              required="false" />
+
+    <!-- Nombre lógico de la entidad, ej: mcdev_htmldevtests -->
+    <property name="entityName"
+              display-name-key="Entity Name"
+              description-key="Logical name of the entity"
+              of-type="SingleLine.Text"
+              usage="input"
+              required="true" />
+
+    <!-- Nombre lógico del campo de archivo, ej: mcdev_htmlarchivooriginal -->
+    <property name="fieldName"
+              display-name-key="Field Name"
+              description-key="File field logical name"
+              of-type="SingleLine.Text"
+              usage="input"
+              required="true" />
+
+    <resources>
+      <code path="index.ts" order="1" />
+      <css path="css/editor.css" order="1" />
+    </resources>
+  </control>
+</manifest>
