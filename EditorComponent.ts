@@ -94,7 +94,7 @@ export class EditorComponent {
     this.container.appendChild(this.root);
   }
 
-  // ── Carga ─────────────────────────────────────────────────────
+  // Carga
 
   private async loadContent(): Promise<void> {
     this.setStatus("Cargando contenido...", "saving");
@@ -114,7 +114,7 @@ export class EditorComponent {
     }
   }
 
-  // ── Renderizado inicial desde HTML ────────────────────────────
+  //Renderizado inicial desde HTML 
 
   /**
    * Divide el HTML en segmentos por marcadores page-break,
@@ -146,25 +146,29 @@ export class EditorComponent {
     this.updatePageCount();
   }
 
-  // ── Página individual ─────────────────────────────────────────
+  // Página individual 
 
-  private createPageElement(html?: string): HTMLElement {
+private createPageElement(html?: string): HTMLElement {
     const page = document.createElement("div");
     page.className = "hwe-page";
-    page.setAttribute("contenteditable", "true");
-    page.setAttribute("spellcheck", "false");
-    page.innerHTML = html ?? "<p><br></p>";
 
-    page.addEventListener("input", () => {
-      this.isDirty = true;
-      this.toolbar.updateActiveStates();
+    // El inner es el contenedor real del contenido y el que es editable
+    const inner = document.createElement("div");
+    inner.className = "hwe-page-inner";
+    inner.setAttribute("contenteditable", "true");
+    inner.setAttribute("spellcheck", "false");
+    inner.innerHTML = html ?? "<p><br></p>";
+
+    inner.addEventListener("input", () => {
+        this.isDirty = true;
+        this.toolbar.updateActiveStates();
     });
+    inner.addEventListener("keydown", (e: KeyboardEvent) => this.onPageKeyDown(e));
+    inner.addEventListener("mouseup", () => this.toolbar.updateActiveStates());
 
-    page.addEventListener("keydown", (e) => this.onPageKeyDown(e));
-    page.addEventListener("mouseup", () => this.toolbar.updateActiveStates());
-
+    page.appendChild(inner);
     return page;
-  }
+}
 
   /**
    * Callback del Paginator: se llama cada vez que la lista de páginas
@@ -203,7 +207,7 @@ export class EditorComponent {
     return div;
   }
 
-  // ── Teclado ───────────────────────────────────────────────────
+  // Teclado 
 
   private onPageKeyDown(e: KeyboardEvent): void {
     // Ctrl+S → Guardar
@@ -217,7 +221,7 @@ export class EditorComponent {
     // No necesitamos lógica especial; el ResizeObserver detectará el desborde.
   }
 
-  // ── Guardar ───────────────────────────────────────────────────
+  //Guardar 
 
   private async save(): Promise<void> {
     const saveBtn = this.toolbar.getSaveButton();
@@ -264,7 +268,7 @@ export class EditorComponent {
       .join("\n");
   }
 
-  // ── Split por page-break ──────────────────────────────────────
+  // Split por page-break 
 
   /**
    * Divide el HTML en segmentos según atributos page-break-before/after.
@@ -335,7 +339,7 @@ export class EditorComponent {
     return segments;
   }
 
-  // ── Helpers ───────────────────────────────────────────────────
+  // Helpers 
 
   private updatePageCount(): void {
     this.pageCountEl.textContent = `Páginas: ${this.pages.length}`;
@@ -350,7 +354,7 @@ export class EditorComponent {
       "hwe-status-msg" + (type ? ` ${type}` : "");
   }
 
-  // ── Cleanup ───────────────────────────────────────────────────
+  // Cleanup
 
   destroy(): void {
     this.paginator.destroy();
