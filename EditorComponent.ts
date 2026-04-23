@@ -1,17 +1,7 @@
-/**
- * EditorComponent.ts
- *
- * Orquestador principal del editor:
- *  1. Construye el DOM (toolbar + workspace + statusbar)
- *  2. Carga el HTML desde Dataverse
- *  3. Divide el HTML en páginas iniciales (por marcadores page-break)
- *  4. Instancia el Paginator para paginación automática por overflow
- *  5. Gestiona el guardado
- */
-
-import { Paginator }                              from "./Paginator";
-import { Toolbar }                                from "./Toolbar";
-import { fetchHtmlFromFileField, saveHtmlToFileField } from "./fileApi";
+import { Paginator } from "../Orquestador/Paginator";
+import { Toolbar } from "../Resize/Toolbar";
+import { fetchHtmlFromFileField, saveHtmlToFileField } from "../execCommand/fileApi";
+type PcfContext = ComponentFramework.Context<IInputs>;
 
 export class EditorComponent {
   private container: HTMLElement;
@@ -39,25 +29,25 @@ export class EditorComponent {
 
   constructor(
     container: HTMLElement,
-    context: ComponentFramework.Context<any>
+    context: PcfContext
   ) {
-    this.container   = container;
-    this.baseUrl     = (window as any).Xrm.Utility.getGlobalContext().getClientUrl();
-    this.entityName  = context.parameters.entityName.raw  ?? "";
-    this.fieldName   = context.parameters.fieldName.raw   ?? "";
-    this.entityId    = (context as any).page.entityId     ?? "";
+    this.container = container;
+    this.baseUrl = (window as unknown as { Xrm: { Utility: { getGlobalContext: () => { getClientUrl: () => string } } } }).Xrm.Utility.getGlobalContext().getClientUrl();
+    this.entityName = "mcdev_htmldevtests";
+    this.fieldName = "mcdev_htmlarchivooriginal";
+    this.entityId = (context as unknown as { page: { entityId: string } }).page.entityId ?? "";
   }
 
   async init(): Promise<void> {
     this.buildShell();
     this.paginator = new Paginator(
-      (html) => this.createPageElement(html),
-      (pages) => this.onPagesChanged(pages)
+      (html?: string) => this.createPageElement(html),
+      (pages: HTMLElement[]) => this.onPagesChanged(pages)
     );
     await this.loadContent();
   }
 
-  // ── DOM shell ─────────────────────────────────────────────────
+  // DOM shell
 
   private buildShell(): void {
     this.container.innerHTML = "";
@@ -109,7 +99,6 @@ export class EditorComponent {
       this.setStatus("", "");
     } catch (err) {
       this.setStatus(`Error al cargar: ${(err as Error).message}`, "error");
-      // Mostrar al menos una página vacía editable
       this.renderFromHtml("<p><br></p>");
     }
   }
@@ -166,21 +155,12 @@ export class EditorComponent {
     return page;
   }
 
-  /**
-   * Callback del Paginator: se llama cada vez que la lista de páginas
-   * cambia (se crea o elimina una página).
-   * Reconstruimos los separadores visuales y actualizamos el contador.
-   */
   private onPagesChanged(pages: HTMLElement[]): void {
     this.pages = pages;
     this.rebuildWorkspace();
     this.updatePageCount();
   }
 
-  /**
-   * Reconstruye el workspace colocando las páginas con sus divisores
-   * entre ellas. No recrea las páginas, solo reorganiza el DOM.
-   */
   private rebuildWorkspace(): void {
     this.workspace.innerHTML = "";
 
@@ -212,12 +192,9 @@ export class EditorComponent {
       this.save();
       return;
     }
-
-    // Enter al final de una página: dejar que el Paginator lo maneje
-    // No necesitamos lógica especial; el ResizeObserver detectará el desborde.
   }
 
-  // ── Guardar ───────────────────────────────────────────────────
+  // Guardar
 
   private async save(): Promise<void> {
     const saveBtn = this.toolbar.getSaveButton();
@@ -246,11 +223,6 @@ export class EditorComponent {
     }
   }
 
-  /**
-   * Reconstruye el HTML completo desde todas las páginas,
-   * reinsertando marcadores page-break-before entre ellas
-   * para que al recargar se vuelvan a separar correctamente.
-   */
   private collectHtml(): string {
     return this.pages
       .map((page, index) => {
@@ -258,18 +230,13 @@ export class EditorComponent {
         if (index === 0) {
           return inner;
         }
-        // Envolver en div con page-break para persistir la separación
         return `<div style="page-break-before:always">${inner}</div>`;
       })
       .join("\n");
   }
 
-  // ── Split por page-break ──────────────────────────────────────
+  // Split por page-break
 
-  /**
-   * Divide el HTML en segmentos según atributos page-break-before/after.
-   * Devuelve al menos un segmento.
-   */
   private splitHtmlByPageBreaks(html: string): string[] {
     const temp = document.createElement("div");
     temp.innerHTML = html;
@@ -335,8 +302,7 @@ export class EditorComponent {
     return segments;
   }
 
-  // ── Helpers ───────────────────────────────────────────────────
-
+  // Funciones auxiliares 
   private updatePageCount(): void {
     this.pageCountEl.textContent = `Páginas: ${this.pages.length}`;
   }
@@ -350,10 +316,15 @@ export class EditorComponent {
       "hwe-status-msg" + (type ? ` ${type}` : "");
   }
 
-  // ── Cleanup ───────────────────────────────────────────────────
-
   destroy(): void {
     this.paginator.destroy();
     this.container.innerHTML = "";
   }
+
 }
+
+  interface IInputs {
+    htmlContent: ComponentFramework.PropertyTypes.StringProperty;
+    entityName:  ComponentFramework.PropertyTypes.StringProperty;
+    fieldName:   ComponentFramework.PropertyTypes.StringProperty;
+    }
