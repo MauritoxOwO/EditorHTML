@@ -255,18 +255,16 @@ private createPageElement(html?: string): HTMLElement {
    * reinsertando marcadores page-break-before entre ellas
    * para que al recargar se vuelvan a separar correctamente.
    */
-  private collectHtml(): string {
+private collectHtml(): string {
     return this.pages
-      .map((page, index) => {
-        const inner = page.innerHTML;
-        if (index === 0) {
-          return inner;
-        }
-        // Envolver en div con page-break para persistir la separación
-        return `<div style="page-break-before:always">${inner}</div>`;
-      })
-      .join("\n");
-  }
+        .map((page, index) => {
+            const inner = page.querySelector(".hwe-page-inner") as HTMLElement;
+            const content = inner ? inner.innerHTML : page.innerHTML;
+            if (index === 0) return content;
+            return `<div style="page-break-before:always">${content}</div>`;
+        })
+        .join("\n");
+}
 
   // Split por page-break 
 
