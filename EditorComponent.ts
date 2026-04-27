@@ -104,34 +104,37 @@ export class EditorComponent {
 
   // Renderizado inicial desde HTML 
 
-  private renderFromHtml(html: string): void {
-    this.workspace.innerHTML = "";
-    this.pages = [];
+private renderFromHtml(html: string): void {
+  this.workspace.innerHTML = "";
+  this.pages = [];
 
-    const segments = this.splitHtmlByPageBreaks(html);
+  const segments = this.splitHtmlByPageBreaks(html);
 
-    segments.forEach((segHtml, index) => {
-      if (index > 0) {
-        this.workspace.appendChild(this.makePageDivider(index + 1));
-      }
-      const page = this.createPageElement(segHtml);
-      this.pages.push(page);
-      this.workspace.appendChild(page);
-    });
-
-    if (this.pages.length === 0) {
-      const page = this.createPageElement("<p><br></p>");
-      this.pages.push(page);
-      this.workspace.appendChild(page);
+  segments.forEach((segHtml, index) => {
+    if (index > 0) {
+      this.workspace.appendChild(this.makePageDivider(index + 1));
     }
+    const page = this.createPageElement(segHtml);
+    this.pages.push(page);
+    this.workspace.appendChild(page);
+  });
 
-    // Registrar en el Paginator
-    this.paginator.setPages(this.pages);
-    this.pages.forEach((page) => {
-      this.paginator.rebalanceFromPage(page);
-    });
-    this.updatePageCount();
+  if (this.pages.length === 0) {
+    const page = this.createPageElement("<p><br></p>");
+    this.pages.push(page);
+    this.workspace.appendChild(page);
   }
+
+  this.paginator.setPages(this.pages);
+
+  // ← Esperar dos frames: el primero pinta, el segundo calcula layout
+  requestAnimationFrame(() => {
+    requestAnimationFrame(() => {
+      this.pages.forEach((page) => this.paginator.rebalanceFromPage(page));
+      this.updatePageCount();
+    });
+  });
+}
 
   // ── Página individual ─────────────────────────────────────────
 
