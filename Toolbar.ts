@@ -1,45 +1,33 @@
-/**
- * Toolbar.ts
- *
- * Construye la barra de herramientas del editor y vincula
- * los comandos de formato mediante document.execCommand.
- *
- * Expone:
- *  - build(): HTMLElement   → el nodo toolbar listo para insertar
- *  - getSaveButton()        → referencia al botón Guardar
- *  - updateActiveStates()   → resalta botones según la selección actual
- */
 
 export class Toolbar {
   private toolbar!: HTMLElement;
   private saveBtn!: HTMLButtonElement;
 
-  // Mapa comando → botón, para resaltar el estado activo
-  private commandButtons: Map<string, HTMLButtonElement> = new Map();
+  private commandButtons = new Map<string, HTMLButtonElement>;
 
   build(): HTMLElement {
     this.toolbar = document.createElement("div");
     this.toolbar.className = "hwe-toolbar";
 
-    // ── Formato de texto ──────────────────────────────────────
+    // Formato básico
     this.addCmdButton("B",  "bold",      "<b>N</b>",  "Negrita (Ctrl+B)");
     this.addCmdButton("I",  "italic",    "<i>K</i>",  "Cursiva (Ctrl+I)");
     this.addCmdButton("U",  "underline", "<u>S</u>",  "Subrayado (Ctrl+U)");
     this.addSep();
 
-    // ── Alineación ────────────────────────────────────────────
+    // Alineación
     this.addCmdButton("justifyLeft",   "justifyLeft",   "≡L", "Alinear izquierda");
     this.addCmdButton("justifyCenter", "justifyCenter", "≡C", "Centrar");
     this.addCmdButton("justifyRight",  "justifyRight",  "≡R", "Alinear derecha");
     this.addCmdButton("justifyFull",   "justifyFull",   "≡J", "Justificar");
     this.addSep();
 
-    // ── Listas ────────────────────────────────────────────────
+    // Listas
     this.addCmdButton("insertUnorderedList", "insertUnorderedList", "• Lista", "Lista con viñetas");
     this.addCmdButton("insertOrderedList",   "insertOrderedList",   "1. Lista", "Lista numerada");
     this.addSep();
 
-    // ── Fuente ────────────────────────────────────────────────
+    // Fuente 
     const fontSelect = this.makeSelect(
       "Fuente",
       [
@@ -54,7 +42,7 @@ export class Toolbar {
     );
     this.toolbar.appendChild(fontSelect);
 
-    // ── Tamaño ────────────────────────────────────────────────
+    // Tamaño de fuente
     const sizeSelect = this.makeSelect(
       "Tamaño",
       [8, 9, 10, 11, 12, 14, 16, 18, 20, 24, 28, 36, 48].map((s) => ({
@@ -68,7 +56,7 @@ export class Toolbar {
 
     this.addSep();
 
-    // ── Color de texto ────────────────────────────────────────
+    // Color de texto
     const colorBtn = document.createElement("button");
     colorBtn.title = "Color de texto";
     colorBtn.innerHTML = "A";
@@ -85,7 +73,7 @@ export class Toolbar {
     colorBtn.appendChild(colorInput);
     this.toolbar.appendChild(colorBtn);
 
-    // ── Resaltado ─────────────────────────────────────────────
+    // Resaltar
     const highlightBtn = document.createElement("button");
     highlightBtn.title = "Color de fondo de texto";
     highlightBtn.innerHTML = "🖊";
@@ -104,14 +92,13 @@ export class Toolbar {
 
     this.addSep();
 
-    // ── Insertar salto de página manual ──────────────────────
+    // Salto de página manual 
     const breakBtn = document.createElement("button");
     breakBtn.title = "Insertar salto de página manual";
     breakBtn.textContent = "⊞ Salto";
     breakBtn.addEventListener("mousedown", (e) => {
       e.preventDefault();
-      // Insertar un div con page-break-before en la posición del cursor.
-      // El Paginator lo detectará como separador al guardar/recargar.
+
       document.execCommand(
         "insertHTML",
         false,
@@ -122,13 +109,12 @@ export class Toolbar {
 
     this.addSep();
 
-    // ── Guardar ───────────────────────────────────────────────
+    // btnGuardar
     this.saveBtn = document.createElement("button");
     this.saveBtn.className = "hwe-save-btn";
     this.saveBtn.textContent = "💾 Guardar";
     this.toolbar.appendChild(this.saveBtn);
 
-    // Actualizar estado activo al cambiar selección
     document.addEventListener("selectionchange", () =>
       this.updateActiveStates()
     );
@@ -140,20 +126,18 @@ export class Toolbar {
     return this.saveBtn;
   }
 
-  /** Resalta los botones que corresponden al formato activo en la selección. */
   updateActiveStates(): void {
     this.commandButtons.forEach((btn, command) => {
       try {
         const active = document.queryCommandState(command);
         btn.classList.toggle("hwe-active", active);
-      } catch {
-        // queryCommandState puede lanzar en algunos contextos
+      } catch (error) {
+        console.log(error);
       }
     });
   }
 
-  // ── Helpers privados ──────────────────────────────────────────
-
+// Funciones auxiliares
   private addCmdButton(
     id: string,
     command: string,
@@ -165,7 +149,6 @@ export class Toolbar {
     btn.title = title;
 
     btn.addEventListener("mousedown", (e) => {
-      // Prevenir pérdida de foco en el editor
       e.preventDefault();
       document.execCommand(command, false);
     });
@@ -201,11 +184,6 @@ export class Toolbar {
     return sel;
   }
 
-  /**
-   * Aplica tamaño de fuente envolviendo la selección en un <span>.
-   * document.execCommand("fontSize") solo acepta 1-7 (legacy HTML),
-   * así que usamos span con style directo.
-   */
   private applyFontSize(size: string): void {
     const sel = window.getSelection();
     if (!sel || sel.rangeCount === 0 || sel.isCollapsed) return;
@@ -217,8 +195,6 @@ export class Toolbar {
     try {
       range.surroundContents(span);
     } catch {
-      // surroundContents falla si la selección cruza elementos.
-      // Fallback: extraer y envolver.
       const fragment = range.extractContents();
       span.appendChild(fragment);
       range.insertNode(span);
