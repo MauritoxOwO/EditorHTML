@@ -32,7 +32,6 @@ export class EditorComponent {
     context: PcfContext
   ) {
     this.container = container;
-    this.baseUrl = (window as unknown as { Xrm: { Utility: { getGlobalContext: () => { getClientUrl: () => string } } } }).Xrm.Utility.getGlobalContext().getClientUrl();
     this.entityName = "mcdev_htmldevtests";
     this.fieldName = "mcdev_htmlarchivooriginal";
     this.entityId = (context as unknown as { page: { entityId: string } }).page.entityId ?? "";
@@ -84,7 +83,7 @@ export class EditorComponent {
     this.container.appendChild(this.root);
   }
 
-  // ── Carga ─────────────────────────────────────────────────────
+  // Carga 
 
   private async loadContent(): Promise<void> {
     this.setStatus("Cargando contenido...", "saving");
@@ -103,12 +102,8 @@ export class EditorComponent {
     }
   }
 
-  // ── Renderizado inicial desde HTML ────────────────────────────
+  // Renderizado inicial desde HTML 
 
-  /**
-   * Divide el HTML en segmentos por marcadores page-break,
-   * crea una página por segmento y registra todas en el Paginator.
-   */
   private renderFromHtml(html: string): void {
     this.workspace.innerHTML = "";
     this.pages = [];
@@ -132,32 +127,49 @@ export class EditorComponent {
 
     // Registrar en el Paginator
     this.paginator.setPages(this.pages);
+    this.pages.forEach((page) => {
+      this.paginator.rebalanceFromPage(page);
+    });
     this.updatePageCount();
   }
 
   // ── Página individual ─────────────────────────────────────────
 
+
   private createPageElement(html?: string): HTMLElement {
     const page = document.createElement("div");
     page.className = "hwe-page";
-    page.setAttribute("contenteditable", "true");
-    page.setAttribute("spellcheck", "false");
-    page.innerHTML = html ?? "<p><br></p>";
 
-    page.addEventListener("input", () => {
-      this.isDirty = true;
-      this.toolbar.updateActiveStates();
+    page.style.height = "297mm";
+    page.style.overflow = "hidden";
+
+    const inner = document.createElement("div");
+    inner.className = "hwe-page-inner";
+    inner.setAttribute("contenteditable", "true");
+    inner.setAttribute("spellcheck", "false");
+    inner.innerHTML = html ?? "<p><br></p>";
+
+
+    inner.addEventListener("input", () => {
+        this.isDirty = true;
+        this.toolbar.updateActiveStates();
+        this.paginator.rebalanceFromPage(page);
     });
+    inner.addEventListener("keydown", (e: KeyboardEvent) => this.onPageKeyDown(e));
+    inner.addEventListener("mouseup", () => this.toolbar.updateActiveStates());
 
-    page.addEventListener("keydown", (e) => this.onPageKeyDown(e));
-    page.addEventListener("mouseup", () => this.toolbar.updateActiveStates());
-
+    page.appendChild(inner);
     return page;
-  }
+}
 
   private onPagesChanged(pages: HTMLElement[]): void {
     this.pages = pages;
-    this.rebuildWorkspace();
+
+    pages.forEach((page) => {
+      if (!page.parentElement) {
+        this.workspace.appendChild(page);
+      }
+    })
     this.updatePageCount();
   }
 
@@ -224,15 +236,14 @@ export class EditorComponent {
   }
 
   private collectHtml(): string {
-    return this.pages
-      .map((page, index) => {
-        const inner = page.innerHTML;
-        if (index === 0) {
-          return inner;
-        }
-        return `<div style="page-break-before:always">${inner}</div>`;
-      })
-      .join("\n");
+      return this.pages
+          .map((page, index) => {
+              const inner = page.querySelector(".hwe-page-inner") as HTMLElement;
+              const content = inner ? inner.innerHTML : page.innerHTML;
+              if (index === 0) return content;
+              return `<div style="page-break-before:always">${content}</div>`;
+          })
+          .join("\n");
   }
 
   // Split por page-break
@@ -327,4 +338,4 @@ export class EditorComponent {
     htmlContent: ComponentFramework.PropertyTypes.StringProperty;
     entityName:  ComponentFramework.PropertyTypes.StringProperty;
     fieldName:   ComponentFramework.PropertyTypes.StringProperty;
-    }
+  }
