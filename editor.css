@@ -1,9 +1,4 @@
-/* ═══════════════════════════════════════════════════════════════
-   HtmlWordEditor — editor.css
-   Estilos A4, toolbar, separadores de página, contenido editable
-   ═══════════════════════════════════════════════════════════════ */
-
-/* ── Contenedor raíz del PCF ─────────────────────────────────── */
+/*Contenedor raíz del PCF */
 .hwe-root {
   width: 100%;
   height: 100%;
@@ -14,7 +9,7 @@
   font-family: "Segoe UI", sans-serif;
 }
 
-/* ── Toolbar ─────────────────────────────────────────────────── */
+/*Toolbar  */
 .hwe-toolbar {
   flex-shrink: 0;
   background: #f3f3f3;
@@ -90,7 +85,7 @@
   cursor: not-allowed !important;
 }
 
-/* ── Workspace (zona gris scrollable) ────────────────────────── */
+/* Workspace  */
 .hwe-workspace {
   flex: 1;
   overflow-y: auto;
@@ -100,38 +95,27 @@
   box-sizing: border-box;
 }
 
-/* ── Página A4 ───────────────────────────────────────────────── */
+/* Página A4  */
 .hwe-page {
-  /* Dimensiones A4 exactas a 96 dpi */
   width: 210mm;
-  min-height: 297mm;
-
-  /* Márgenes Word por defecto: 2.54 cm todos los lados */
-  padding: 25.4mm;
-  box-sizing: border-box;
-
-  background: white;
-  margin: 0 auto 0 auto;
-  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.28);
-
-  /* Tipografía base Calibri como Word */
-  font-family: "Calibri", "Segoe UI", Arial, sans-serif;
-  font-size: 11pt;
-  line-height: 1.5;
-  color: #000000;
-
-  /* Importante: NO overflow hidden para que ResizeObserver mida el scrollHeight real */
+  min-height: 297mm;          
   overflow: visible;
-
-  outline: none;
+  height: 297mm;
+  overflow: hidden;
+  padding: 0;
+  box-sizing: border-box;
+  background: white;
+  margin: 0 auto;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.28);
   position: relative;
 }
 
 .hwe-page[contenteditable="true"] {
   cursor: text;
+  outline: none;
 }
 
-/* ── Contenido dentro de la página (extensible con clases custom) */
+/* Contenido dentro de la página  */
 
 .hwe-page p {
   margin: 0 0 8pt 0;
@@ -195,12 +179,11 @@
   display: block;
 }
 
-/* Espaciado por defecto para spans (extensible) */
 .hwe-page span {
   /* Las clases custom añadirán fuente, color, etc. */
 }
 
-/* ── Separador visual entre páginas ─────────────────────────── */
+/*  Separador visual entre páginas */
 .hwe-page-divider {
   width: 210mm;
   margin: 0 auto;
@@ -230,7 +213,7 @@
   background: #d0d0d0;
 }
 
-/* ── Barra de estado inferior ────────────────────────────────── */
+/* Barra de estado inferior*/
 .hwe-statusbar {
   flex-shrink: 0;
   height: 22px;
@@ -243,6 +226,20 @@
   color: #555;
   gap: 16px;
 }
+
+.hwe-page-inner {
+  width: 100%;
+  padding: 25.4mm;
+  box-sizing: border-box;
+  outline: none;
+  font-family: "calibri", "Segoe UI", Arial, sans-serif;
+  font-size: 11pt;
+  line-height: 1.5;
+  color: #000000;
+  overflow: auto;
+  overflow: visible;
+}
+
 
 .hwe-statusbar .hwe-status-msg {
   margin-left: auto;
