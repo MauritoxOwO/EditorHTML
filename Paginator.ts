@@ -14,27 +14,24 @@
 export type PageFactory = (html?: string) => HTMLElement;
 export type OnPagesChanged = (pages: HTMLElement[]) => void;
 
+
 export class Paginator {
   private pages: HTMLElement[] = [];
   private observer!: ResizeObserver;
   private pageFactory: PageFactory;
   private onPagesChanged: OnPagesChanged;
   private rebalancing = false;
+
+  private readonly MAX_CONTENT_PX = 930;
+  
   private getContentHeight(inner: HTMLElement): number {
-    const range = document.createRange();
-    range.selectNodeContents(inner);
-    return range.getBoundingClientRect().height;
+    return inner.scrollHeight; // scrollHeight SÍ refleja contenido real aunque overflow:hidden
+  }
+  
+  private getMaxContentHeight(_page: HTMLElement, _inner: HTMLElement): number {
+    return this.MAX_CONTENT_PX;
   }
 
-  private getMaxContentHeight(page: HTMLElement, inner: HTMLElement): number {
-    const pageHeight = page.clientHeight;
-
-    const styles = getComputedStyle(inner);
-    const paddingTop = parseFloat(styles.paddingTop);
-    const paddingBottom = parseFloat(styles.paddingBottom);
-
-    return pageHeight - paddingTop - paddingBottom;
-  }
 
   constructor(pageFactory: PageFactory, onPagesChanged: OnPagesChanged) {
     this.pageFactory    = pageFactory;
