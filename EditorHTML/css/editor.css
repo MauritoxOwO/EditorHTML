@@ -1,0 +1,250 @@
+/*Contenedor raíz del PCF */
+.hwe-root {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  box-sizing: border-box;
+  font-family: "Segoe UI", sans-serif;
+}
+
+/*Toolbar  */
+.hwe-toolbar {
+  flex-shrink: 0;
+  background: #f3f3f3;
+  border-bottom: 1px solid #ccc;
+  padding: 5px 10px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  align-items: center;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+  z-index: 10;
+}
+
+.hwe-toolbar button {
+  background: white;
+  border: 1px solid #bbb;
+  border-radius: 3px;
+  padding: 3px 9px;
+  cursor: pointer;
+  font-size: 13px;
+  min-width: 28px;
+  line-height: 1.4;
+  transition: background 0.12s, border-color 0.12s;
+  user-select: none;
+}
+
+.hwe-toolbar button:hover {
+  background: #ddeeff;
+  border-color: #88aadd;
+}
+
+.hwe-toolbar button.hwe-active {
+  background: #c7dff7;
+  border-color: #4a90d9;
+  font-weight: 700;
+}
+
+.hwe-toolbar select {
+  border: 1px solid #bbb;
+  border-radius: 3px;
+  padding: 3px 5px;
+  font-size: 12px;
+  background: white;
+  cursor: pointer;
+  height: 26px;
+}
+
+.hwe-toolbar .hwe-sep {
+  width: 1px;
+  height: 20px;
+  background: #ccc;
+  margin: 0 3px;
+  flex-shrink: 0;
+}
+
+/* Botón guardar a la derecha */
+.hwe-save-btn {
+  margin-left: auto !important;
+  background: #0078d4 !important;
+  color: white !important;
+  border-color: #005a9e !important;
+  font-weight: 600;
+  padding: 3px 16px !important;
+}
+
+.hwe-save-btn:hover {
+  background: #106ebe !important;
+}
+
+.hwe-save-btn:disabled {
+  background: #999 !important;
+  border-color: #888 !important;
+  cursor: not-allowed !important;
+}
+
+/* Workspace  */
+.hwe-workspace {
+  flex: 1;
+  overflow-y: auto;
+  overflow-x: auto;
+  background: #d0d0d0;
+  padding: 32px 20px 48px;
+  box-sizing: border-box;
+}
+
+/* Página A4  */
+.hwe-page {
+  width: 210mm;
+  min-height: 297mm;          
+  overflow: visible;
+  height: 297mm;
+  overflow: hidden;
+  padding: 0;
+  box-sizing: border-box;
+  background: white;
+  margin: 0 auto;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.28);
+  position: relative;
+}
+
+.hwe-page[contenteditable="true"] {
+  cursor: text;
+  outline: none;
+}
+
+/* Contenido dentro de la página  */
+
+.hwe-page p {
+  margin: 0 0 8pt 0;
+  min-height: 1em; /* evita colapso de párrafos vacíos */
+}
+
+.hwe-page h1 {
+  font-size: 20pt;
+  font-weight: 700;
+  margin: 12pt 0 6pt;
+  line-height: 1.2;
+}
+
+.hwe-page h2 {
+  font-size: 16pt;
+  font-weight: 700;
+  margin: 10pt 0 4pt;
+  line-height: 1.2;
+}
+
+.hwe-page h3 {
+  font-size: 13pt;
+  font-weight: 700;
+  margin: 8pt 0 4pt;
+  line-height: 1.2;
+}
+
+.hwe-page ul,
+.hwe-page ol {
+  margin: 0 0 8pt 0;
+  padding-left: 24pt;
+}
+
+.hwe-page li {
+  margin-bottom: 2pt;
+}
+
+.hwe-page table {
+  border-collapse: collapse;
+  width: 100%;
+  margin: 8pt 0;
+  table-layout: fixed;
+}
+
+.hwe-page table td,
+.hwe-page table th {
+  border: 1px solid #999;
+  padding: 4pt 6pt;
+  vertical-align: top;
+  word-break: break-word;
+}
+
+.hwe-page table th {
+  background: #f0f0f0;
+  font-weight: 700;
+}
+
+.hwe-page img {
+  max-width: 100%;
+  height: auto;
+  display: block;
+}
+
+.hwe-page span {
+  /* Las clases custom añadirán fuente, color, etc. */
+}
+
+/*  Separador visual entre páginas */
+.hwe-page-divider {
+  width: 210mm;
+  margin: 0 auto;
+  height: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+  user-select: none;
+  position: relative;
+}
+
+.hwe-page-divider::before,
+.hwe-page-divider::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: #aaa;
+}
+
+.hwe-page-divider span {
+  font-size: 10px;
+  color: #777;
+  padding: 0 12px;
+  font-family: "Segoe UI", sans-serif;
+  white-space: nowrap;
+  background: #d0d0d0;
+}
+
+/* Barra de estado inferior*/
+.hwe-statusbar {
+  flex-shrink: 0;
+  height: 22px;
+  background: #f3f3f3;
+  border-top: 1px solid #ddd;
+  padding: 0 12px;
+  display: flex;
+  align-items: center;
+  font-size: 11px;
+  color: #555;
+  gap: 16px;
+}
+
+.hwe-page-inner {
+  width: 100%;
+  padding: 25.4mm;
+  box-sizing: border-box;
+  outline: none;
+  font-family: "calibri", "Segoe UI", Arial, sans-serif;
+  font-size: 11pt;
+  line-height: 1.5;
+  color: #000000;
+  overflow: auto;
+  overflow: visible;
+}
+
+
+.hwe-statusbar .hwe-status-msg {
+  margin-left: auto;
+}
+
+.hwe-statusbar .hwe-status-msg.success { color: #107c10; font-weight: 600; }
+.hwe-statusbar .hwe-status-msg.error   { color: #a80000; font-weight: 600; }
+.hwe-statusbar .hwe-status-msg.saving  { color: #0078d4; }

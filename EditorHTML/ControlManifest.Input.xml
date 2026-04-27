@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<manifest>
+  <control namespace="EditorHTMLPBOC" 
+          constructor="EditorHTML"
+          version="0.0.2" 
+          display-name-key="EditorHTMLv0.2"
+          description-key="EditorHTML description" 
+          control-type="standard" 
+  >
+
+    <external-service-usage enabled="false">
+    </external-service-usage>
+
+    <property name="htmlContent" 
+              display-name-key="HTML Content" 
+              description-key="HTML Content" 
+              of-type="SingleLine.Text" 
+              usage="bound" 
+              required="false" 
+    />
+    <property name="entityName"
+              display-name-key="HTML Dev Test" 
+              description-key="HTML Dev Test" 
+              of-type="SingleLine.Text" 
+              usage="bound" 
+              required="true"
+    />
+
+    <property name="fieldName"
+              display-name-key="HTML File" 
+              description-key="HTML File" 
+              of-type="SingleLine.Text" 
+              usage="bound" 
+              required="true"
+    />
+    <resources>
+      <code path="index.ts" order="1"/>
+      <css path="css/editor.css" order="1"/>
+    </resources>
+  </control>
+</manifest>
