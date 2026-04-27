@@ -39,15 +39,15 @@ export class Paginator {
 
     this.observer = new ResizeObserver((entries) => {
       if (this.rebalancing) return;
-      for (const entry of entries) {
-        // entry.target es el inner div — buscamos la página padre
-        const inner = entry.target as HTMLElement;
-        const page  = inner.parentElement;
-        if (!page) continue;
-        this.rebalancePage(page);
-      }
+      requestAnimationFrame(() => {     
+        for (const entry of entries) {
+          const inner = entry.target as HTMLElement;
+          const page  = inner.parentElement;
+          if (!page) continue;
+          this.rebalancePage(page);
+        }
+      });
     });
-  }
 
   private splitTextNodeByLine(
     textNode: Text,
