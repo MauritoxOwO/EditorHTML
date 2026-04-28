@@ -1,3 +1,152 @@
+import { Paginator } from "../Orquestador/Paginator";
+import { Toolbar } from "../Resize/Toolbar";
+import { fetchHtmlFromFileField, saveHtmlToFileField } from "../execCommand/fileApi";
+
+type PcfContext = ComponentFramework.Context<IInputs>;
+type StatusType = "success" | "error" | "saving" | "";
+
+export class EditorComponent {
+  private readonly container: HTMLElement;
+
+  private root!: HTMLElement;
+  private workspace!: HTMLElement;
+  private statusMsg!: HTMLElement;
+  private pageCountEl!: HTMLElement;
+
+  private pages: HTMLElement[] = [];
+  private paginator!: Paginator;
+  private toolbar!: Toolbar;
+
+  private readonly baseUrl: string;
+  private readonly entityName: string;
+  private readonly entityId: string;
+  private readonly fieldName: string;
+
+  private isDirty = false;
+
+  constructor(container: HTMLElement, context: PcfContext) {
+    this.container = container;
+
+    const page = (context as unknown as {
+      page: { getClientUrl: () => string; entityId?: string };
+    }).page;
+
+    this.baseUrl = page.getClientUrl();
+    this.entityId = page.entityId ?? "";
+    this.entityName = "mcdev_htmldevtests";
+    this.fieldName = "mcdev_htmlarchivooriginal";
+  }
+
+  async init(): Promise<void> {
+    this.buildShell();
+    this.paginator = new Paginator(
+      (html?: string) => this.createPageElement(html),
+      (pages: HTMLElement[]) => this.onPagesChanged(pages)
+    );
+    await this.loadContent();
+  }
+
+  private buildShell(): void {
+    this.container.innerHTML = "";
+    this.container.style.cssText =
+      "width:100%;height:100%;overflow:hidden;display:flex;flex-direction:column;";
+
+    this.root = document.createElement("div");
+    this.root.className = "hwe-root";
+
+    this.toolbar = new Toolbar();
+    const toolbarEl = this.toolbar.build();
+    this.toolbar.getSaveButton().addEventListener("click", () => void this.save());
+    this.root.appendChild(toolbarEl);
+
+    this.workspace = document.createElement("div");
+    this.workspace.className = "hwe-workspace";
+    this.root.appendChild(this.workspace);
+
+    const statusBar = document.createElement("div");
+    statusBar.className = "hwe-statusbar";
+
+    this.pageCountEl = document.createElement("span");
+    this.pageCountEl.textContent = "Paginas: 0";
+    statusBar.appendChild(this.pageCountEl);
+
+    this.statusMsg = document.createElement("span");
+    this.statusMsg.className = "hwe-status-msg";
+    statusBar.appendChild(this.statusMsg);
+
+    this.root.appendChild(statusBar);
+    this.container.appendChild(this.root);
+  }
+
+  private async loadContent(): Promise<void> {
+    this.setStatus("Cargando contenido...", "saving");
+
+    try {
+      const html = await fetchHtmlFromFileField(
+        this.baseUrl,
+        this.entityName,
+        this.entityId,
+        this.fieldName
+      );
+
+      this.renderInitial(html || "<p><br></p>");
+      await this.waitFrames(2);
+      await this.paginateContent();
+
+      this.setStatus("", "");
+    } catch (err) {
+      this.setStatus(`Error al cargar: ${(err as Error).message}`, "error");
+      this.renderInitial("<p><br></p>");
+      this.paginator.setPages(this.pages);
+
+    if (splitRowIndex <= 0) {
+      targetInner.insertBefore(table, targetInner.firstChild);
+      return true;
+    }
+
+    const rowsForNext = rows.slice(splitRowIndex);
+    if (rowsForNext.length === 0) return false;
+
+    const newTable = document.createElement("table");
+    Array.from(table.attributes).forEach((attr) => {
+      newTable.setAttribute(attr.name, attr.value);
+    });
+
+    const colgroup = table.querySelector("colgroup");
+    if (colgroup) newTable.appendChild(colgroup.cloneNode(true));
+
+    const thead = table.querySelector("thead");
+    if (thead) newTable.appendChild(thead.cloneNode(true));
+
+    const tbody = document.createElement("tbody");
+    rowsForNext.forEach((row) => tbody.appendChild(row));
+    newTable.appendChild(tbody);
+
+    targetInner.insertBefore(newTable, targetInner.firstChild);
+
+    const remainingRows = table.querySelectorAll("tbody tr, tfoot tr");
+    if (remainingRows.length === 0) table.remove();
+
+    return true;
+  }
+
+  private createPageElement(html?: string): HTMLElement {
+    const page = document.createElement("div");
+    page.className = "hwe-page";
+
+    const inner = document.createElement("div");
+    inner.className = "hwe-page-inner";
+    inner.setAttribute("contenteditable", "true");
+    inner.setAttribute("spellcheck", "false");
+    inner.innerHTML = html ?? "<p><br></p>";
+
+    inner.addEventListener("input", () => {
+      this.isDirty = true;
+      this.toolbar.updateActiveStates();
+      this.paginator.rebalanceFromPage(page);
+    });
+    inner.addEventListener("keydown", (e: KeyboardEvent) => this.onPageKeyDown(e));
+    inner.addEventListener("mouseup", () => this.toolbar.updateActiveStates());
 
     page.appendChild(inner);
     return page;
