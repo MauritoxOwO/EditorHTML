@@ -27,13 +27,16 @@ export class EditorComponent {
   constructor(container: HTMLElement, context: PcfContext) {
     this.container = container;
 
-    const page = (context as unknown as {
-      page: { getClientUrl: () => string; entityId?: string };
-    }).page;
+    const runtime = context as unknown as {
+      page?: { getClientUrl?: () => string; entityId?: string };
+      mode?: { contextInfo?: { entityId?: string; entityTypeName?: string } };
+    };
 
-    this.baseUrl = page.getClientUrl();
-    this.entityId = page.entityId ?? "";
-    this.entityName = "mcdev_htmldevtests";
+    this.baseUrl = this.getClientUrl(runtime);
+    this.entityId = this.cleanGuid(
+      runtime.page?.entityId ?? runtime.mode?.contextInfo?.entityId ?? ""
+    );
+    this.entityName = runtime.mode?.contextInfo?.entityTypeName ?? "mcdev_htmldevtests";
     this.fieldName = "mcdev_htmlarchivooriginal";
   }
 
@@ -78,10 +81,35 @@ export class EditorComponent {
     this.container.appendChild(this.root);
   }
 
+  private getClientUrl(runtime: {
+    page?: { getClientUrl?: () => string };
+  }): string {
+    const pageClientUrl = runtime.page?.getClientUrl?.();
+    if (pageClientUrl) return pageClientUrl;
+
+    const globalContext = (window as unknown as {
+      Xrm?: { Utility?: { getGlobalContext?: () => { getClientUrl?: () => string } } };
+    }).Xrm?.Utility?.getGlobalContext?.();
+
+    return globalContext?.getClientUrl?.() ?? "";
+  }
+
+  private cleanGuid(value: string): string {
+    return value.replace(/[{}]/g, "");
+  }
+
   private async loadContent(): Promise<void> {
     this.setStatus("Cargando contenido...", "saving");
 
     try {
+      if (!this.baseUrl) {
+        throw new Error("No se pudo obtener la URL de Dataverse.");
+      }
+
+      if (!this.entityId) {
+        throw new Error("No se pudo obtener el Id del registro actual.");
+      }
+
       const html = await fetchHtmlFromFileField(
         this.baseUrl,
         this.entityName,
