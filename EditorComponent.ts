@@ -105,7 +105,7 @@ export class EditorComponent {
     this.workspace.innerHTML = "";
     this.pages = [];
 
-    const page = this.createPageElement(html);
+    const page = this.createPageElement(this.normalizeHtmlForPagination(html));
     this.pages.push(page);
     this.workspace.appendChild(page);
     this.updatePageCount();
@@ -169,6 +169,13 @@ export class EditorComponent {
 
       if (
         lastChild.nodeType === Node.ELEMENT_NODE &&
+        this.unwrapIfSplittableContainer(lastChild as HTMLElement)
+      ) {
+        continue;
+      }
+
+      if (
+        lastChild.nodeType === Node.ELEMENT_NODE &&
         (lastChild as HTMLElement).tagName === "TABLE"
       ) {
         const split = this.splitTable(lastChild as HTMLElement, targetInner, page);
@@ -182,6 +189,27 @@ export class EditorComponent {
     }
 
     return movedAny;
+  }
+
+  private normalizeHtmlForPagination(html: string): string {
+    const temp = document.createElement("div");
+    temp.innerHTML = html || "<p><br></p>";
+
+    const body = temp.querySelector("body");
+    if (body) temp.innerHTML = body.innerHTML;
+
+    let safety = 0;
+    while (safety++ < 20) {
+      const children = this.getMeaningfulChildren(temp);
+      if (children.length !== 1 || children[0].nodeType !== Node.ELEMENT_NODE) break;
+
+      const onlyChild = children[0] as HTMLElement;
+      if (!this.isSplittableContainer(onlyChild)) break;
+
+      temp.innerHTML = onlyChild.innerHTML;
+    }
+
+    return temp.innerHTML.trim() || "<p><br></p>";
   }
 
   private splitTable(
@@ -308,10 +336,43 @@ export class EditorComponent {
   }
 
   private getLastMeaningfulChild(container: HTMLElement): ChildNode | null {
-    const children = Array.from(container.childNodes).filter(
-      (node) => !this.isEmptyNode(node)
-    );
-    return children.length > 1 ? children[children.length - 1] : null;
+    const children = this.getMeaningfulChildren(container);
+    if (children.length > 1) return children[children.length - 1];
+
+    const onlyChild = children[0];
+    if (
+      onlyChild?.nodeType === Node.ELEMENT_NODE &&
+      this.isSplittableContainer(onlyChild as HTMLElement)
+    ) {
+      return onlyChild;
+    }
+
+    return null;
+  }
+
+  private getMeaningfulChildren(container: HTMLElement): ChildNode[] {
+    return Array.from(container.childNodes).filter((node) => !this.isEmptyNode(node));
+  }
+
+  private unwrapIfSplittableContainer(element: HTMLElement): boolean {
+    if (!this.isSplittableContainer(element) || !element.parentNode) return false;
+
+    const parent = element.parentNode;
+    while (element.firstChild) {
+      parent.insertBefore(element.firstChild, element);
+    }
+    parent.removeChild(element);
+    return true;
+  }
+
+  private isSplittableContainer(element: HTMLElement): boolean {
+    const splittableTags = new Set(["DIV", "SECTION", "ARTICLE", "MAIN", "BODY"]);
+    if (!splittableTags.has(element.tagName)) return false;
+    if (element.classList.contains("hwe-page") || element.classList.contains("hwe-page-inner")) {
+      return false;
+    }
+
+    return this.getMeaningfulChildren(element).length > 0;
   }
 
   private isEmptyNode(node: ChildNode): boolean {
