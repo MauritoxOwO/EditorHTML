@@ -1,6 +1,3 @@
-
-
-
 const PAGE_CONTENT_HEIGHT_PX = 929;
 const PAGE_MERGE_THRESHOLD_PX = PAGE_CONTENT_HEIGHT_PX * 0.85;
 
@@ -82,6 +79,14 @@ export class Paginator {
       const nextInner = this.getInner(nextPage);
       if (!nextInner) break;
 
+      if (
+        lastChild.nodeType === Node.ELEMENT_NODE &&
+        (lastChild as HTMLElement).tagName === "TABLE"
+      ) {
+        const split = this.splitTable(lastChild as HTMLElement, nextInner, page);
+        if (split) continue;
+      }
+
       nextInner.insertBefore(lastChild, nextInner.firstChild);
     }
   }
@@ -147,6 +152,50 @@ export class Paginator {
 
   private getInner(page: HTMLElement): HTMLElement | null {
     return page.querySelector(".hwe-page-inner");
+  }
+
+  private splitTable(
+    table: HTMLElement,
+    targetInner: HTMLElement,
+    page: HTMLElement
+  ): boolean {
+    const pageBottom = page.getBoundingClientRect().bottom;
+    const rows = Array.from(table.querySelectorAll("tr")) as HTMLElement[];
+
+    let splitRowIndex = -1;
+    for (let i = 0; i < rows.length; i++) {
+      if (rows[i].getBoundingClientRect().bottom > pageBottom) {
+        splitRowIndex = i;
+        break;
+      }
+    }
+
+    if (splitRowIndex <= 0) return false;
+
+    const rowsForNext = rows.slice(splitRowIndex);
+    if (rowsForNext.length === 0) return false;
+
+    const newTable = document.createElement("table");
+    Array.from(table.attributes).forEach((attr) => {
+      newTable.setAttribute(attr.name, attr.value);
+    });
+
+    const colgroup = table.querySelector("colgroup");
+    if (colgroup) newTable.appendChild(colgroup.cloneNode(true));
+
+    const thead = table.querySelector("thead");
+    if (thead) newTable.appendChild(thead.cloneNode(true));
+
+    const tbody = document.createElement("tbody");
+    rowsForNext.forEach((row) => tbody.appendChild(row));
+    newTable.appendChild(tbody);
+
+    targetInner.insertBefore(newTable, targetInner.firstChild);
+
+    const remainingRows = table.querySelectorAll("tbody tr, tfoot tr");
+    if (remainingRows.length === 0) table.remove();
+
+    return true;
   }
 
   private getLastMeaningfulChild(container: HTMLElement): ChildNode | null {
