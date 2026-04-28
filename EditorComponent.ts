@@ -1,100 +1,165 @@
-import { Paginator } from "../Orquestador/Paginator";
-import { Toolbar } from "../Resize/Toolbar";
-import { fetchHtmlFromFileField, saveHtmlToFileField } from "../execCommand/fileApi";
 
-type PcfContext = ComponentFramework.Context<IInputs>;
-type StatusType = "success" | "error" | "saving" | "";
-
-export class EditorComponent {
-  private readonly container: HTMLElement;
-
-  private root!: HTMLElement;
-  private workspace!: HTMLElement;
-  private statusMsg!: HTMLElement;
-  private pageCountEl!: HTMLElement;
-
-  private pages: HTMLElement[] = [];
-  private paginator!: Paginator;
-  private toolbar!: Toolbar;
-
-  private readonly baseUrl: string;
-  private readonly entityName: string;
-  private readonly entityId: string;
-  private readonly fieldName: string;
-
-  private isDirty = false;
-
-  constructor(container: HTMLElement, context: PcfContext) {
-    this.container = container;
-
-    const page = (context as unknown as {
-      page: { getClientUrl: () => string; entityId?: string };
-    }).page;
-
-    this.baseUrl = page.getClientUrl();
-    this.entityId = page.entityId ?? "";
-    this.entityName = "mcdev_htmldevtests";
-    this.fieldName = "mcdev_htmlarchivooriginal";
+    page.appendChild(inner);
+    return page;
   }
 
-  async init(): Promise<void> {
-    this.buildShell();
-    this.paginator = new Paginator(
-      (html?: string) => this.createPageElement(html),
-      (pages: HTMLElement[]) => this.onPagesChanged(pages)
+  private onPagesChanged(pages: HTMLElement[]): void {
+    this.pages = pages;
+
+    pages.forEach((page, index) => {
+      if (!page.parentElement) {
+        const previousPage = pages[index - 1];
+        if (previousPage?.parentElement) {
+          const divider = this.makePageDivider(index + 1);
+          this.workspace.insertBefore(divider, previousPage.nextSibling);
+          this.workspace.insertBefore(page, divider.nextSibling);
+        } else {
+          this.workspace.appendChild(page);
+        }
+      }
+    });
+
+    this.removeEmptyDividers();
+    this.renumberDividers();
+    this.updatePageCount();
+  }
+
+  private makePageDivider(pageNumber: number): HTMLElement {
+    const divider = document.createElement("div");
+    divider.className = "hwe-page-divider";
+    divider.setAttribute("contenteditable", "false");
+
+    const label = document.createElement("span");
+    label.textContent = `Pagina ${pageNumber}`;
+    divider.appendChild(label);
+
+    return divider;
+  }
+
+  private removeEmptyDividers(): void {
+    const dividers = Array.from(this.workspace.querySelectorAll(".hwe-page-divider"));
+    dividers.forEach((divider) => {
+      const next = divider.nextElementSibling;
+      if (!next || !next.classList.contains("hwe-page")) divider.remove();
+    });
+  }
+
+  private renumberDividers(): void {
+    const dividers = this.workspace.querySelectorAll(".hwe-page-divider span");
+    dividers.forEach((span, index) => {
+      span.textContent = `Pagina ${index + 2}`;
+    });
+  }
+
+  private pageOverflows(page: HTMLElement): boolean {
+    const inner = this.getInner(page);
+    if (!inner) return false;
+    return inner.scrollHeight > page.clientHeight + 1;
+  }
+
+  private getLastMeaningfulChild(container: HTMLElement): ChildNode | null {
+    const children = Array.from(container.childNodes).filter(
+      (node) => !this.isEmptyNode(node)
     );
-    await this.loadContent();
+    return children.length > 1 ? children[children.length - 1] : null;
   }
 
-  private buildShell(): void {
-    this.container.innerHTML = "";
-    this.container.style.cssText =
-      "width:100%;height:100%;overflow:hidden;display:flex;flex-direction:column;";
+  private isEmptyNode(node: ChildNode): boolean {
+    if (node.nodeType === Node.TEXT_NODE) {
+      return (node.textContent ?? "").trim() === "";
+    }
 
-    this.root = document.createElement("div");
-    this.root.className = "hwe-root";
+    if (node.nodeType !== Node.ELEMENT_NODE) return false;
 
-    this.toolbar = new Toolbar();
-    const toolbarEl = this.toolbar.build();
-    this.toolbar.getSaveButton().addEventListener("click", () => void this.save());
-    this.root.appendChild(toolbarEl);
+    const el = node as HTMLElement;
+    if (el.tagName === "BR") return true;
 
-    this.workspace = document.createElement("div");
-    this.workspace.className = "hwe-workspace";
-    this.root.appendChild(this.workspace);
-
-    const statusBar = document.createElement("div");
-    statusBar.className = "hwe-statusbar";
-
-    this.pageCountEl = document.createElement("span");
-    this.pageCountEl.textContent = "Paginas: 0";
-    statusBar.appendChild(this.pageCountEl);
-
-    this.statusMsg = document.createElement("span");
-    this.statusMsg.className = "hwe-status-msg";
-    statusBar.appendChild(this.statusMsg);
-
-    this.root.appendChild(statusBar);
-    this.container.appendChild(this.root);
+    return (
+      el.tagName === "P" &&
+      el.childNodes.length <= 1 &&
+      (el.textContent ?? "").trim() === ""
+    );
   }
 
-  private async loadContent(): Promise<void> {
-    this.setStatus("Cargando contenido...", "saving");
+  private getInner(page: HTMLElement): HTMLElement | null {
+    return page.querySelector(".hwe-page-inner");
+  }
+
+  private waitFrames(n: number): Promise<void> {
+    return new Promise((resolve) => {
+      let count = 0;
+      const tick = () => {
+        count++;
+        if (count >= n) {
+          resolve();
+          return;
+        }
+        requestAnimationFrame(tick);
+      };
+      requestAnimationFrame(tick);
+    });
+  }
+
+  private onPageKeyDown(e: KeyboardEvent): void {
+    if (e.ctrlKey && e.key.toLowerCase() === "s") {
+      e.preventDefault();
+      void this.save();
+    }
+  }
+
+  private async save(): Promise<void> {
+    const saveBtn = this.toolbar.getSaveButton();
+    saveBtn.disabled = true;
+    this.setStatus("Guardando...", "saving");
 
     try {
-      const html = await fetchHtmlFromFileField(
+      const html = this.collectHtml();
+      await saveHtmlToFileField(
         this.baseUrl,
         this.entityName,
         this.entityId,
-        this.fieldName
+        this.fieldName,
+        html
       );
 
-      this.renderInitial(html || "<p><br></p>");
-      await this.waitFrames(2);
-      await this.paginateContent();
-
-      this.setStatus("", "");
+      this.isDirty = false;
+      this.setStatus("Guardado correctamente", "success");
+      window.setTimeout(() => this.setStatus("", ""), 3000);
     } catch (err) {
-      this.setStatus(`Error al cargar: ${(err as Error).message}`, "error");
-      this.renderInitial("<p><br></p>");
-      this.paginator.setPages(this.pages);
+      this.setStatus(`Error al guardar: ${(err as Error).message}`, "error");
+    } finally {
+      saveBtn.disabled = false;
+    }
+  }
+
+  private collectHtml(): string {
+    return this.pages
+      .map((page, index) => {
+        const inner = this.getInner(page);
+        const content = inner ? inner.innerHTML : page.innerHTML;
+        if (index === 0) return content;
+        return `<div style="page-break-before:always">${content}</div>`;
+      })
+      .join("\n");
+  }
+
+  private updatePageCount(): void {
+    this.pageCountEl.textContent = `Paginas: ${this.pages.length}`;
+  }
+
+  private setStatus(message: string, type: StatusType): void {
+    this.statusMsg.textContent = message;
+    this.statusMsg.className = "hwe-status-msg" + (type ? ` ${type}` : "");
+  }
+
+  destroy(): void {
+    this.paginator?.destroy();
+    this.container.innerHTML = "";
+  }
+}
+
+interface IInputs {
+  htmlContent: ComponentFramework.PropertyTypes.StringProperty;
+  entityName: ComponentFramework.PropertyTypes.StringProperty;
+  fieldName: ComponentFramework.PropertyTypes.StringProperty;
+}
