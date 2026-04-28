@@ -98,6 +98,107 @@ export class EditorComponent {
       this.setStatus(`Error al cargar: ${(err as Error).message}`, "error");
       this.renderInitial("<p><br></p>");
       this.paginator.setPages(this.pages);
+    }
+  }
+
+  private renderInitial(html: string): void {
+    this.workspace.innerHTML = "";
+    this.pages = [];
+
+    const page = this.createPageElement(html);
+    this.pages.push(page);
+    this.workspace.appendChild(page);
+    this.updatePageCount();
+  }
+
+  private async paginateContent(): Promise<void> {
+    let pageIndex = 0;
+    let safety = 0;
+
+    while (pageIndex < this.pages.length && safety++ < 100) {
+      const page = this.pages[pageIndex];
+      const inner = this.getInner(page);
+
+      if (!inner || !this.pageOverflows(page)) {
+        pageIndex++;
+        continue;
+      }
+
+      const nextPage = this.createPageElement("");
+      const nextInner = this.getInner(nextPage);
+      if (!nextInner) {
+        pageIndex++;
+        continue;
+      }
+
+      nextInner.innerHTML = "";
+      const moved = this.extractOverflowToNextPage(inner, nextInner, page);
+
+      if (!moved) {
+        pageIndex++;
+        continue;
+      }
+
+      const divider = this.makePageDivider(pageIndex + 2);
+      this.workspace.insertBefore(divider, page.nextSibling);
+      this.workspace.insertBefore(nextPage, divider.nextSibling);
+      this.pages.splice(pageIndex + 1, 0, nextPage);
+
+      await this.waitFrames(1);
+    }
+
+    this.renumberDividers();
+    this.paginator.setPages(this.pages);
+    this.updatePageCount();
+  }
+
+  private extractOverflowToNextPage(
+    sourceInner: HTMLElement,
+    targetInner: HTMLElement,
+    page: HTMLElement
+  ): boolean {
+    let movedAny = false;
+    let safety = 0;
+
+    while (this.pageOverflows(page) && safety++ < 200) {
+      const lastChild = this.getLastMeaningfulChild(sourceInner);
+
+      if (!lastChild) {
+        break;
+      }
+
+      if (
+        lastChild.nodeType === Node.ELEMENT_NODE &&
+        (lastChild as HTMLElement).tagName === "TABLE"
+      ) {
+        const split = this.splitTable(lastChild as HTMLElement, targetInner, page);
+        if (!split) break;
+        movedAny = true;
+        continue;
+      }
+
+      targetInner.insertBefore(lastChild, targetInner.firstChild);
+      movedAny = true;
+    }
+
+    return movedAny;
+  }
+
+  private splitTable(
+    table: HTMLElement,
+    targetInner: HTMLElement,
+    page: HTMLElement
+  ): boolean {
+    const pageBottom = page.getBoundingClientRect().bottom;
+    const rows = Array.from(table.querySelectorAll("tr")) as HTMLElement[];
+
+    let splitRowIndex = -1;
+    for (let i = 0; i < rows.length; i++) {
+      if (rows[i].getBoundingClientRect().bottom > pageBottom) {
+        splitRowIndex = i;
+        break;
+      }
+    }
 
     if (splitRowIndex <= 0) {
       targetInner.insertBefore(table, targetInner.firstChild);
