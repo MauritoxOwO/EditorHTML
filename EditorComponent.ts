@@ -1,35 +1,21 @@
-/**
- * EditorComponent.ts
- *
- * Orquestador principal del editor:
- *  1. Construye el DOM (toolbar + workspace + statusbar)
- *  2. Carga el HTML desde Dataverse
- *  3. Divide el HTML en páginas iniciales (por marcadores page-break)
- *  4. Instancia el Paginator para paginación automática por overflow
- *  5. Gestiona el guardado
- */
-
-import { Paginator }                              from "./Paginator";
-import { Toolbar }                                from "./Toolbar";
-import { fetchHtmlFromFileField, saveHtmlToFileField } from "./fileApi";
+import { Paginator } from "../Orquestador/Paginator";
+import { Toolbar } from "../Resize/Toolbar";
+import { fetchHtmlFromFileField, saveHtmlToFileField } from "../execCommand/fileApi";
+type PcfContext = ComponentFramework.Context<IInputs>;
 
 export class EditorComponent {
   private container: HTMLElement;
 
-  // DOM principal
   private root!: HTMLElement;
   private workspace!: HTMLElement;
   private statusMsg!: HTMLElement;
   private pageCountEl!: HTMLElement;
 
-  // Páginas actuales en el DOM
   private pages: HTMLElement[] = [];
 
-  // Módulos
   private paginator!: Paginator;
   private toolbar!: Toolbar;
 
-  // Dataverse
   private baseUrl: string;
   private entityName: string;
   private entityId: string;
@@ -37,48 +23,47 @@ export class EditorComponent {
 
   private isDirty = false;
 
-  constructor(
-    container: HTMLElement,
-    context: ComponentFramework.Context<any>
-  ) {
-    this.container   = container;
-    this.baseUrl     = (window as any).Xrm.Utility.getGlobalContext().getClientUrl();
-    this.entityName  = context.parameters.entityName.raw  ?? "";
-    this.fieldName   = context.parameters.fieldName.raw   ?? "";
-    this.entityId    = (context as any).page.entityId     ?? "";
+  constructor(container: HTMLElement, context: PcfContext) {
+    this.container = container;
+
+    const page = (context as unknown as {
+      page: { getClientUrl: () => string; entityId: string };
+    }).page;
+
+    this.baseUrl   = page.getClientUrl();
+    this.entityId  = page.entityId ?? "";
+    this.entityName = "mcdev_htmldevtests";
+    this.fieldName  = "mcdev_htmlarchivooriginal";
   }
 
   async init(): Promise<void> {
     this.buildShell();
     this.paginator = new Paginator(
-      (html) => this.createPageElement(html),
-      (pages) => this.onPagesChanged(pages)
+      (html?: string) => this.createPageElement(html),
+      (pages: HTMLElement[]) => this.onPagesChanged(pages)
     );
     await this.loadContent();
   }
 
-  // ── DOM shell ─────────────────────────────────────────────────
+  // ── Shell ─────────────────────────────────────────────────────
 
   private buildShell(): void {
     this.container.innerHTML = "";
-    this.container.style.cssText = "width:100%;height:100%;overflow:hidden;display:flex;flex-direction:column;";
+    this.container.style.cssText =
+      "width:100%;height:100%;overflow:hidden;display:flex;flex-direction:column;";
 
-    // Raíz
     this.root = document.createElement("div");
     this.root.className = "hwe-root";
 
-    // Toolbar
     this.toolbar = new Toolbar();
     const toolbarEl = this.toolbar.build();
     this.toolbar.getSaveButton().addEventListener("click", () => this.save());
     this.root.appendChild(toolbarEl);
 
-    // Workspace (zona scrollable con fondo gris)
     this.workspace = document.createElement("div");
     this.workspace.className = "hwe-workspace";
     this.root.appendChild(this.workspace);
 
-    // Status bar inferior
     const statusBar = document.createElement("div");
     statusBar.className = "hwe-statusbar";
 
@@ -94,65 +79,243 @@ export class EditorComponent {
     this.container.appendChild(this.root);
   }
 
-  // Carga
+  // ── Carga ─────────────────────────────────────────────────────
 
   private async loadContent(): Promise<void> {
     this.setStatus("Cargando contenido...", "saving");
     try {
       const html = await fetchHtmlFromFileField(
-        this.baseUrl,
-        this.entityName,
-        this.entityId,
-        this.fieldName
+        this.baseUrl, this.entityName, this.entityId, this.fieldName
       );
-      this.renderFromHtml(html);
+
+      // 1. Renderizar todo en una sola página provisional
+      this.renderInitial(html);
+
+      // 2. Esperar dos frames: primero pinta, segundo calcula layout
+      await this.waitFrames(2);
+
+      // 3. Paginar por desbordamiento
+      await this.paginateContent();
+
       this.setStatus("", "");
     } catch (err) {
       this.setStatus(`Error al cargar: ${(err as Error).message}`, "error");
-      // Mostrar al menos una página vacía editable
-      this.renderFromHtml("<p><br></p>");
+      this.renderInitial("<p><br></p>");
     }
   }
 
-  //Renderizado inicial desde HTML 
+  // ── Renderizado inicial (una sola página) ─────────────────────
 
   /**
-   * Divide el HTML en segmentos por marcadores page-break,
-   * crea una página por segmento y registra todas en el Paginator.
+   * Vuelca todo el HTML en una única página provisional.
+   * paginateContent() la dividirá después.
    */
-  private renderFromHtml(html: string): void {
+  private renderInitial(html: string): void {
     this.workspace.innerHTML = "";
     this.pages = [];
 
-    const segments = this.splitHtmlByPageBreaks(html);
+    const page = this.createPageElement(html);
+    this.pages.push(page);
+    this.workspace.appendChild(page);
 
-    segments.forEach((segHtml, index) => {
-      if (index > 0) {
-        this.workspace.appendChild(this.makePageDivider(index + 1));
-      }
-      const page = this.createPageElement(segHtml);
-      this.pages.push(page);
-      this.workspace.appendChild(page);
-    });
-
-    if (this.pages.length === 0) {
-      const page = this.createPageElement("<p><br></p>");
-      this.pages.push(page);
-      this.workspace.appendChild(page);
-    }
-
-    // Registrar en el Paginator
     this.paginator.setPages(this.pages);
     this.updatePageCount();
   }
 
-  // Página individual 
+  // ── Paginación por desbordamiento ─────────────────────────────
 
-private createPageElement(html?: string): HTMLElement {
+  /**
+   * Recorre las páginas existentes y corta el contenido que desborda
+   * en páginas nuevas. Soporta corte fila a fila en tablas.
+   */
+  private async paginateContent(): Promise<void> {
+    let pageIndex = 0;
+
+    // Procesamos página a página; el array puede crecer durante el bucle
+    while (pageIndex < this.pages.length) {
+      const page  = this.pages[pageIndex];
+      const inner = page.querySelector(".hwe-page-inner") as HTMLElement;
+      if (!inner) { pageIndex++; continue; }
+
+      const pageLimit = page.offsetTop + page.clientHeight;
+
+      if (inner.scrollHeight <= page.clientHeight + 1) {
+        // Esta página no desborda
+        pageIndex++;
+        continue;
+      }
+
+      // Crear la página siguiente donde irá el contenido sobrante
+      const nextPage  = this.createPageElement("");
+      const nextInner = nextPage.querySelector(".hwe-page-inner") as HTMLElement;
+      nextInner.innerHTML = "";
+
+      // Insertar la nueva página en el DOM y en el array
+      const divider = this.makePageDivider(pageIndex + 2);
+      this.workspace.insertBefore(divider, page.nextSibling);
+      this.workspace.insertBefore(nextPage, divider.nextSibling);
+      this.pages.splice(pageIndex + 1, 0, nextPage);
+
+      // Mover los nodos que desbordan a la página siguiente
+      this.overflowNodeToNext(inner, nextInner, page);
+
+      // Esperar un frame para que el navegador recalcule el layout
+      await this.waitFrames(1);
+
+      // Continuar con la misma página por si sigue desbordando
+      // (no incrementamos pageIndex)
+    }
+
+    // Renumerar divisores y registrar páginas en el Paginator
+    this.renumberDividers();
+    this.paginator.setPages(this.pages);
+    this.updatePageCount();
+  }
+
+  /**
+   * Mueve desde `sourceInner` a `targetInner` todos los nodos de bloque
+   * que superan el límite de altura de `page`.
+   * Para tablas, corta fila a fila.
+   */
+  private overflowNodeToNext(
+    sourceInner: HTMLElement,
+    targetInner: HTMLElement,
+    page: HTMLElement
+  ): void {
+    const pageBottom = page.offsetTop + page.clientHeight;
+    const nodes = Array.from(sourceInner.childNodes);
+
+    // Recorremos de atrás hacia adelante para encontrar el punto de corte
+    // sin invalidar índices al mover nodos
+    let cutIndex = -1;
+
+    for (let i = 0; i < nodes.length; i++) {
+      const node = nodes[i];
+      if (node.nodeType !== Node.ELEMENT_NODE) continue;
+
+      const el   = node as HTMLElement;
+      const rect = el.getBoundingClientRect();
+      const elBottom = rect.bottom + window.scrollY;
+
+      if (elBottom > pageBottom) {
+        // Este nodo desborda
+        if (el.tagName === "TABLE") {
+          // Corte quirúrgico fila a fila
+          this.splitTable(el, targetInner, page);
+        } else {
+          // Nodo de bloque entero → mover a la siguiente página
+          // Primero movemos este y todos los siguientes
+          cutIndex = i;
+          break;
+        }
+      }
+    }
+
+    // Mover nodos desde cutIndex en adelante (si hubo corte de bloque)
+    if (cutIndex >= 0) {
+      const toMove = Array.from(sourceInner.childNodes).slice(cutIndex);
+      toMove.forEach(n => targetInner.appendChild(n));
+    }
+  }
+
+  /**
+   * Divide una tabla en el punto donde sus filas desbordan la página.
+   * La parte superior queda en su sitio; la inferior se mueve a targetInner
+   * como una nueva tabla con los mismos atributos y colgroup.
+   */
+  private splitTable(
+    table: HTMLElement,
+    targetInner: HTMLElement,
+    page: HTMLElement
+  ): void {
+    const pageBottom = page.offsetTop + page.clientHeight;
+
+    // Recopilar todas las filas (thead + tbody + tfoot)
+    const allRows = Array.from(table.querySelectorAll("tr")) as HTMLElement[];
+
+    let splitRowIndex = -1;
+    for (let i = 0; i < allRows.length; i++) {
+      const rect = allRows[i].getBoundingClientRect();
+      const rowBottom = rect.bottom + window.scrollY;
+      if (rowBottom > pageBottom) {
+        splitRowIndex = i;
+        break;
+      }
+    }
+
+    // Si no encontramos punto de corte o la primera fila ya desborda,
+    // mover la tabla entera
+    if (splitRowIndex <= 0) {
+      targetInner.insertBefore(table, targetInner.firstChild);
+      return;
+    }
+
+    // Filas que van a la página siguiente
+    const rowsForNext = allRows.slice(splitRowIndex);
+
+    // Construir tabla nueva con los mismos atributos
+    const newTable = document.createElement("table");
+    // Copiar atributos de la tabla original
+    Array.from(table.attributes).forEach(attr => {
+      newTable.setAttribute(attr.name, attr.value);
+    });
+
+    // Copiar colgroup si existe (mantiene anchos de columna)
+    const colgroup = table.querySelector("colgroup");
+    if (colgroup) {
+      newTable.appendChild(colgroup.cloneNode(true));
+    }
+
+    // Copiar thead como cabecera repetida (comportamiento Word)
+    const thead = table.querySelector("thead");
+    if (thead) {
+      newTable.appendChild(thead.cloneNode(true));
+    }
+
+    // Crear tbody para las filas sobrantes
+    const newTbody = document.createElement("tbody");
+    rowsForNext.forEach(row => {
+      // Mover la fila (no clonar) para preservar el contenido editable
+      newTbody.appendChild(row);
+    });
+    newTable.appendChild(newTbody);
+
+    // Insertar la nueva tabla al inicio de la página siguiente
+    targetInner.insertBefore(newTable, targetInner.firstChild);
+
+    // Si la tabla original quedó vacía (solo thead), eliminarla
+    const remainingRows = table.querySelectorAll("tbody tr, tfoot tr");
+    if (remainingRows.length === 0) {
+      table.parentElement?.removeChild(table);
+    }
+  }
+
+  // ── Helpers de layout ─────────────────────────────────────────
+
+  private waitFrames(n: number): Promise<void> {
+    return new Promise(resolve => {
+      let count = 0;
+      const tick = () => {
+        if (++count >= n) resolve();
+        else requestAnimationFrame(tick);
+      };
+      requestAnimationFrame(tick);
+    });
+  }
+
+  private renumberDividers(): void {
+    const dividers = this.workspace.querySelectorAll(".hwe-page-divider span");
+    dividers.forEach((span, i) => {
+      span.textContent = `Página ${i + 2}`;
+    });
+  }
+
+  // ── Página individual ─────────────────────────────────────────
+
+  private createPageElement(html?: string): HTMLElement {
     const page = document.createElement("div");
     page.className = "hwe-page";
 
-    // El inner es el contenedor real del contenido y el que es editable
     const inner = document.createElement("div");
     inner.className = "hwe-page-inner";
     inner.setAttribute("contenteditable", "true");
@@ -160,68 +323,45 @@ private createPageElement(html?: string): HTMLElement {
     inner.innerHTML = html ?? "<p><br></p>";
 
     inner.addEventListener("input", () => {
-        this.isDirty = true;
-        this.toolbar.updateActiveStates();
+      this.isDirty = true;
+      this.toolbar.updateActiveStates();
+      this.paginator.rebalanceFromPage(page);
     });
     inner.addEventListener("keydown", (e: KeyboardEvent) => this.onPageKeyDown(e));
     inner.addEventListener("mouseup", () => this.toolbar.updateActiveStates());
 
     page.appendChild(inner);
     return page;
-}
-
-  /**
-   * Callback del Paginator: se llama cada vez que la lista de páginas
-   * cambia (se crea o elimina una página).
-   * Reconstruimos los separadores visuales y actualizamos el contador.
-   */
-  private onPagesChanged(pages: HTMLElement[]): void {
-    this.pages = pages;
-    this.rebuildWorkspace();
-    this.updatePageCount();
   }
 
-  /**
-   * Reconstruye el workspace colocando las páginas con sus divisores
-   * entre ellas. No recrea las páginas, solo reorganiza el DOM.
-   */
-  private rebuildWorkspace(): void {
-    this.workspace.innerHTML = "";
-
-    this.pages.forEach((page, index) => {
-      if (index > 0) {
-        this.workspace.appendChild(this.makePageDivider(index + 1));
-      }
-      this.workspace.appendChild(page);
+  private onPagesChanged(pages: HTMLElement[]): void {
+    this.pages = pages;
+    pages.forEach(page => {
+      if (!page.parentElement) this.workspace.appendChild(page);
     });
+    this.updatePageCount();
   }
 
   private makePageDivider(pageNumber: number): HTMLElement {
     const div = document.createElement("div");
     div.className = "hwe-page-divider";
     div.setAttribute("contenteditable", "false");
-
     const span = document.createElement("span");
     span.textContent = `Página ${pageNumber}`;
     div.appendChild(span);
     return div;
   }
 
-  // Teclado 
+  // ── Teclado ───────────────────────────────────────────────────
 
   private onPageKeyDown(e: KeyboardEvent): void {
-    // Ctrl+S → Guardar
     if (e.ctrlKey && e.key === "s") {
       e.preventDefault();
       this.save();
-      return;
     }
-
-    // Enter al final de una página: dejar que el Paginator lo maneje
-    // No necesitamos lógica especial; el ResizeObserver detectará el desborde.
   }
 
-  //Guardar 
+  // ── Guardar ───────────────────────────────────────────────────
 
   private async save(): Promise<void> {
     const saveBtn = this.toolbar.getSaveButton();
@@ -231,51 +371,34 @@ private createPageElement(html?: string): HTMLElement {
     try {
       const html = this.collectHtml();
       await saveHtmlToFileField(
-        this.baseUrl,
-        this.entityName,
-        this.entityId,
-        this.fieldName,
-        html
+        this.baseUrl, this.entityName, this.entityId, this.fieldName, html
       );
       this.isDirty = false;
       this.setStatus("✓ Guardado correctamente", "success");
       setTimeout(() => this.setStatus("", ""), 3000);
     } catch (err) {
-      this.setStatus(
-        `✗ Error al guardar: ${(err as Error).message}`,
-        "error"
-      );
+      this.setStatus(`✗ Error al guardar: ${(err as Error).message}`, "error");
     } finally {
       saveBtn.disabled = false;
     }
   }
 
-  /**
-   * Reconstruye el HTML completo desde todas las páginas,
-   * reinsertando marcadores page-break-before entre ellas
-   * para que al recargar se vuelvan a separar correctamente.
-   */
-private collectHtml(): string {
+  private collectHtml(): string {
     return this.pages
-        .map((page, index) => {
-            const inner = page.querySelector(".hwe-page-inner") as HTMLElement;
-            const content = inner ? inner.innerHTML : page.innerHTML;
-            if (index === 0) return content;
-            return `<div style="page-break-before:always">${content}</div>`;
-        })
-        .join("\n");
-}
+      .map((page, index) => {
+        const inner = page.querySelector(".hwe-page-inner") as HTMLElement;
+        const content = inner ? inner.innerHTML : page.innerHTML;
+        if (index === 0) return content;
+        return `<div style="page-break-before:always">${content}</div>`;
+      })
+      .join("\n");
+  }
 
-  // Split por page-break 
+  // ── splitHtmlByPageBreaks (intacta, para futuros usos) ────────
 
-  /**
-   * Divide el HTML en segmentos según atributos page-break-before/after.
-   * Devuelve al menos un segmento.
-   */
   private splitHtmlByPageBreaks(html: string): string[] {
     const temp = document.createElement("div");
     temp.innerHTML = html;
-
     const segments: string[] = [];
     let current = document.createElement("div");
 
@@ -284,25 +407,19 @@ private collectHtml(): string {
         current.appendChild(node.cloneNode(true));
         return;
       }
-
       const el    = node as HTMLElement;
       const style = el.getAttribute("style") ?? "";
-
       const isBreakBefore =
         /page-break-before\s*:\s*always/i.test(style) ||
         (el.className && el.className.includes("page-break"));
-
       const isHrBreak =
         el.tagName === "HR" &&
         (/page-break/i.test(style) || el.className.includes("page-break"));
 
       if (isBreakBefore || isHrBreak) {
-        // Cerrar segmento actual
         segments.push(current.innerHTML || "<p><br></p>");
         current = document.createElement("div");
-
         if (!isHrBreak) {
-          // Clonar el elemento sin el atributo page-break
           const clone = el.cloneNode(true) as HTMLElement;
           clone.style.cssText = clone.style.cssText
             .replace(/page-break-before\s*:\s*always\s*;?/gi, "")
@@ -312,8 +429,6 @@ private collectHtml(): string {
         }
         return;
       }
-
-      // page-break-after
       const isBreakAfter = /page-break-after\s*:\s*always/i.test(style);
       if (isBreakAfter) {
         const clone = el.cloneNode(true) as HTMLElement;
@@ -325,37 +440,34 @@ private collectHtml(): string {
         current = document.createElement("div");
         return;
       }
-
       current.appendChild(el.cloneNode(true));
     };
 
     Array.from(temp.childNodes).forEach(processNode);
-
     const last = current.innerHTML.trim();
     segments.push(last || "<p><br></p>");
-
     return segments;
   }
 
-  // Helpers 
+  // ── Auxiliares ────────────────────────────────────────────────
 
   private updatePageCount(): void {
     this.pageCountEl.textContent = `Páginas: ${this.pages.length}`;
   }
 
-  private setStatus(
-    msg: string,
-    type: "success" | "error" | "saving" | ""
-  ): void {
+  private setStatus(msg: string, type: "success" | "error" | "saving" | ""): void {
     this.statusMsg.textContent = msg;
-    this.statusMsg.className =
-      "hwe-status-msg" + (type ? ` ${type}` : "");
+    this.statusMsg.className = "hwe-status-msg" + (type ? ` ${type}` : "");
   }
-
-  // Cleanup
 
   destroy(): void {
     this.paginator.destroy();
     this.container.innerHTML = "";
   }
+}
+
+interface IInputs {
+  htmlContent: ComponentFramework.PropertyTypes.StringProperty;
+  entityName:  ComponentFramework.PropertyTypes.StringProperty;
+  fieldName:   ComponentFramework.PropertyTypes.StringProperty;
 }
