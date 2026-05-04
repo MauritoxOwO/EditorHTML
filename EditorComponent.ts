@@ -226,7 +226,7 @@ export class EditorComponent {
     const body = temp.querySelector("body");
     if (body) temp.innerHTML = body.innerHTML;
 
-    this.stripPageBreakStyles(temp);
+    this.cleanImportedHtml(temp);
 
     let safety = 0;
     while (safety++ < 20) {
@@ -242,14 +242,56 @@ export class EditorComponent {
     return temp.innerHTML.trim() || "<p><br></p>";
   }
 
-  private stripPageBreakStyles(root: HTMLElement): void {
+  private cleanImportedHtml(root: HTMLElement): void {
+    root.querySelectorAll("style, meta, link, xml, script, object").forEach((node) => {
+      node.remove();
+    });
+
     root.querySelectorAll<HTMLElement>("[style]").forEach((element) => {
-      element.style.cssText = element.style.cssText
+      element.style.cssText = this.sanitizeInlineStyle(element.style.cssText);
+    });
+
+    this.unwrapKnownWordContainers(root);
+    this.removeVisuallyEmptyNodes(root);
+  }
+
+  private sanitizeInlineStyle(style: string): string {
+    return style
+        .replace(/mso-[^:;]+:[^;]+;?/gi, "")
         .replace(/page-break-before\s*:\s*always\s*;?/gi, "")
         .replace(/page-break-after\s*:\s*always\s*;?/gi, "")
         .replace(/break-before\s*:\s*page\s*;?/gi, "")
         .replace(/break-after\s*:\s*page\s*;?/gi, "")
+        .replace(/margin-left\s*:[^;]+;?/gi, "")
+        .replace(/margin-right\s*:[^;]+;?/gi, "")
+        .replace(/text-indent\s*:[^;]+;?/gi, "")
+        .replace(/position\s*:[^;]+;?/gi, "")
+        .replace(/left\s*:[^;]+;?/gi, "")
+        .replace(/right\s*:[^;]+;?/gi, "")
+        .replace(/transform\s*:[^;]+;?/gi, "")
+        .replace(/min-width\s*:[^;]+;?/gi, "")
+        .replace(/max-width\s*:[^;]+;?/gi, "")
+        .replace(/width\s*:[^;]+;?/gi, "")
         .trim();
+  }
+
+  private unwrapKnownWordContainers(root: HTMLElement): void {
+    root.querySelectorAll<HTMLElement>("div.WordSection1, div[class*='WordSection']").forEach(
+      (element) => {
+        this.unwrapElement(element);
+      }
+    );
+  }
+
+  private removeVisuallyEmptyNodes(root: HTMLElement): void {
+    Array.from(root.childNodes).forEach((node) => {
+      if (node.nodeType === Node.ELEMENT_NODE) {
+        this.removeVisuallyEmptyNodes(node as HTMLElement);
+      }
+
+      if (this.isEmptyNode(node)) {
+        node.parentNode?.removeChild(node);
+      }
     });
   }
 
@@ -398,12 +440,18 @@ export class EditorComponent {
   private unwrapIfSplittableContainer(element: HTMLElement): boolean {
     if (!this.isSplittableContainer(element) || !element.parentNode) return false;
 
+    this.unwrapElement(element);
+    return true;
+  }
+
+  private unwrapElement(element: HTMLElement): void {
+    if (!element.parentNode) return;
+
     const parent = element.parentNode;
     while (element.firstChild) {
       parent.insertBefore(element.firstChild, element);
     }
     parent.removeChild(element);
-    return true;
   }
 
   private isSplittableContainer(element: HTMLElement): boolean {
@@ -417,19 +465,25 @@ export class EditorComponent {
   }
 
   private isEmptyNode(node: ChildNode): boolean {
+    if (node.nodeType === Node.COMMENT_NODE) {
+      return true;
+    }
+
     if (node.nodeType === Node.TEXT_NODE) {
-      return (node.textContent ?? "").trim() === "";
+      return (node.textContent ?? "").replace(/\u00a0/g, " ").trim() === "";
     }
 
     if (node.nodeType !== Node.ELEMENT_NODE) return false;
 
     const el = node as HTMLElement;
     if (el.tagName === "BR") return true;
+    if (["META", "LINK", "STYLE", "SCRIPT", "XML"].includes(el.tagName)) return true;
+    if (el.querySelector("img, table, tr, td, th, video, canvas, svg")) return false;
 
     return (
-      el.tagName === "P" &&
-      el.childNodes.length <= 1 &&
-      (el.textContent ?? "").trim() === ""
+      ["P", "DIV", "SECTION", "ARTICLE", "SPAN"].includes(el.tagName) &&
+      (el.textContent ?? "").replace(/\u00a0/g, " ").trim() === "" &&
+      Array.from(el.childNodes).every((child) => this.isEmptyNode(child))
     );
   }
 
