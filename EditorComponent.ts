@@ -1,41 +1,43 @@
 import { Paginator } from "../Orquestador/Paginator";
 import { Toolbar } from "../Resize/Toolbar";
 import { fetchHtmlFromFileField, saveHtmlToFileField } from "../execCommand/fileApi";
+
 type PcfContext = ComponentFramework.Context<IInputs>;
+type StatusType = "success" | "error" | "saving" | "";
 
 export class EditorComponent {
-  private container: HTMLElement;
+  private readonly container: HTMLElement;
 
-  // DOM principal
   private root!: HTMLElement;
   private workspace!: HTMLElement;
   private statusMsg!: HTMLElement;
   private pageCountEl!: HTMLElement;
 
-  // Páginas actuales en el DOM
   private pages: HTMLElement[] = [];
-
-  // Módulos
   private paginator!: Paginator;
   private toolbar!: Toolbar;
 
-  // Dataverse
-  private baseUrl: string;
-  private entityName: string;
-  private entityId: string;
-  private fieldName: string;
+  private readonly baseUrl: string;
+  private readonly entityName: string;
+  private readonly entityId: string;
+  private readonly fieldName: string;
 
   private isDirty = false;
 
-  constructor(
-    container: HTMLElement,
-    context: PcfContext
-  ) {
+  constructor(container: HTMLElement, context: PcfContext) {
     this.container = container;
-    this.baseUrl = (window as unknown as { Xrm: { Utility: { getGlobalContext: () => { getClientUrl: () => string } } } }).Xrm.Utility.getGlobalContext().getClientUrl();
-    this.entityName = "mcdev_htmldevtests";
+
+    const runtime = context as unknown as {
+      page?: { getClientUrl?: () => string; entityId?: string };
+      mode?: { contextInfo?: { entityId?: string; entityTypeName?: string } };
+    };
+
+    this.baseUrl = this.getClientUrl(runtime);
+    this.entityId = this.cleanGuid(
+      runtime.page?.entityId ?? runtime.mode?.contextInfo?.entityId ?? ""
+    );
+    this.entityName = runtime.mode?.contextInfo?.entityTypeName ?? "mcdev_htmldevtests";
     this.fieldName = "mcdev_htmlarchivooriginal";
-    this.entityId = (context as unknown as { page: { entityId: string } }).page.entityId ?? "";
   }
 
   async init(): Promise<void> {
@@ -47,33 +49,28 @@ export class EditorComponent {
     await this.loadContent();
   }
 
-  // DOM shell
-
   private buildShell(): void {
     this.container.innerHTML = "";
-    this.container.style.cssText = "width:100%;height:100%;overflow:hidden;display:flex;flex-direction:column;";
+    this.container.style.cssText =
+      "width:100%;height:100%;overflow:hidden;display:flex;flex-direction:column;";
 
-    // Raíz
     this.root = document.createElement("div");
     this.root.className = "hwe-root";
 
-    // Toolbar
     this.toolbar = new Toolbar();
     const toolbarEl = this.toolbar.build();
-    this.toolbar.getSaveButton().addEventListener("click", () => this.save());
+    this.toolbar.getSaveButton().addEventListener("click", () => void this.save());
     this.root.appendChild(toolbarEl);
 
-    // Workspace (zona scrollable con fondo gris)
     this.workspace = document.createElement("div");
     this.workspace.className = "hwe-workspace";
     this.root.appendChild(this.workspace);
 
-    // Status bar inferior
     const statusBar = document.createElement("div");
     statusBar.className = "hwe-statusbar";
 
     this.pageCountEl = document.createElement("span");
-    this.pageCountEl.textContent = "Páginas: —";
+    this.pageCountEl.textContent = "Paginas: 0";
     statusBar.appendChild(this.pageCountEl);
 
     this.statusMsg = document.createElement("span");
@@ -84,117 +81,383 @@ export class EditorComponent {
     this.container.appendChild(this.root);
   }
 
-  // ── Carga ─────────────────────────────────────────────────────
+  private getClientUrl(runtime: {
+    page?: { getClientUrl?: () => string };
+  }): string {
+    const pageClientUrl = runtime.page?.getClientUrl?.();
+    if (pageClientUrl) return pageClientUrl;
+
+    const globalContext = (window as unknown as {
+      Xrm?: { Utility?: { getGlobalContext?: () => { getClientUrl?: () => string } } };
+    }).Xrm?.Utility?.getGlobalContext?.();
+
+    return globalContext?.getClientUrl?.() ?? "";
+  }
+
+  private cleanGuid(value: string): string {
+    return value.replace(/[{}]/g, "");
+  }
 
   private async loadContent(): Promise<void> {
     this.setStatus("Cargando contenido...", "saving");
+
     try {
+      if (!this.baseUrl) {
+        throw new Error("No se pudo obtener la URL de Dataverse.");
+      }
+
+      if (!this.entityId) {
+        throw new Error("No se pudo obtener el Id del registro actual.");
+      }
+
       const html = await fetchHtmlFromFileField(
         this.baseUrl,
         this.entityName,
         this.entityId,
         this.fieldName
       );
-      this.renderFromHtml(html);
+
+      this.renderInitial(html || "<p><br></p>");
+      await this.waitFrames(2);
+      await this.paginateContent();
+
       this.setStatus("", "");
     } catch (err) {
       this.setStatus(`Error al cargar: ${(err as Error).message}`, "error");
-      this.renderFromHtml("<p><br></p>");
+      this.renderInitial("<p><br></p>");
+      this.paginator.setPages(this.pages);
     }
   }
 
-  // ── Renderizado inicial desde HTML ────────────────────────────
-
-  /**
-   * Divide el HTML en segmentos por marcadores page-break,
-   * crea una página por segmento y registra todas en el Paginator.
-   */
-  private renderFromHtml(html: string): void {
+  private renderInitial(html: string): void {
     this.workspace.innerHTML = "";
     this.pages = [];
 
-    const segments = this.splitHtmlByPageBreaks(html);
+    const page = this.createPageElement(this.normalizeHtmlForPagination(html));
+    this.pages.push(page);
+    this.workspace.appendChild(page);
+    this.updatePageCount();
+  }
 
-    segments.forEach((segHtml, index) => {
-      if (index > 0) {
-        this.workspace.appendChild(this.makePageDivider(index + 1));
+  private async paginateContent(): Promise<void> {
+    let pageIndex = 0;
+    let safety = 0;
+
+    while (pageIndex < this.pages.length && safety++ < 100) {
+      const page = this.pages[pageIndex];
+      const inner = this.getInner(page);
+
+      if (!inner || !this.pageOverflows(page)) {
+        pageIndex++;
+        continue;
       }
-      const page = this.createPageElement(segHtml);
-      this.pages.push(page);
-      this.workspace.appendChild(page);
-    });
 
-    if (this.pages.length === 0) {
-      const page = this.createPageElement("<p><br></p>");
-      this.pages.push(page);
-      this.workspace.appendChild(page);
+      const nextPage = this.createPageElement("");
+      const nextInner = this.getInner(nextPage);
+      if (!nextInner) {
+        pageIndex++;
+        continue;
+      }
+
+      nextInner.innerHTML = "";
+      const moved = this.extractOverflowToNextPage(inner, nextInner, page);
+
+      if (!moved) {
+        pageIndex++;
+        continue;
+      }
+
+      const divider = this.makePageDivider(pageIndex + 2);
+      this.workspace.insertBefore(divider, page.nextSibling);
+      this.workspace.insertBefore(nextPage, divider.nextSibling);
+      this.pages.splice(pageIndex + 1, 0, nextPage);
+
+      await this.waitFrames(1);
     }
 
-    // Registrar en el Paginator
+    this.renumberDividers();
     this.paginator.setPages(this.pages);
     this.updatePageCount();
   }
 
-  // ── Página individual ─────────────────────────────────────────
+  private extractOverflowToNextPage(
+    sourceInner: HTMLElement,
+    targetInner: HTMLElement,
+    page: HTMLElement
+  ): boolean {
+    let movedAny = false;
+    let safety = 0;
+
+    while (this.pageOverflows(page) && safety++ < 200) {
+      const lastChild = this.getLastMeaningfulChild(sourceInner);
+
+      if (!lastChild) {
+        break;
+      }
+
+      if (
+        lastChild.nodeType === Node.ELEMENT_NODE &&
+        this.unwrapIfSplittableContainer(lastChild as HTMLElement)
+      ) {
+        continue;
+      }
+
+      if (
+        lastChild.nodeType === Node.ELEMENT_NODE &&
+        (lastChild as HTMLElement).tagName === "TABLE"
+      ) {
+        const split = this.splitTable(lastChild as HTMLElement, targetInner, page);
+        if (!split) break;
+        movedAny = true;
+        continue;
+      }
+
+      targetInner.insertBefore(lastChild, targetInner.firstChild);
+      movedAny = true;
+    }
+
+    return movedAny;
+  }
+
+  private normalizeHtmlForPagination(html: string): string {
+    const temp = document.createElement("div");
+    temp.innerHTML = html || "<p><br></p>";
+
+    const body = temp.querySelector("body");
+    if (body) temp.innerHTML = body.innerHTML;
+
+    this.stripPageBreakStyles(temp);
+
+    let safety = 0;
+    while (safety++ < 20) {
+      const children = this.getMeaningfulChildren(temp);
+      if (children.length !== 1 || children[0].nodeType !== Node.ELEMENT_NODE) break;
+
+      const onlyChild = children[0] as HTMLElement;
+      if (!this.isSplittableContainer(onlyChild)) break;
+
+      temp.innerHTML = onlyChild.innerHTML;
+    }
+
+    return temp.innerHTML.trim() || "<p><br></p>";
+  }
+
+  private stripPageBreakStyles(root: HTMLElement): void {
+    root.querySelectorAll<HTMLElement>("[style]").forEach((element) => {
+      element.style.cssText = element.style.cssText
+        .replace(/page-break-before\s*:\s*always\s*;?/gi, "")
+        .replace(/page-break-after\s*:\s*always\s*;?/gi, "")
+        .replace(/break-before\s*:\s*page\s*;?/gi, "")
+        .replace(/break-after\s*:\s*page\s*;?/gi, "")
+        .trim();
+    });
+  }
+
+  private splitTable(
+    table: HTMLElement,
+    targetInner: HTMLElement,
+    page: HTMLElement
+  ): boolean {
+    const pageBottom = page.getBoundingClientRect().bottom;
+    const rows = Array.from(table.querySelectorAll("tr")) as HTMLElement[];
+
+    let splitRowIndex = -1;
+    for (let i = 0; i < rows.length; i++) {
+      if (rows[i].getBoundingClientRect().bottom > pageBottom) {
+        splitRowIndex = i;
+        break;
+      }
+    }
+
+    if (splitRowIndex <= 0) {
+      targetInner.insertBefore(table, targetInner.firstChild);
+      return true;
+    }
+
+    const rowsForNext = rows.slice(splitRowIndex);
+    if (rowsForNext.length === 0) return false;
+
+    const newTable = document.createElement("table");
+    Array.from(table.attributes).forEach((attr) => {
+      newTable.setAttribute(attr.name, attr.value);
+    });
+
+    const colgroup = table.querySelector("colgroup");
+    if (colgroup) newTable.appendChild(colgroup.cloneNode(true));
+
+    const thead = table.querySelector("thead");
+    if (thead) newTable.appendChild(thead.cloneNode(true));
+
+    const tbody = document.createElement("tbody");
+    rowsForNext.forEach((row) => tbody.appendChild(row));
+    newTable.appendChild(tbody);
+
+    targetInner.insertBefore(newTable, targetInner.firstChild);
+
+    const remainingRows = table.querySelectorAll("tbody tr, tfoot tr");
+    if (remainingRows.length === 0) table.remove();
+
+    return true;
+  }
 
   private createPageElement(html?: string): HTMLElement {
     const page = document.createElement("div");
     page.className = "hwe-page";
-    page.setAttribute("contenteditable", "true");
-    page.setAttribute("spellcheck", "false");
-    page.innerHTML = html ?? "<p><br></p>";
 
-    page.addEventListener("input", () => {
+    const inner = document.createElement("div");
+    inner.className = "hwe-page-inner";
+    inner.setAttribute("contenteditable", "true");
+    inner.setAttribute("spellcheck", "false");
+    inner.innerHTML = html ?? "<p><br></p>";
+
+    inner.addEventListener("input", () => {
       this.isDirty = true;
       this.toolbar.updateActiveStates();
+      this.paginator.rebalanceFromPage(page);
     });
+    inner.addEventListener("keydown", (e: KeyboardEvent) => this.onPageKeyDown(e));
+    inner.addEventListener("mouseup", () => this.toolbar.updateActiveStates());
 
-    page.addEventListener("keydown", (e) => this.onPageKeyDown(e));
-    page.addEventListener("mouseup", () => this.toolbar.updateActiveStates());
-
+    page.appendChild(inner);
     return page;
   }
 
   private onPagesChanged(pages: HTMLElement[]): void {
     this.pages = pages;
-    this.rebuildWorkspace();
+
+    pages.forEach((page, index) => {
+      if (!page.parentElement) {
+        const previousPage = pages[index - 1];
+        if (previousPage?.parentElement) {
+          const divider = this.makePageDivider(index + 1);
+          this.workspace.insertBefore(divider, previousPage.nextSibling);
+          this.workspace.insertBefore(page, divider.nextSibling);
+        } else {
+          this.workspace.appendChild(page);
+        }
+      }
+    });
+
+    this.removeEmptyDividers();
+    this.renumberDividers();
     this.updatePageCount();
   }
 
-  private rebuildWorkspace(): void {
-    this.workspace.innerHTML = "";
+  private makePageDivider(pageNumber: number): HTMLElement {
+    const divider = document.createElement("div");
+    divider.className = "hwe-page-divider";
+    divider.setAttribute("contenteditable", "false");
 
-    this.pages.forEach((page, index) => {
-      if (index > 0) {
-        this.workspace.appendChild(this.makePageDivider(index + 1));
-      }
-      this.workspace.appendChild(page);
+    const label = document.createElement("span");
+    label.textContent = `Pagina ${pageNumber}`;
+    divider.appendChild(label);
+
+    return divider;
+  }
+
+  private removeEmptyDividers(): void {
+    const dividers = Array.from(this.workspace.querySelectorAll(".hwe-page-divider"));
+    dividers.forEach((divider) => {
+      const next = divider.nextElementSibling;
+      if (!next || !next.classList.contains("hwe-page")) divider.remove();
     });
   }
 
-  private makePageDivider(pageNumber: number): HTMLElement {
-    const div = document.createElement("div");
-    div.className = "hwe-page-divider";
-    div.setAttribute("contenteditable", "false");
-
-    const span = document.createElement("span");
-    span.textContent = `Página ${pageNumber}`;
-    div.appendChild(span);
-    return div;
+  private renumberDividers(): void {
+    const dividers = this.workspace.querySelectorAll(".hwe-page-divider span");
+    dividers.forEach((span, index) => {
+      span.textContent = `Pagina ${index + 2}`;
+    });
   }
 
-  // ── Teclado ───────────────────────────────────────────────────
+  private pageOverflows(page: HTMLElement): boolean {
+    const inner = this.getInner(page);
+    if (!inner) return false;
+    return inner.scrollHeight > page.clientHeight + 1;
+  }
+
+  private getLastMeaningfulChild(container: HTMLElement): ChildNode | null {
+    const children = this.getMeaningfulChildren(container);
+    if (children.length > 1) return children[children.length - 1];
+
+    const onlyChild = children[0];
+    if (
+      onlyChild?.nodeType === Node.ELEMENT_NODE &&
+      this.isSplittableContainer(onlyChild as HTMLElement)
+    ) {
+      return onlyChild;
+    }
+
+    return null;
+  }
+
+  private getMeaningfulChildren(container: HTMLElement): ChildNode[] {
+    return Array.from(container.childNodes).filter((node) => !this.isEmptyNode(node));
+  }
+
+  private unwrapIfSplittableContainer(element: HTMLElement): boolean {
+    if (!this.isSplittableContainer(element) || !element.parentNode) return false;
+
+    const parent = element.parentNode;
+    while (element.firstChild) {
+      parent.insertBefore(element.firstChild, element);
+    }
+    parent.removeChild(element);
+    return true;
+  }
+
+  private isSplittableContainer(element: HTMLElement): boolean {
+    const splittableTags = new Set(["DIV", "SECTION", "ARTICLE", "MAIN", "BODY"]);
+    if (!splittableTags.has(element.tagName)) return false;
+    if (element.classList.contains("hwe-page") || element.classList.contains("hwe-page-inner")) {
+      return false;
+    }
+
+    return this.getMeaningfulChildren(element).length > 0;
+  }
+
+  private isEmptyNode(node: ChildNode): boolean {
+    if (node.nodeType === Node.TEXT_NODE) {
+      return (node.textContent ?? "").trim() === "";
+    }
+
+    if (node.nodeType !== Node.ELEMENT_NODE) return false;
+
+    const el = node as HTMLElement;
+    if (el.tagName === "BR") return true;
+
+    return (
+      el.tagName === "P" &&
+      el.childNodes.length <= 1 &&
+      (el.textContent ?? "").trim() === ""
+    );
+  }
+
+  private getInner(page: HTMLElement): HTMLElement | null {
+    return page.querySelector(".hwe-page-inner");
+  }
+
+  private waitFrames(n: number): Promise<void> {
+    return new Promise((resolve) => {
+      let count = 0;
+      const tick = () => {
+        count++;
+        if (count >= n) {
+          resolve();
+          return;
+        }
+        requestAnimationFrame(tick);
+      };
+      requestAnimationFrame(tick);
+    });
+  }
 
   private onPageKeyDown(e: KeyboardEvent): void {
-    // Ctrl+S → Guardar
-    if (e.ctrlKey && e.key === "s") {
+    if (e.ctrlKey && e.key.toLowerCase() === "s") {
       e.preventDefault();
-      this.save();
-      return;
+      void this.save();
     }
   }
-
-  // Guardar
 
   private async save(): Promise<void> {
     const saveBtn = this.toolbar.getSaveButton();
@@ -210,14 +473,12 @@ export class EditorComponent {
         this.fieldName,
         html
       );
+
       this.isDirty = false;
-      this.setStatus("✓ Guardado correctamente", "success");
-      setTimeout(() => this.setStatus("", ""), 3000);
+      this.setStatus("Guardado correctamente", "success");
+      window.setTimeout(() => this.setStatus("", ""), 3000);
     } catch (err) {
-      this.setStatus(
-        `✗ Error al guardar: ${(err as Error).message}`,
-        "error"
-      );
+      this.setStatus(`Error al guardar: ${(err as Error).message}`, "error");
     } finally {
       saveBtn.disabled = false;
     }
@@ -226,105 +487,31 @@ export class EditorComponent {
   private collectHtml(): string {
     return this.pages
       .map((page, index) => {
-        const inner = page.innerHTML;
-        if (index === 0) {
-          return inner;
-        }
-        return `<div style="page-break-before:always">${inner}</div>`;
+        const inner = this.getInner(page);
+        const content = inner ? inner.innerHTML : page.innerHTML;
+        if (index === 0) return content;
+        return `<div style="page-break-before:always">${content}</div>`;
       })
       .join("\n");
   }
 
-  // Split por page-break
-
-  private splitHtmlByPageBreaks(html: string): string[] {
-    const temp = document.createElement("div");
-    temp.innerHTML = html;
-
-    const segments: string[] = [];
-    let current = document.createElement("div");
-
-    const processNode = (node: ChildNode): void => {
-      if (node.nodeType !== Node.ELEMENT_NODE) {
-        current.appendChild(node.cloneNode(true));
-        return;
-      }
-
-      const el    = node as HTMLElement;
-      const style = el.getAttribute("style") ?? "";
-
-      const isBreakBefore =
-        /page-break-before\s*:\s*always/i.test(style) ||
-        (el.className && el.className.includes("page-break"));
-
-      const isHrBreak =
-        el.tagName === "HR" &&
-        (/page-break/i.test(style) || el.className.includes("page-break"));
-
-      if (isBreakBefore || isHrBreak) {
-        // Cerrar segmento actual
-        segments.push(current.innerHTML || "<p><br></p>");
-        current = document.createElement("div");
-
-        if (!isHrBreak) {
-          // Clonar el elemento sin el atributo page-break
-          const clone = el.cloneNode(true) as HTMLElement;
-          clone.style.cssText = clone.style.cssText
-            .replace(/page-break-before\s*:\s*always\s*;?/gi, "")
-            .replace(/page-break-after\s*:\s*always\s*;?/gi, "")
-            .trim();
-          current.appendChild(clone);
-        }
-        return;
-      }
-
-      // page-break-after
-      const isBreakAfter = /page-break-after\s*:\s*always/i.test(style);
-      if (isBreakAfter) {
-        const clone = el.cloneNode(true) as HTMLElement;
-        clone.style.cssText = clone.style.cssText
-          .replace(/page-break-after\s*:\s*always\s*;?/gi, "")
-          .trim();
-        current.appendChild(clone);
-        segments.push(current.innerHTML);
-        current = document.createElement("div");
-        return;
-      }
-
-      current.appendChild(el.cloneNode(true));
-    };
-
-    Array.from(temp.childNodes).forEach(processNode);
-
-    const last = current.innerHTML.trim();
-    segments.push(last || "<p><br></p>");
-
-    return segments;
-  }
-
-  // Funciones auxiliares 
   private updatePageCount(): void {
-    this.pageCountEl.textContent = `Páginas: ${this.pages.length}`;
+    this.pageCountEl.textContent = `Paginas: ${this.pages.length}`;
   }
 
-  private setStatus(
-    msg: string,
-    type: "success" | "error" | "saving" | ""
-  ): void {
-    this.statusMsg.textContent = msg;
-    this.statusMsg.className =
-      "hwe-status-msg" + (type ? ` ${type}` : "");
+  private setStatus(message: string, type: StatusType): void {
+    this.statusMsg.textContent = message;
+    this.statusMsg.className = "hwe-status-msg" + (type ? ` ${type}` : "");
   }
 
   destroy(): void {
-    this.paginator.destroy();
+    this.paginator?.destroy();
     this.container.innerHTML = "";
   }
-
 }
 
-  interface IInputs {
-    htmlContent: ComponentFramework.PropertyTypes.StringProperty;
-    entityName:  ComponentFramework.PropertyTypes.StringProperty;
-    fieldName:   ComponentFramework.PropertyTypes.StringProperty;
-    }
+interface IInputs {
+  htmlContent: ComponentFramework.PropertyTypes.StringProperty;
+  entityName: ComponentFramework.PropertyTypes.StringProperty;
+  fieldName: ComponentFramework.PropertyTypes.StringProperty;
+}
