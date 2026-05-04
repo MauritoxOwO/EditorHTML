@@ -122,6 +122,8 @@
   font-family: Calibri, "Segoe UI", Arial, sans-serif;
   font-size: 11pt;
   line-height: 1.5;
+  overflow-wrap: break-word;
+  word-wrap: break-word;
 }
 
 .hwe-page-inner *,
@@ -129,6 +131,16 @@
 .hwe-page-inner *::after {
   box-sizing: border-box;
   max-width: 100%;
+}
+
+.hwe-page-inner div,
+.hwe-page-inner p,
+.hwe-page-inner section,
+.hwe-page-inner article,
+.hwe-page-inner li {
+  max-width: 100%;
+  overflow-wrap: break-word;
+  word-wrap: break-word;
 }
 
 .hwe-page-inner body,
@@ -180,7 +192,8 @@
 }
 
 .hwe-page table {
-  width: 100%;
+  width: 100% !important;
+  max-width: 100% !important;
   margin: 8pt 0;
   border-collapse: collapse;
   table-layout: fixed;
@@ -201,7 +214,7 @@
 
 .hwe-page img {
   display: block;
-  max-width: 100%;
+  max-width: 100% !important;
   height: auto;
 }
 
