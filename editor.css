@@ -124,6 +124,7 @@
   line-height: 1.5;
   overflow-wrap: break-word;
   word-wrap: break-word;
+  white-space: normal;
 }
 
 .hwe-page-inner *,
@@ -137,10 +138,13 @@
 .hwe-page-inner p,
 .hwe-page-inner section,
 .hwe-page-inner article,
+.hwe-page-inner span,
 .hwe-page-inner li {
   max-width: 100%;
   overflow-wrap: break-word;
+  overflow-wrap: anywhere;
   word-wrap: break-word;
+  white-space: normal !important;
 }
 
 .hwe-page-inner body,
@@ -148,6 +152,10 @@
   width: auto;
   margin: 0;
   padding: 0;
+}
+
+.hwe-page-inner hr {
+  display: none;
 }
 
 .hwe-page-inner:focus {
@@ -205,6 +213,7 @@
   border: 1px solid #999;
   vertical-align: top;
   word-break: break-word;
+  overflow-wrap: anywhere;
 }
 
 .hwe-page table th {
