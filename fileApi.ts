@@ -26,10 +26,15 @@ export async function fetchHtmlFromFileField(
 
   if (!response.ok) {
     const body = await response.text().catch(() => "");
+    console.log(`Error in url: ${url}`);
     throw new Error(
       `No se pudo cargar el contenido (HTTP ${response.status}). ${body}`
     );
+
   }
+
+  return response.text();
+}
 
   return response.text();
 }
