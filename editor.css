@@ -98,3 +98,172 @@
 }
 
 /* Pagina A4 */
+.hwe-page {
+  width: 210mm;
+  height: 297mm;
+  flex: 0 0 auto;
+  margin: 0;
+  padding: 0;
+  position: relative;
+  overflow: hidden;
+  box-sizing: border-box;
+  background: #fff;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.28);
+}
+
+.hwe-page-inner {
+  width: 100%;
+  height: 100%;
+  padding: 25.4mm;
+  box-sizing: border-box;
+  outline: none;
+  overflow: visible;
+  color: #000;
+  font-family: Calibri, "Segoe UI", Arial, sans-serif;
+  font-size: 11pt;
+  line-height: 1.5;
+}
+
+.hwe-page-inner *,
+.hwe-page-inner *::before,
+.hwe-page-inner *::after {
+  box-sizing: border-box;
+  max-width: 100%;
+}
+
+.hwe-page-inner body,
+.hwe-page-inner html {
+  width: auto;
+  margin: 0;
+  padding: 0;
+}
+
+.hwe-page-inner:focus {
+  outline: none;
+}
+
+/* Contenido */
+.hwe-page p {
+  min-height: 1em;
+  margin: 0 0 8pt;
+}
+
+.hwe-page h1 {
+  margin: 12pt 0 6pt;
+  font-size: 20pt;
+  font-weight: 700;
+  line-height: 1.2;
+}
+
+.hwe-page h2 {
+  margin: 10pt 0 4pt;
+  font-size: 16pt;
+  font-weight: 700;
+  line-height: 1.2;
+}
+
+.hwe-page h3 {
+  margin: 8pt 0 4pt;
+  font-size: 13pt;
+  font-weight: 700;
+  line-height: 1.2;
+}
+
+.hwe-page ul,
+.hwe-page ol {
+  margin: 0 0 8pt;
+  padding-left: 24pt;
+}
+
+.hwe-page li {
+  margin-bottom: 2pt;
+}
+
+.hwe-page table {
+  width: 100%;
+  margin: 8pt 0;
+  border-collapse: collapse;
+  table-layout: fixed;
+}
+
+.hwe-page table td,
+.hwe-page table th {
+  padding: 4pt 6pt;
+  border: 1px solid #999;
+  vertical-align: top;
+  word-break: break-word;
+}
+
+.hwe-page table th {
+  background: #f0f0f0;
+  font-weight: 700;
+}
+
+.hwe-page img {
+  display: block;
+  max-width: 100%;
+  height: auto;
+}
+
+/* Separador visual entre paginas */
+.hwe-page-divider {
+  width: 210mm;
+  height: 40px;
+  flex: 0 0 auto;
+  margin: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  pointer-events: none;
+  user-select: none;
+}
+
+.hwe-page-divider::before,
+.hwe-page-divider::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: #aaa;
+}
+
+.hwe-page-divider span {
+  padding: 0 12px;
+  background: #d0d0d0;
+  color: #777;
+  font-family: "Segoe UI", sans-serif;
+  font-size: 10px;
+  white-space: nowrap;
+}
+
+/* Barra de estado inferior */
+.hwe-statusbar {
+  height: 22px;
+  flex-shrink: 0;
+  padding: 0 12px;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  border-top: 1px solid #ddd;
+  background: #f3f3f3;
+  color: #555;
+  font-size: 11px;
+}
+
+.hwe-statusbar .hwe-status-msg {
+  margin-left: auto;
+}
+
+.hwe-statusbar .hwe-status-msg.success {
+  color: #107c10;
+  font-weight: 600;
+}
+
+.hwe-statusbar .hwe-status-msg.error {
+  color: #a80000;
+  font-weight: 600;
+}
+
+.hwe-statusbar .hwe-status-msg.saving {
+  color: #0078d4;
+}
