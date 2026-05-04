@@ -36,9 +36,6 @@ export async function fetchHtmlFromFileField(
   return response.text();
 }
 
-  return response.text();
-}
-
 /**
  * Guarda el HTML en un campo de archivo (file field) via OData PATCH.
  *
