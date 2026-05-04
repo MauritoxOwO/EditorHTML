@@ -1,36 +1,14 @@
-/**
- * Paginator.ts
- *
- * Gestiona la paginación automática del editor:
- *  - Vigila el scrollHeight de cada página con ResizeObserver.
- *  - Si una página desborda (scrollHeight > PAGE_MAX_HEIGHT_PX),
- *    mueve el último nodo hijo al inicio de la página siguiente.
- *  - Si una página queda por debajo del umbral de fusión y existe
- *    la siguiente, mueve el primer nodo de la siguiente a esta.
- *  - Crea y elimina páginas según sea necesario.
- *  - Notifica al caller mediante callbacks para que pueda
- *    reconstruir los separadores visuales.
- */
-
-// A4 a 96 dpi: 297mm → 297 * (96/25.4) ≈ 1122 px
-// Márgenes 2 × 25.4mm → 2 × 96.38 ≈ 193 px
-// Área de contenido ≈ 1122 − 193 = 929 px
-const PAGE_MAX_HEIGHT_PX = 929;
-
-// Si una página tiene menos de este contenido Y existe la siguiente,
-// intentamos fusionar (traer nodos de la siguiente).
-const PAGE_MERGE_THRESHOLD_PX = PAGE_MAX_HEIGHT_PX * 0.85; // 85 %
+const PAGE_CONTENT_HEIGHT_PX = 929;
+const PAGE_MERGE_THRESHOLD_PX = PAGE_CONTENT_HEIGHT_PX * 0.85;
 
 export type PageFactory = (html?: string) => HTMLElement;
 export type OnPagesChanged = (pages: HTMLElement[]) => void;
 
 export class Paginator {
   private pages: HTMLElement[] = [];
-  private observer!: ResizeObserver;
-  private pageFactory: PageFactory;
-  private onPagesChanged: OnPagesChanged;
-
-  /** Evita reentradas mientras rebalanceamos */
+  private readonly observer: ResizeObserver;
+  private readonly pageFactory: PageFactory;
+  private readonly onPagesChanged: OnPagesChanged;
   private rebalancing = false;
 
   constructor(pageFactory: PageFactory, onPagesChanged: OnPagesChanged) {
@@ -39,132 +17,129 @@ export class Paginator {
 
     this.observer = new ResizeObserver((entries) => {
       if (this.rebalancing) return;
+
       for (const entry of entries) {
-        const page = entry.target as HTMLElement;
-        this.rebalancePage(page);
+        const inner = entry.target as HTMLElement;
+        const page = inner.parentElement;
+        if (page) this.rebalanceFromPage(page);
       }
     });
   }
 
-  // ── API pública ───────────────────────────────────────────────
-
-  /** Registra las páginas iniciales (ya renderizadas en el DOM). */
   setPages(pages: HTMLElement[]): void {
-    // Desconectar observadores previos
-    this.pages.forEach((p) => this.observer.unobserve(p));
+    this.pages.forEach((page) => {
+      const inner = this.getInner(page);
+      if (inner) this.observer.unobserve(inner);
+    });
+
     this.pages = [...pages];
-    this.pages.forEach((p) => this.observer.observe(p));
+
+    this.pages.forEach((page) => {
+      const inner = this.getInner(page);
+      if (inner) this.observer.observe(inner);
+    });
+
+    this.onPagesChanged(this.pages);
   }
 
-  /** Retorna la lista actual de páginas (puede haber cambiado). */
   getPages(): HTMLElement[] {
-    return this.pages;
+    return [...this.pages];
   }
 
-  /** Libera el ResizeObserver. Llamar en destroy(). */
-  destroy(): void {
-    this.observer.disconnect();
-  }
-
-  // ── Lógica de rebalanceo ──────────────────────────────────────
-
-  private rebalancePage(page: HTMLElement): void {
+  rebalanceFromPage(page: HTMLElement): void {
     const index = this.pages.indexOf(page);
-    if (index === -1) return;
+    if (index === -1 || this.rebalancing) return;
 
     this.rebalancing = true;
     try {
-      // Primero resolvemos overflow (puede crear nuevas páginas)
       this.resolveOverflow(index);
-      // Luego intentamos fusión desde atrás
       this.resolveMerge(index);
+      this.onPagesChanged(this.pages);
     } finally {
       this.rebalancing = false;
     }
   }
 
-  /**
-   * Si la página desborda, mueve el último hijo al inicio
-   * de la página siguiente. Repite hasta que no desborde.
-   */
+  destroy(): void {
+    this.observer.disconnect();
+  }
+
   private resolveOverflow(index: number): void {
-    let safetyCounter = 0;
-    const MAX_ITERATIONS = 200;
+    let safety = 0;
 
-    while (safetyCounter++ < MAX_ITERATIONS) {
+    while (safety++ < 200) {
       const page = this.pages[index];
-      if (!page) break;
+      const inner = page ? this.getInner(page) : null;
+      if (!inner || inner.scrollHeight <= PAGE_CONTENT_HEIGHT_PX + 1) break;
 
-      const contentHeight = this.getContentHeight(page);
-      if (contentHeight <= PAGE_MAX_HEIGHT_PX) break;
+      const lastChild = this.getLastMeaningfulChild(inner);
+      if (!lastChild) break;
 
-      const lastChild = this.getLastMeaningfulChild(page);
-      if (!lastChild) break; // no hay nodos movibles
-
-      // Obtener o crear la página siguiente
       const nextPage = this.getOrCreateNextPage(index);
+      const nextInner = this.getInner(nextPage);
+      if (!nextInner) break;
 
-      // Mover el nodo al inicio de la siguiente página
-      nextPage.insertBefore(lastChild, nextPage.firstChild);
+      if (
+        lastChild.nodeType === Node.ELEMENT_NODE &&
+        this.unwrapIfSplittableContainer(lastChild as HTMLElement)
+      ) {
+        continue;
+      }
 
-      // Si la siguiente página también desborda, continuamos
-      // con ella en la próxima iteración del ResizeObserver.
-      // Aquí solo resolvemos la página actual.
+      if (
+        lastChild.nodeType === Node.ELEMENT_NODE &&
+        (lastChild as HTMLElement).tagName === "TABLE"
+      ) {
+        const split = this.splitTable(lastChild as HTMLElement, nextInner, page);
+        if (split) continue;
+      }
+
+      nextInner.insertBefore(lastChild, nextInner.firstChild);
     }
   }
 
-  /**
-   * Si la página tiene poco contenido y existe la siguiente,
-   * trae nodos de la siguiente hasta llenarla o vaciarla.
-   */
   private resolveMerge(index: number): void {
-    let safetyCounter = 0;
-    const MAX_ITERATIONS = 200;
+    let safety = 0;
 
-    while (safetyCounter++ < MAX_ITERATIONS) {
-      const page     = this.pages[index];
+    while (safety++ < 200) {
+      const page = this.pages[index];
       const nextPage = this.pages[index + 1];
-      if (!page || !nextPage) break;
+      const inner = page ? this.getInner(page) : null;
+      const nextInner = nextPage ? this.getInner(nextPage) : null;
 
-      const contentHeight = this.getContentHeight(page);
-      if (contentHeight >= PAGE_MERGE_THRESHOLD_PX) break;
+      if (!inner || !nextInner) break;
+      if (inner.scrollHeight >= PAGE_MERGE_THRESHOLD_PX) break;
 
-      const firstChild = this.getFirstMeaningfulChild(nextPage);
+      const firstChild = this.getFirstMeaningfulChild(nextInner);
       if (!firstChild) {
-        // Página siguiente vacía: eliminarla
         this.removePage(index + 1);
         break;
       }
 
-      // Mover el primer hijo de la siguiente a esta página
-      page.appendChild(firstChild);
+      inner.appendChild(firstChild);
 
-      // Comprobar si hemos desbordado al hacer la fusión
-      if (this.getContentHeight(page) > PAGE_MAX_HEIGHT_PX) {
-        // Devolver el nodo que acabamos de mover
-        nextPage.insertBefore(firstChild, nextPage.firstChild);
+      if (inner.scrollHeight > PAGE_CONTENT_HEIGHT_PX + 1) {
+        nextInner.insertBefore(firstChild, nextInner.firstChild);
         break;
       }
 
-      // Si la siguiente quedó vacía, eliminarla
-      if (!this.getFirstMeaningfulChild(nextPage)) {
+      if (!this.getFirstMeaningfulChild(nextInner)) {
         this.removePage(index + 1);
         break;
       }
     }
   }
-
-  // ── Gestión de páginas ────────────────────────────────────────
 
   private getOrCreateNextPage(afterIndex: number): HTMLElement {
-    if (this.pages[afterIndex + 1]) {
-      return this.pages[afterIndex + 1];
-    }
+    const existingPage = this.pages[afterIndex + 1];
+    if (existingPage) return existingPage;
 
     const newPage = this.pageFactory();
     this.pages.splice(afterIndex + 1, 0, newPage);
-    this.observer.observe(newPage);
-    this.onPagesChanged(this.pages);
+
+    const inner = this.getInner(newPage);
+    if (inner) this.observer.observe(inner);
+
     return newPage;
   }
 
@@ -172,58 +147,122 @@ export class Paginator {
     const page = this.pages[index];
     if (!page) return;
 
-    this.observer.unobserve(page);
+    const inner = this.getInner(page);
+    if (inner) this.observer.unobserve(inner);
+
+    const previous = page.previousElementSibling;
+    if (previous?.classList.contains("hwe-page-divider")) previous.remove();
+
+    page.remove();
     this.pages.splice(index, 1);
-    this.onPagesChanged(this.pages);
   }
 
-  // ── Utilidades DOM ────────────────────────────────────────────
-
-  /**
-   * Altura real del contenido, independiente del min-height CSS.
-   * Usamos scrollHeight para capturar contenido que desborda.
-   */
-  private getContentHeight(page: HTMLElement): number {
-    // scrollHeight incluye padding pero no el min-height de CSS,
-    // por lo que refleja el contenido real.
-    return page.scrollHeight;
+  private getInner(page: HTMLElement): HTMLElement | null {
+    return page.querySelector(".hwe-page-inner");
   }
 
-  /**
-   * Último hijo que no sea solo un <br> o nodo de texto vacío.
-   * Si solo hay un hijo, no lo movemos para evitar páginas vacías.
-   */
-  private getLastMeaningfulChild(page: HTMLElement): ChildNode | null {
-    const children = Array.from(page.childNodes).filter(
-      (n) => !this.isEmptyNode(n)
-    );
-    if (children.length <= 1) return null; // mantener al menos uno
-    return children[children.length - 1];
+  private splitTable(
+    table: HTMLElement,
+    targetInner: HTMLElement,
+    page: HTMLElement
+  ): boolean {
+    const pageBottom = page.getBoundingClientRect().bottom;
+    const rows = Array.from(table.querySelectorAll("tr")) as HTMLElement[];
+
+    let splitRowIndex = -1;
+    for (let i = 0; i < rows.length; i++) {
+      if (rows[i].getBoundingClientRect().bottom > pageBottom) {
+        splitRowIndex = i;
+        break;
+      }
+    }
+
+    if (splitRowIndex <= 0) return false;
+
+    const rowsForNext = rows.slice(splitRowIndex);
+    if (rowsForNext.length === 0) return false;
+
+    const newTable = document.createElement("table");
+    Array.from(table.attributes).forEach((attr) => {
+      newTable.setAttribute(attr.name, attr.value);
+    });
+
+    const colgroup = table.querySelector("colgroup");
+    if (colgroup) newTable.appendChild(colgroup.cloneNode(true));
+
+    const thead = table.querySelector("thead");
+    if (thead) newTable.appendChild(thead.cloneNode(true));
+
+    const tbody = document.createElement("tbody");
+    rowsForNext.forEach((row) => tbody.appendChild(row));
+    newTable.appendChild(tbody);
+
+    targetInner.insertBefore(newTable, targetInner.firstChild);
+
+    const remainingRows = table.querySelectorAll("tbody tr, tfoot tr");
+    if (remainingRows.length === 0) table.remove();
+
+    return true;
   }
 
-  private getFirstMeaningfulChild(page: HTMLElement): ChildNode | null {
-    const children = Array.from(page.childNodes).filter(
-      (n) => !this.isEmptyNode(n)
-    );
-    return children[0] ?? null;
+  private getLastMeaningfulChild(container: HTMLElement): ChildNode | null {
+    const children = this.getMeaningfulChildren(container);
+    if (children.length > 1) return children[children.length - 1];
+
+    const onlyChild = children[0];
+    if (
+      onlyChild?.nodeType === Node.ELEMENT_NODE &&
+      this.isSplittableContainer(onlyChild as HTMLElement)
+    ) {
+      return onlyChild;
+    }
+
+    return null;
+  }
+
+  private getFirstMeaningfulChild(container: HTMLElement): ChildNode | null {
+    return this.getMeaningfulChildren(container)[0] ?? null;
+  }
+
+  private getMeaningfulChildren(container: HTMLElement): ChildNode[] {
+    return Array.from(container.childNodes).filter((node) => !this.isEmptyNode(node));
+  }
+
+  private unwrapIfSplittableContainer(element: HTMLElement): boolean {
+    if (!this.isSplittableContainer(element) || !element.parentNode) return false;
+
+    const parent = element.parentNode;
+    while (element.firstChild) {
+      parent.insertBefore(element.firstChild, element);
+    }
+    parent.removeChild(element);
+    return true;
+  }
+
+  private isSplittableContainer(element: HTMLElement): boolean {
+    const splittableTags = new Set(["DIV", "SECTION", "ARTICLE", "MAIN", "BODY"]);
+    if (!splittableTags.has(element.tagName)) return false;
+    if (element.classList.contains("hwe-page") || element.classList.contains("hwe-page-inner")) {
+      return false;
+    }
+
+    return this.getMeaningfulChildren(element).length > 0;
   }
 
   private isEmptyNode(node: ChildNode): boolean {
     if (node.nodeType === Node.TEXT_NODE) {
       return (node.textContent ?? "").trim() === "";
     }
-    if (node.nodeType === Node.ELEMENT_NODE) {
-      const el = node as HTMLElement;
-      if (el.tagName === "BR") return true;
-      // Párrafo vacío: <p><br></p> o <p></p>
-      if (
-        el.tagName === "P" &&
-        el.childNodes.length <= 1 &&
-        (el.textContent ?? "").trim() === ""
-      ) {
-        return true;
-      }
-    }
-    return false;
+
+    if (node.nodeType !== Node.ELEMENT_NODE) return false;
+
+    const el = node as HTMLElement;
+    if (el.tagName === "BR") return true;
+
+    return (
+      el.tagName === "P" &&
+      el.childNodes.length <= 1 &&
+      (el.textContent ?? "").trim() === ""
+    );
   }
 }
