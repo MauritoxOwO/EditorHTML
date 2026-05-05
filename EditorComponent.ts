@@ -22,6 +22,8 @@ export class EditorComponent {
   private readonly entityId: string;
   private readonly fieldName: string;
 
+  private rebalanceTimer: number | undefined;
+  private isComposing = false;
   private isDirty = false;
 
   constructor(container: HTMLElement, context: PcfContext) {
@@ -36,7 +38,7 @@ export class EditorComponent {
     this.entityId = this.cleanGuid(
       runtime.page?.entityId ?? runtime.mode?.contextInfo?.entityId ?? ""
     );
-    this.entityName = runtime.mode?.contextInfo?.entityTypeName ?? "mcdev_htmldevtests";
+    this.entityName = "mcdev_htmldevtests";
     this.fieldName = "mcdev_htmlarchivooriginal";
   }
 
@@ -102,13 +104,8 @@ export class EditorComponent {
     this.setStatus("Cargando contenido...", "saving");
 
     try {
-      if (!this.baseUrl) {
-        throw new Error("No se pudo obtener la URL de Dataverse.");
-      }
-
-      if (!this.entityId) {
-        throw new Error("No se pudo obtener el Id del registro actual.");
-      }
+      if (!this.baseUrl) throw new Error("No se pudo obtener la URL de Dataverse.");
+      if (!this.entityId) throw new Error("No se pudo obtener el Id del registro actual.");
 
       const html = await fetchHtmlFromFileField(
         this.baseUrl,
@@ -117,174 +114,27 @@ export class EditorComponent {
         this.fieldName
       );
 
-      this.renderInitial(html || "<p><br></p>");
-      await this.waitFrames(2);
-      await this.paginateContent();
-
+      await this.renderAndPaginate(html || "<p><br></p>");
       this.setStatus("", "");
     } catch (err) {
       this.setStatus(`Error al cargar: ${(err as Error).message}`, "error");
-      this.renderInitial("<p><br></p>");
-      this.paginator.setPages(this.pages);
+      await this.renderAndPaginate("<p><br></p>");
     }
   }
 
-  private renderInitial(html: string): void {
+  private async renderAndPaginate(html: string): Promise<void> {
     this.workspace.innerHTML = "";
-    this.pages = [];
+    this.pages = [this.createPageElement(this.normalizeHtmlForPagination(html))];
+    this.workspace.appendChild(this.pages[0]);
 
-    const page = this.createPageElement(this.normalizeHtmlForPagination(html));
-    this.pages.push(page);
-    this.workspace.appendChild(page);
-    this.updatePageCount();
-  }
-
-  private async paginateContent(): Promise<void> {
-    let pageIndex = 0;
-    let safety = 0;
-
-    while (pageIndex < this.pages.length && safety++ < 100) {
-      const page = this.pages[pageIndex];
-      const inner = this.getInner(page);
-
-      if (!inner || !this.pageOverflows(page)) {
-        pageIndex++;
-        continue;
-      }
-
-      const nextPage = this.createPageElement("");
-      const nextInner = this.getInner(nextPage);
-      if (!nextInner) {
-        pageIndex++;
-        continue;
-      }
-
-      nextInner.innerHTML = "";
-      const moved = this.extractOverflowToNextPage(inner, nextInner, page);
-
-      if (!moved) {
-        pageIndex++;
-        continue;
-      }
-
-      const divider = this.makePageDivider(pageIndex + 2);
-      this.workspace.insertBefore(divider, page.nextSibling);
-      this.workspace.insertBefore(nextPage, divider.nextSibling);
-      this.pages.splice(pageIndex + 1, 0, nextPage);
-
-      await this.waitFrames(1);
-    }
-
-    this.renumberDividers();
     this.paginator.setPages(this.pages);
+    await this.waitForImages(this.workspace);
+    await this.waitFrames(2);
+
+    this.paginator.repaginateAll();
+    this.pages = this.paginator.getPages();
+    this.syncWorkspace();
     this.updatePageCount();
-  }
-
-  private extractOverflowToNextPage(
-    sourceInner: HTMLElement,
-    targetInner: HTMLElement,
-    page: HTMLElement
-  ): boolean {
-    let movedAny = false;
-    let safety = 0;
-
-    while (this.pageOverflows(page) && safety++ < 200) {
-      const lastChild = this.getLastMeaningfulChild(sourceInner);
-
-      if (!lastChild) {
-        break;
-      }
-
-      if (
-        lastChild.nodeType === Node.ELEMENT_NODE &&
-        this.unwrapIfSplittableContainer(lastChild as HTMLElement)
-      ) {
-        continue;
-      }
-
-      if (
-        lastChild.nodeType === Node.ELEMENT_NODE &&
-        (lastChild as HTMLElement).tagName === "TABLE"
-      ) {
-        const split = this.splitTable(lastChild as HTMLElement, targetInner, page);
-        if (!split) break;
-        movedAny = true;
-        continue;
-      }
-
-      targetInner.insertBefore(lastChild, targetInner.firstChild);
-      movedAny = true;
-    }
-
-    return movedAny;
-  }
-
-  private normalizeHtmlForPagination(html: string): string {
-    const temp = document.createElement("div");
-    temp.innerHTML = html || "<p><br></p>";
-
-    const body = temp.querySelector("body");
-    if (body) temp.innerHTML = body.innerHTML;
-
-    let safety = 0;
-    while (safety++ < 20) {
-      const children = this.getMeaningfulChildren(temp);
-      if (children.length !== 1 || children[0].nodeType !== Node.ELEMENT_NODE) break;
-
-      const onlyChild = children[0] as HTMLElement;
-      if (!this.isSplittableContainer(onlyChild)) break;
-
-      temp.innerHTML = onlyChild.innerHTML;
-    }
-
-    return temp.innerHTML.trim() || "<p><br></p>";
-  }
-
-  private splitTable(
-    table: HTMLElement,
-    targetInner: HTMLElement,
-    page: HTMLElement
-  ): boolean {
-    const pageBottom = page.getBoundingClientRect().bottom;
-    const rows = Array.from(table.querySelectorAll("tr")) as HTMLElement[];
-
-    let splitRowIndex = -1;
-    for (let i = 0; i < rows.length; i++) {
-      if (rows[i].getBoundingClientRect().bottom > pageBottom) {
-        splitRowIndex = i;
-        break;
-      }
-    }
-
-    if (splitRowIndex <= 0) {
-      targetInner.insertBefore(table, targetInner.firstChild);
-      return true;
-    }
-
-    const rowsForNext = rows.slice(splitRowIndex);
-    if (rowsForNext.length === 0) return false;
-
-    const newTable = document.createElement("table");
-    Array.from(table.attributes).forEach((attr) => {
-      newTable.setAttribute(attr.name, attr.value);
-    });
-
-    const colgroup = table.querySelector("colgroup");
-    if (colgroup) newTable.appendChild(colgroup.cloneNode(true));
-
-    const thead = table.querySelector("thead");
-    if (thead) newTable.appendChild(thead.cloneNode(true));
-
-    const tbody = document.createElement("tbody");
-    rowsForNext.forEach((row) => tbody.appendChild(row));
-    newTable.appendChild(tbody);
-
-    targetInner.insertBefore(newTable, targetInner.firstChild);
-
-    const remainingRows = table.querySelectorAll("tbody tr, tfoot tr");
-    if (remainingRows.length === 0) table.remove();
-
-    return true;
   }
 
   private createPageElement(html?: string): HTMLElement {
@@ -300,34 +150,76 @@ export class EditorComponent {
     inner.addEventListener("input", () => {
       this.isDirty = true;
       this.toolbar.updateActiveStates();
-      this.paginator.rebalanceFromPage(page);
+      if (!this.isComposing) this.scheduleRebalance(page);
     });
-    inner.addEventListener("keydown", (e: KeyboardEvent) => this.onPageKeyDown(e));
+    inner.addEventListener("compositionstart", () => {
+      this.isComposing = true;
+    });
+    inner.addEventListener("compositionend", () => {
+      this.isComposing = false;
+      this.scheduleRebalance(page);
+    });
+    inner.addEventListener("keydown", (event: KeyboardEvent) => this.onPageKeyDown(event));
     inner.addEventListener("mouseup", () => this.toolbar.updateActiveStates());
 
     page.appendChild(inner);
     return page;
   }
 
+  private scheduleRebalance(page: HTMLElement): void {
+    if (this.rebalanceTimer !== undefined) {
+      window.clearTimeout(this.rebalanceTimer);
+    }
+
+    this.rebalanceTimer = window.setTimeout(() => {
+      this.rebalanceTimer = undefined;
+      if (!this.pages.includes(page)) return;
+
+      const pageIndex = this.pages.indexOf(page);
+      const startPage = this.pages[Math.max(0, pageIndex - 1)] ?? page;
+      this.paginator.rebalanceFromPage(startPage);
+      this.pages = this.paginator.getPages();
+      this.syncWorkspace();
+      this.updatePageCount();
+    }, 180);
+  }
+
   private onPagesChanged(pages: HTMLElement[]): void {
     this.pages = pages;
+    this.syncWorkspace();
+    this.updatePageCount();
+  }
 
-    pages.forEach((page, index) => {
-      if (!page.parentElement) {
-        const previousPage = pages[index - 1];
-        if (previousPage?.parentElement) {
-          const divider = this.makePageDivider(index + 1);
-          this.workspace.insertBefore(divider, previousPage.nextSibling);
-          this.workspace.insertBefore(page, divider.nextSibling);
-        } else {
-          this.workspace.appendChild(page);
-        }
-      }
+  private syncWorkspace(): void {
+    const pageSet = new Set(this.pages);
+
+    Array.from(this.workspace.querySelectorAll(".hwe-page")).forEach((page) => {
+      if (!pageSet.has(page as HTMLElement)) page.remove();
     });
 
-    this.removeEmptyDividers();
-    this.renumberDividers();
-    this.updatePageCount();
+    this.workspace.querySelectorAll(".hwe-page-divider").forEach((divider) => {
+      divider.remove();
+    });
+
+    let previousPage: HTMLElement | null = null;
+
+    this.pages.forEach((page, index) => {
+      if (index === 0) {
+        if (this.workspace.firstElementChild !== page) {
+          this.workspace.insertBefore(page, this.workspace.firstChild);
+        }
+      } else {
+        if (previousPage && page.previousElementSibling !== previousPage) {
+          this.workspace.insertBefore(page, previousPage.nextSibling);
+        } else if (!page.parentElement) {
+          this.workspace.appendChild(page);
+        }
+
+        this.workspace.insertBefore(this.makePageDivider(index + 1), page);
+      }
+
+      previousPage = page;
+    });
   }
 
   private makePageDivider(pageNumber: number): HTMLElement {
@@ -342,59 +234,152 @@ export class EditorComponent {
     return divider;
   }
 
-  private removeEmptyDividers(): void {
-    const dividers = Array.from(this.workspace.querySelectorAll(".hwe-page-divider"));
-    dividers.forEach((divider) => {
-      const next = divider.nextElementSibling;
-      if (!next || !next.classList.contains("hwe-page")) divider.remove();
-    });
-  }
+  private normalizeHtmlForPagination(html: string): string {
+    const temp = document.createElement("div");
+    temp.innerHTML = html || "<p><br></p>";
 
-  private renumberDividers(): void {
-    const dividers = this.workspace.querySelectorAll(".hwe-page-divider span");
-    dividers.forEach((span, index) => {
-      span.textContent = `Pagina ${index + 2}`;
-    });
-  }
+    const body = temp.querySelector("body");
+    if (body) temp.innerHTML = body.innerHTML;
 
-  private pageOverflows(page: HTMLElement): boolean {
-    const inner = this.getInner(page);
-    if (!inner) return false;
-    return inner.scrollHeight > page.clientHeight + 1;
-  }
+    this.cleanImportedHtml(temp);
 
-  private getLastMeaningfulChild(container: HTMLElement): ChildNode | null {
-    const children = this.getMeaningfulChildren(container);
-    if (children.length > 1) return children[children.length - 1];
+    let safety = 0;
+    while (safety++ < 20) {
+      const children = this.getMeaningfulChildren(temp);
+      if (children.length !== 1 || children[0].nodeType !== Node.ELEMENT_NODE) break;
 
-    const onlyChild = children[0];
-    if (
-      onlyChild?.nodeType === Node.ELEMENT_NODE &&
-      this.isSplittableContainer(onlyChild as HTMLElement)
-    ) {
-      return onlyChild;
+      const onlyChild = children[0] as HTMLElement;
+      if (!this.isSplittableContainer(onlyChild)) break;
+
+      temp.innerHTML = onlyChild.innerHTML;
     }
 
-    return null;
+    return temp.innerHTML.trim() || "<p><br></p>";
   }
 
-  private getMeaningfulChildren(container: HTMLElement): ChildNode[] {
-    return Array.from(container.childNodes).filter((node) => !this.isEmptyNode(node));
+  private cleanImportedHtml(root: HTMLElement): void {
+    this.removeComments(root);
+    root.querySelectorAll("style, meta, link, xml, script, object, hr").forEach((node) => {
+      node.remove();
+    });
+    this.removeOfficeNamespacedNodes(root);
+
+    root.querySelectorAll<HTMLElement>("[style]").forEach((element) => {
+      element.style.cssText = this.sanitizeInlineStyle(element.style.cssText);
+      if (!element.getAttribute("style")) element.removeAttribute("style");
+    });
+
+    root.querySelectorAll<HTMLElement>("[width]").forEach((element) => {
+      if (element.tagName !== "IMG") element.removeAttribute("width");
+    });
+    root.querySelectorAll<HTMLElement>("[height]").forEach((element) => {
+      if (element.tagName !== "IMG") element.removeAttribute("height");
+    });
+
+    this.unwrapKnownWordContainers(root);
+    this.removeVisuallyEmptyNodes(root);
+    this.removeBorderOnlyBlocks(root);
   }
 
-  private unwrapIfSplittableContainer(element: HTMLElement): boolean {
-    if (!this.isSplittableContainer(element) || !element.parentNode) return false;
+  private sanitizeInlineStyle(style: string): string {
+    return style
+      .replace(/mso-[^:;]+:[^;]+;?/gi, "")
+      .replace(/page-break-before\s*:\s*always\s*;?/gi, "")
+      .replace(/page-break-after\s*:\s*always\s*;?/gi, "")
+      .replace(/break-before\s*:\s*page\s*;?/gi, "")
+      .replace(/break-after\s*:\s*page\s*;?/gi, "")
+      .replace(/margin-left\s*:[^;]+;?/gi, "")
+      .replace(/margin-right\s*:[^;]+;?/gi, "")
+      .replace(/text-indent\s*:[^;]+;?/gi, "")
+      .replace(/position\s*:[^;]+;?/gi, "")
+      .replace(/left\s*:[^;]+;?/gi, "")
+      .replace(/right\s*:[^;]+;?/gi, "")
+      .replace(/transform\s*:[^;]+;?/gi, "")
+      .replace(/overflow\s*:[^;]+;?/gi, "")
+      .replace(/overflow-x\s*:[^;]+;?/gi, "")
+      .replace(/overflow-y\s*:[^;]+;?/gi, "")
+      .replace(/min-height\s*:[^;]+;?/gi, "")
+      .replace(/max-height\s*:[^;]+;?/gi, "")
+      .replace(/height\s*:[^;]+;?/gi, "")
+      .replace(/min-width\s*:[^;]+;?/gi, "")
+      .replace(/max-width\s*:[^;]+;?/gi, "")
+      .replace(/width\s*:[^;]+;?/gi, "")
+      .replace(/white-space\s*:[^;]+;?/gi, "")
+      .replace(/tab-stops\s*:[^;]+;?/gi, "")
+      .trim();
+  }
+
+  private removeComments(root: HTMLElement): void {
+    const walker = document.createTreeWalker(root, NodeFilter.SHOW_COMMENT);
+    const comments: Node[] = [];
+
+    while (walker.nextNode()) {
+      comments.push(walker.currentNode);
+    }
+
+    comments.forEach((comment) => comment.parentNode?.removeChild(comment));
+  }
+
+  private removeOfficeNamespacedNodes(root: HTMLElement): void {
+    Array.from(root.querySelectorAll("*")).forEach((node) => {
+      const tagName = node.tagName.toLowerCase();
+      if (tagName.includes(":") && /^(o|v|w|m):/i.test(tagName)) node.remove();
+    });
+  }
+
+  private unwrapKnownWordContainers(root: HTMLElement): void {
+    root.querySelectorAll<HTMLElement>("div.WordSection1, div[class*='WordSection']").forEach(
+      (element) => this.unwrapElement(element)
+    );
+  }
+
+  private removeVisuallyEmptyNodes(root: HTMLElement): void {
+    Array.from(root.childNodes).forEach((node) => {
+      if (node.nodeType === Node.ELEMENT_NODE) {
+        this.removeVisuallyEmptyNodes(node as HTMLElement);
+      }
+
+      if (this.isEmptyNode(node)) {
+        node.parentNode?.removeChild(node);
+      }
+    });
+  }
+
+  private removeBorderOnlyBlocks(root: HTMLElement): void {
+    Array.from(root.querySelectorAll<HTMLElement>("p, div, section, article, span")).forEach(
+      (element) => {
+        const text = (element.textContent ?? "").replace(/\u00a0/g, " ").trim();
+        const hasMedia = !!element.querySelector("img, table, tr, td, th, video, canvas, svg");
+        const hasBorder = /border/i.test(element.getAttribute("style") ?? "");
+
+        if (!text && !hasMedia && hasBorder) element.remove();
+      }
+    );
+  }
+
+  private unwrapElement(element: HTMLElement): void {
+    if (!element.parentNode) return;
 
     const parent = element.parentNode;
     while (element.firstChild) {
       parent.insertBefore(element.firstChild, element);
     }
     parent.removeChild(element);
-    return true;
   }
 
   private isSplittableContainer(element: HTMLElement): boolean {
-    const splittableTags = new Set(["DIV", "SECTION", "ARTICLE", "MAIN", "BODY"]);
+    const splittableTags = new Set([
+      "DIV",
+      "SECTION",
+      "ARTICLE",
+      "MAIN",
+      "BODY",
+      "CENTER",
+      "HEADER",
+      "FOOTER",
+      "ASIDE",
+      "NAV",
+    ]);
     if (!splittableTags.has(element.tagName)) return false;
     if (element.classList.contains("hwe-page") || element.classList.contains("hwe-page-inner")) {
       return false;
@@ -403,33 +388,52 @@ export class EditorComponent {
     return this.getMeaningfulChildren(element).length > 0;
   }
 
+  private getMeaningfulChildren(container: HTMLElement): ChildNode[] {
+    return Array.from(container.childNodes).filter((node) => !this.isEmptyNode(node));
+  }
+
   private isEmptyNode(node: ChildNode): boolean {
+    if (node.nodeType === Node.COMMENT_NODE) return true;
+
     if (node.nodeType === Node.TEXT_NODE) {
-      return (node.textContent ?? "").trim() === "";
+      return (node.textContent ?? "").replace(/\u00a0/g, " ").trim() === "";
     }
 
     if (node.nodeType !== Node.ELEMENT_NODE) return false;
 
-    const el = node as HTMLElement;
-    if (el.tagName === "BR") return true;
+    const element = node as HTMLElement;
+    if (element.tagName === "BR") return true;
+    if (["META", "LINK", "STYLE", "SCRIPT", "XML"].includes(element.tagName)) return true;
+    if (element.querySelector("img, table, tr, td, th, video, canvas, svg")) return false;
 
     return (
-      el.tagName === "P" &&
-      el.childNodes.length <= 1 &&
-      (el.textContent ?? "").trim() === ""
+      ["P", "DIV", "SECTION", "ARTICLE", "SPAN"].includes(element.tagName) &&
+      (element.textContent ?? "").replace(/\u00a0/g, " ").trim() === "" &&
+      Array.from(element.childNodes).every((child) => this.isEmptyNode(child))
     );
   }
 
-  private getInner(page: HTMLElement): HTMLElement | null {
-    return page.querySelector(".hwe-page-inner");
+  private waitForImages(root: HTMLElement): Promise<void> {
+    const pending = Array.from(root.querySelectorAll("img")).filter((img) => !img.complete);
+    if (pending.length === 0) return Promise.resolve();
+
+    return Promise.all(
+      pending.map(
+        (img) =>
+          new Promise<void>((resolve) => {
+            img.addEventListener("load", () => resolve(), { once: true });
+            img.addEventListener("error", () => resolve(), { once: true });
+          })
+      )
+    ).then(() => undefined);
   }
 
-  private waitFrames(n: number): Promise<void> {
+  private waitFrames(count: number): Promise<void> {
     return new Promise((resolve) => {
-      let count = 0;
+      let frame = 0;
       const tick = () => {
-        count++;
-        if (count >= n) {
+        frame++;
+        if (frame >= count) {
           resolve();
           return;
         }
@@ -439,16 +443,16 @@ export class EditorComponent {
     });
   }
 
-  private onPageKeyDown(e: KeyboardEvent): void {
-    if (e.ctrlKey && e.key.toLowerCase() === "s") {
-      e.preventDefault();
+  private onPageKeyDown(event: KeyboardEvent): void {
+    if (event.ctrlKey && event.key.toLowerCase() === "s") {
+      event.preventDefault();
       void this.save();
     }
   }
 
   private async save(): Promise<void> {
-    const saveBtn = this.toolbar.getSaveButton();
-    saveBtn.disabled = true;
+    const saveButton = this.toolbar.getSaveButton();
+    saveButton.disabled = true;
     this.setStatus("Guardando...", "saving");
 
     try {
@@ -467,14 +471,14 @@ export class EditorComponent {
     } catch (err) {
       this.setStatus(`Error al guardar: ${(err as Error).message}`, "error");
     } finally {
-      saveBtn.disabled = false;
+      saveButton.disabled = false;
     }
   }
 
   private collectHtml(): string {
     return this.pages
       .map((page, index) => {
-        const inner = this.getInner(page);
+        const inner = page.querySelector(".hwe-page-inner") as HTMLElement | null;
         const content = inner ? inner.innerHTML : page.innerHTML;
         if (index === 0) return content;
         return `<div style="page-break-before:always">${content}</div>`;
@@ -492,6 +496,9 @@ export class EditorComponent {
   }
 
   destroy(): void {
+    if (this.rebalanceTimer !== undefined) {
+      window.clearTimeout(this.rebalanceTimer);
+    }
     this.paginator?.destroy();
     this.container.innerHTML = "";
   }
