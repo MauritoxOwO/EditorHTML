@@ -63,7 +63,19 @@ export class Paginator {
       pageIndex = this.appendNodeFlowing(node, pageIndex);
     }
 
+    this.stabilizeOverflow();
     this.removeEmptyPages();
+  }
+
+  private stabilizeOverflow(): void {
+    let safety = 0;
+
+    while (safety++ < 20) {
+      const overflowingIndex = this.pages.findIndex((page) => this.pageOverflows(page));
+      if (overflowingIndex === -1) break;
+
+      this.resolveOverflow(overflowingIndex);
+    }
   }
 
   private collectNodesFromIndex(startIndex: number): ChildNode[] {
@@ -74,11 +86,23 @@ export class Paginator {
       if (!inner) return;
 
       this.getMeaningfulChildren(inner).forEach((node) => {
-        nodes.push(node);
+        nodes.push(...this.flattenFlowNode(node));
       });
     });
 
     return nodes;
+  }
+
+  private flattenFlowNode(node: ChildNode): ChildNode[] {
+    if (node.nodeType !== Node.ELEMENT_NODE) return [node];
+
+    const element = node as HTMLElement;
+    if (!this.isSplittableContainer(element)) return [node];
+
+    const children = this.getMeaningfulChildren(element);
+    if (children.length === 0) return [];
+
+    return children.flatMap((child) => this.flattenFlowNode(child));
   }
 
   private trimPagesFromIndex(startIndex: number): void {
@@ -102,10 +126,32 @@ export class Paginator {
     let currentInner = this.getInner(currentPage);
     if (!currentInner) return currentIndex;
 
+    if (node.nodeType === Node.ELEMENT_NODE) {
+      this.constrainAtomicElement(node as HTMLElement, currentPage);
+    }
+
+    const pageHadContent = !!this.getFirstMeaningfulChild(currentInner);
     currentInner.appendChild(node);
 
     if (!this.pageOverflows(currentPage)) {
       return currentIndex;
+    }
+
+    if (pageHadContent) {
+      currentInner.removeChild(node);
+      const nextPage = this.getOrCreateNextPage(currentIndex);
+      const nextInner = this.getInner(nextPage);
+      if (!nextInner) return currentIndex;
+
+      if (node.nodeType === Node.ELEMENT_NODE) {
+        this.constrainAtomicElement(node as HTMLElement, nextPage);
+      }
+
+      nextInner.appendChild(node);
+      if (this.pageOverflows(nextPage)) {
+        this.resolveOverflow(currentIndex + 1);
+      }
+      return currentIndex + 1;
     }
 
     this.resolveOverflow(currentIndex);
@@ -118,6 +164,26 @@ export class Paginator {
     if (!nextPage) return currentIndex;
 
     return currentIndex + 1;
+  }
+
+  private constrainAtomicElement(element: HTMLElement, page: HTMLElement): void {
+    if (element.tagName === "IMG") {
+      const contentHeight = this.getContentHeight(page);
+      element.style.maxWidth = "100%";
+      element.style.maxHeight = `${contentHeight}px`;
+      element.style.height = "auto";
+      element.style.objectFit = "contain";
+    }
+  }
+
+  private getContentHeight(page: HTMLElement): number {
+    const inner = this.getInner(page);
+    if (!inner) return page.clientHeight;
+
+    const styles = getComputedStyle(inner);
+    const paddingTop = parseFloat(styles.paddingTop) || 0;
+    const paddingBottom = parseFloat(styles.paddingBottom) || 0;
+    return Math.max(0, inner.clientHeight - paddingTop - paddingBottom);
   }
 
   private resolveOverflow(index: number): void {
@@ -187,6 +253,7 @@ export class Paginator {
 
     const newPage = this.pageFactory();
     this.pages.splice(afterIndex + 1, 0, newPage);
+    this.onPagesChanged(this.pages);
     return newPage;
   }
 
@@ -383,7 +450,8 @@ export class Paginator {
     const onlyChild = children[0];
     if (
       onlyChild?.nodeType === Node.ELEMENT_NODE &&
-      (this.isSplittableContainer(onlyChild as HTMLElement) ||
+      ((onlyChild as HTMLElement).tagName === "TABLE" ||
+        this.isSplittableContainer(onlyChild as HTMLElement) ||
         this.isSplittableTextBlock(onlyChild as HTMLElement))
     ) {
       return onlyChild;
@@ -467,6 +535,7 @@ export class Paginator {
     if (node.nodeType !== Node.ELEMENT_NODE) return false;
 
     const element = node as HTMLElement;
+    if (element.hasAttribute("data-hwe-caret")) return false;
     if (element.tagName === "BR") return true;
     if (["META", "LINK", "STYLE", "SCRIPT", "XML"].includes(element.tagName)) return true;
     if (element.querySelector("img, table, tr, td, th, video, canvas, svg")) return false;
