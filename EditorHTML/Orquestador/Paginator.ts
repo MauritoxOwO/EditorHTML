@@ -309,7 +309,12 @@ export class Paginator {
       return (node.textContent ?? "").replace(/\u00a0/g, " ").trim() === "";
     }
 
-    return node.nodeType === Node.ELEMENT_NODE && this.isEditableBlankBlock(node as HTMLElement);
+    if (node.nodeType !== Node.ELEMENT_NODE) return false;
+
+    const element = node as HTMLElement;
+    if (element.hasAttribute("data-hwe-user-blank")) return false;
+
+    return this.isEditableBlankBlock(element);
   }
 
   private splitTable(
@@ -317,10 +322,13 @@ export class Paginator {
     targetInner: HTMLElement,
     page: HTMLElement
   ): boolean {
-    const rows = Array.from(table.querySelectorAll("tr")) as HTMLElement[];
+    const rows = this.getSplittableTableRows(table);
     if (rows.length <= 1) return false;
 
-    const pageBottom = page.getBoundingClientRect().bottom;
+    const inner = this.getInner(page);
+    const pageBottom = inner
+      ? this.getContentLimitBottom(inner)
+      : page.getBoundingClientRect().bottom;
     let splitRowIndex = -1;
 
     for (let i = 0; i < rows.length; i++) {
@@ -356,6 +364,13 @@ export class Paginator {
     if (remainingRows.length === 0) table.remove();
 
     return true;
+  }
+
+  private getSplittableTableRows(table: HTMLElement): HTMLElement[] {
+    const thead = table.querySelector("thead");
+    const allRows = Array.from(table.querySelectorAll("tr")) as HTMLElement[];
+
+    return allRows.filter((row) => !thead?.contains(row));
   }
 
   private splitTextBlock(
@@ -429,14 +444,18 @@ export class Paginator {
 
   private moveLastWordFromTextNode(textNode: Text, target: HTMLElement): boolean {
     const text = textNode.textContent ?? "";
-    const trimmedEnd = text.replace(/\s+$/g, "");
 
-    if (!trimmedEnd) {
-      textNode.remove();
+    if (!text) {
       return true;
     }
 
-    const match = /(\s*\S+)$/.exec(trimmedEnd);
+    if (/^\s+$/.test(text)) {
+      if (target.childNodes.length > 0) return false;
+      target.insertBefore(textNode, target.firstChild);
+      return true;
+    }
+
+    const match = /(\s*\S+\s*)$/.exec(text);
     if (!match) return false;
 
     if (match.index <= 0) {
@@ -445,8 +464,8 @@ export class Paginator {
       return true;
     }
 
-    const prefix = trimmedEnd.slice(0, match.index);
-    const suffix = trimmedEnd.slice(match.index);
+    const prefix = text.slice(0, match.index);
+    const suffix = text.slice(match.index);
 
     textNode.textContent = prefix;
     target.insertBefore(document.createTextNode(suffix), target.firstChild);
@@ -587,6 +606,7 @@ export class Paginator {
     if (node.nodeType !== Node.ELEMENT_NODE) return false;
 
     const element = node as HTMLElement;
+    if (element.hasAttribute("data-hwe-user-blank")) return false;
     if (element.hasAttribute("data-hwe-caret")) return false;
     if (element.tagName === "BR") return true;
     if (["META", "LINK", "STYLE", "SCRIPT", "XML"].includes(element.tagName)) return true;
