@@ -251,6 +251,11 @@
   overflow-wrap: break-word;
 }
 
+.hwe-page table.hwe-word-table tr {
+  break-inside: avoid;
+  page-break-inside: avoid;
+}
+
 .hwe-page img {
   display: block;
   max-width: 100% !important;
