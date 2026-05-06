@@ -1,9 +1,6 @@
 export type PageFactory = (html?: string) => HTMLElement;
 export type OnPagesChanged = (pages: HTMLElement[]) => void;
 
-const MIN_LINES_ON_SPLIT = 2;
-const LINE_TOP_TOLERANCE_PX = 2;
-
 export class Paginator {
   private pages: HTMLElement[] = [];
   private readonly pageFactory: PageFactory;
@@ -88,56 +85,24 @@ export class Paginator {
       const inner = this.getInner(page);
       if (!inner) return;
 
-      nodes.push(...this.collectFlowNodes(inner));
+      this.getMeaningfulChildren(inner).forEach((node) => {
+        nodes.push(...this.flattenFlowNode(node));
+      });
     });
 
-    return nodes;
-  }
-
-  private collectFlowNodes(container: HTMLElement): ChildNode[] {
-    const nodes: ChildNode[] = [];
-    let inlineParagraph: HTMLElement | null = null;
-
-    const flushInlineParagraph = () => {
-      if (!inlineParagraph) return;
-
-      if (this.getMeaningfulChildren(inlineParagraph).length > 0) {
-        nodes.push(inlineParagraph);
-      }
-
-      inlineParagraph = null;
-    };
-
-    Array.from(container.childNodes).forEach((node) => {
-      if (this.isEmptyNode(node)) return;
-
-      if (this.isInlineFlowNode(node)) {
-        if (!inlineParagraph) inlineParagraph = document.createElement("p");
-        inlineParagraph.appendChild(node);
-        return;
-      }
-
-      flushInlineParagraph();
-      nodes.push(...this.flattenFlowNode(node));
-    });
-
-    flushInlineParagraph();
     return nodes;
   }
 
   private flattenFlowNode(node: ChildNode): ChildNode[] {
-    if (node.nodeType === Node.TEXT_NODE) {
-      const paragraph = document.createElement("p");
-      paragraph.appendChild(node);
-      return [paragraph];
-    }
-
     if (node.nodeType !== Node.ELEMENT_NODE) return [node];
 
     const element = node as HTMLElement;
     if (!this.isSplittableContainer(element)) return [node];
 
-    return this.collectFlowNodes(element);
+    const children = this.getMeaningfulChildren(element);
+    if (children.length === 0) return [];
+
+    return children.flatMap((child) => this.flattenFlowNode(child));
   }
 
   private trimPagesFromIndex(startIndex: number): void {
@@ -204,10 +169,10 @@ export class Paginator {
   private constrainAtomicElement(element: HTMLElement, page: HTMLElement): void {
     if (element.tagName === "IMG") {
       const contentHeight = this.getContentHeight(page);
-      element.style.setProperty("max-width", "100%", "important");
-      element.style.setProperty("max-height", `${contentHeight}px`, "important");
-      element.style.setProperty("height", "auto", "important");
-      element.style.setProperty("object-fit", "contain");
+      element.style.maxWidth = "100%";
+      element.style.maxHeight = `${contentHeight}px`;
+      element.style.height = "auto";
+      element.style.objectFit = "contain";
     }
   }
 
@@ -400,47 +365,7 @@ export class Paginator {
       return false;
     }
 
-    this.ensureMinimumOverflowLines(block, overflowBlock);
-
     return true;
-  }
-
-  private ensureMinimumOverflowLines(source: HTMLElement, target: HTMLElement): void {
-    let safety = 0;
-
-    while (
-      safety++ < 100 &&
-      !this.isEmptyNode(source) &&
-      this.countVisualLines(target) < MIN_LINES_ON_SPLIT
-    ) {
-      const moved = this.moveLastInlinePiece(source, target);
-      if (!moved) break;
-
-      if (this.isEmptyNode(source)) {
-        source.remove();
-        break;
-      }
-    }
-  }
-
-  private countVisualLines(element: HTMLElement): number {
-    if (this.isEmptyNode(element)) return 0;
-
-    const range = document.createRange();
-    range.selectNodeContents(element);
-
-    const tops: number[] = [];
-    Array.from(range.getClientRects()).forEach((rect) => {
-      if (rect.width <= 0 || rect.height <= 0) return;
-
-      const hasExistingTop = tops.some(
-        (top) => Math.abs(top - rect.top) <= LINE_TOP_TOLERANCE_PX
-      );
-      if (!hasExistingTop) tops.push(rect.top);
-    });
-
-    if (tops.length > 0) return tops.length;
-    return (element.textContent ?? "").replace(/\u00a0/g, " ").trim() ? 1 : 0;
   }
 
   private moveLastInlinePiece(source: HTMLElement, target: HTMLElement): boolean {
@@ -513,9 +438,39 @@ export class Paginator {
   private pageOverflows(page: HTMLElement): boolean {
     const inner = this.getInner(page);
     if (!inner) return false;
-    const limit = inner.clientHeight || page.clientHeight;
-    if (limit <= 0) return false;
-    return inner.scrollHeight > limit + 1;
+
+    const contentBottom = this.getContentBottom(inner);
+    if (contentBottom === null) return false;
+
+    return contentBottom > this.getContentLimitBottom(inner) + 1;
+  }
+
+  private getContentLimitBottom(inner: HTMLElement): number {
+    const styles = getComputedStyle(inner);
+    const paddingBottom = parseFloat(styles.paddingBottom) || 0;
+    return inner.getBoundingClientRect().bottom - paddingBottom;
+  }
+
+  private getContentBottom(inner: HTMLElement): number | null {
+    const children = this.getMeaningfulChildren(inner);
+    if (children.length === 0) return null;
+
+    return children.reduce<number | null>((bottom, child) => {
+      const childBottom = this.getNodeBottom(child);
+      if (childBottom === null) return bottom;
+      return bottom === null ? childBottom : Math.max(bottom, childBottom);
+    }, null);
+  }
+
+  private getNodeBottom(node: ChildNode): number | null {
+    if (node.nodeType === Node.ELEMENT_NODE) {
+      return (node as HTMLElement).getBoundingClientRect().bottom;
+    }
+
+    const range = document.createRange();
+    range.selectNodeContents(node);
+    const rect = range.getBoundingClientRect();
+    return rect.width > 0 || rect.height > 0 ? rect.bottom : null;
   }
 
   private getLastMeaningfulChild(container: HTMLElement): ChildNode | null {
@@ -573,43 +528,6 @@ export class Paginator {
     }
 
     return this.getMeaningfulChildren(element).length > 0;
-  }
-
-  private isInlineFlowNode(node: ChildNode): boolean {
-    if (node.nodeType === Node.TEXT_NODE) {
-      return (node.textContent ?? "").replace(/\u00a0/g, " ").trim() !== "";
-    }
-
-    if (node.nodeType !== Node.ELEMENT_NODE) return false;
-
-    const element = node as HTMLElement;
-    if (element.hasAttribute("data-hwe-caret")) return true;
-    if (element.querySelector("img, table, tr, td, th, video, canvas, svg")) return false;
-
-    return [
-      "A",
-      "ABBR",
-      "B",
-      "BDI",
-      "BDO",
-      "CITE",
-      "CODE",
-      "EM",
-      "FONT",
-      "I",
-      "KBD",
-      "MARK",
-      "Q",
-      "S",
-      "SMALL",
-      "SPAN",
-      "STRONG",
-      "SUB",
-      "SUP",
-      "TIME",
-      "U",
-      "VAR",
-    ].includes(element.tagName);
   }
 
   private isSplittableTextBlock(element: HTMLElement): boolean {
