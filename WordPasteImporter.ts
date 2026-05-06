@@ -300,7 +300,18 @@ export class WordPasteImporter {
       }
 
       if (!element.style.borderCollapse) element.style.borderCollapse = "collapse";
+      element.style.removeProperty("height");
+      element.style.removeProperty("min-height");
+      element.style.removeProperty("max-height");
+      element.removeAttribute("height");
       this.moveLengthAttributeToStyle(element, "width");
+    }
+
+    if (["THEAD", "TBODY", "TFOOT"].includes(tagName)) {
+      element.style.removeProperty("height");
+      element.style.removeProperty("min-height");
+      element.style.removeProperty("max-height");
+      element.removeAttribute("height");
     }
 
     if (tagName === "COL" || tagName === "TD" || tagName === "TH") {
