@@ -569,10 +569,13 @@ export class EditorComponent {
 
     event.preventDefault();
 
+    const targetEditable = event.currentTarget as HTMLElement;
+    const insertionMarker = this.createPasteInsertionMarker(targetEditable);
     const imported = this.wordPasteImporter.importFromHtml(html);
     if (imported.pageSetup) this.setPageSetup(imported.pageSetup);
 
-    const affectedPage = this.insertHtmlAtSelection(imported.html) ?? page;
+    const affectedPage =
+      this.insertHtmlAtPasteMarker(imported.html, insertionMarker, targetEditable) ?? page;
     const inner = affectedPage.querySelector<HTMLElement>(".hwe-page-inner");
     if (inner) this.syncEditableBlankBlocks(inner, false);
 
@@ -582,39 +585,58 @@ export class EditorComponent {
     void this.waitForImages(affectedPage).then(() => this.scheduleRebalance(affectedPage, true));
   }
 
-  private insertHtmlAtSelection(html: string): HTMLElement | null {
-    const selection = window.getSelection();
-    const activeEditable = this.getActiveEditable();
-    if (!activeEditable) return null;
+  private createPasteInsertionMarker(targetEditable: HTMLElement): HTMLElement {
+    const marker = document.createElement("span");
+    marker.setAttribute("data-hwe-paste-marker", "true");
+    marker.style.cssText = "display:inline-block;width:0;height:0;overflow:hidden;line-height:0;";
 
-    activeEditable.focus({ preventScroll: true });
+    const selection = window.getSelection();
+    targetEditable.focus({ preventScroll: true });
 
     if (!selection || selection.rangeCount === 0) {
-      activeEditable.insertAdjacentHTML("beforeend", html);
-      return activeEditable.closest<HTMLElement>(".hwe-page");
+      targetEditable.appendChild(marker);
+      return marker;
     }
 
     const range = selection.getRangeAt(0);
-    if (!activeEditable.contains(range.commonAncestorContainer)) {
-      activeEditable.insertAdjacentHTML("beforeend", html);
-      return activeEditable.closest<HTMLElement>(".hwe-page");
+    if (!targetEditable.contains(range.commonAncestorContainer)) {
+      targetEditable.appendChild(marker);
+      return marker;
     }
 
     range.deleteContents();
-    const fragment = range.createContextualFragment(html);
-    const insertedNodes = Array.from(fragment.childNodes);
-    range.insertNode(fragment);
+    range.insertNode(marker);
+    return marker;
+  }
 
+  private insertHtmlAtPasteMarker(
+    html: string,
+    marker: HTMLElement,
+    targetEditable: HTMLElement
+  ): HTMLElement | null {
+    const template = document.createElement("template");
+    template.innerHTML = html;
+    const fragment = template.content;
+    const insertedNodes = Array.from(fragment.childNodes);
+
+    if (!marker.parentNode) {
+      targetEditable.appendChild(fragment);
+    } else {
+      marker.replaceWith(fragment);
+    }
+
+    const selection = window.getSelection();
     const lastInserted = insertedNodes[insertedNodes.length - 1];
-    if (lastInserted?.parentNode) {
+    if (selection && lastInserted?.parentNode) {
       const nextRange = document.createRange();
       nextRange.setStartAfter(lastInserted);
       nextRange.collapse(true);
+      targetEditable.focus({ preventScroll: true });
       selection.removeAllRanges();
       selection.addRange(nextRange);
     }
 
-    return activeEditable.closest<HTMLElement>(".hwe-page");
+    return targetEditable.closest<HTMLElement>(".hwe-page");
   }
 
   private syncEditableBlankBlocks(root: HTMLElement, markNewBlanks: boolean): void {
