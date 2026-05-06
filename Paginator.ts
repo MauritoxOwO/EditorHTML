@@ -1,8 +1,8 @@
-const PAGE_CONTENT_HEIGHT_PX = 929;
-const PAGE_MERGE_THRESHOLD_PX = PAGE_CONTENT_HEIGHT_PX * 0.75;
-
 export type PageFactory = (html?: string) => HTMLElement;
 export type OnPagesChanged = (pages: HTMLElement[]) => void;
+
+const MIN_LINES_ON_SPLIT = 2;
+const LINE_TOP_TOLERANCE_PX = 2;
 
 export class Paginator {
   private pages: HTMLElement[] = [];
@@ -29,8 +29,7 @@ export class Paginator {
 
     this.rebalancing = true;
     try {
-      this.rebalanceFromIndex(0);
-      this.removeEmptyPages();
+      this.repaginateFromIndex(0);
       this.onPagesChanged(this.pages);
     } finally {
       this.rebalancing = false;
@@ -45,8 +44,7 @@ export class Paginator {
 
     this.rebalancing = true;
     try {
-      this.rebalanceFromIndex(index);
-      this.removeEmptyPages();
+      this.repaginateFromIndex(Math.max(0, index - 1));
       this.onPagesChanged(this.pages);
     } finally {
       this.rebalancing = false;
@@ -57,76 +55,192 @@ export class Paginator {
     this.pages = [];
   }
 
-  private rebalanceFromIndex(startIndex: number): void {
-    let index = Math.max(0, startIndex);
+  private repaginateFromIndex(startIndex: number): void {
+    const safeStart = Math.max(0, Math.min(startIndex, this.pages.length - 1));
+    const nodes = this.collectNodesFromIndex(safeStart);
+
+    this.trimPagesFromIndex(safeStart);
+
+    let pageIndex = safeStart;
+    for (const node of nodes) {
+      pageIndex = this.appendNodeFlowing(node, pageIndex);
+    }
+
+    this.stabilizeOverflow();
+    this.removeEmptyPages();
+  }
+
+  private stabilizeOverflow(): void {
     let safety = 0;
 
-    while (index < this.pages.length && safety++ < 300) {
-      this.resolveOverflow(index);
-      this.resolveMerge(index);
-      index++;
+    while (safety++ < 20) {
+      const overflowingIndex = this.pages.findIndex((page) => this.pageOverflows(page));
+      if (overflowingIndex === -1) break;
+
+      this.resolveOverflow(overflowingIndex);
     }
   }
 
+  private collectNodesFromIndex(startIndex: number): ChildNode[] {
+    const nodes: ChildNode[] = [];
+
+    this.pages.slice(startIndex).forEach((page) => {
+      const inner = this.getInner(page);
+      if (!inner) return;
+
+      nodes.push(...this.collectFlowNodes(inner));
+    });
+
+    return nodes;
+  }
+
+  private collectFlowNodes(container: HTMLElement): ChildNode[] {
+    const nodes: ChildNode[] = [];
+    let inlineParagraph: HTMLElement | null = null;
+
+    const flushInlineParagraph = () => {
+      if (!inlineParagraph) return;
+
+      if (this.getMeaningfulChildren(inlineParagraph).length > 0) {
+        nodes.push(inlineParagraph);
+      }
+
+      inlineParagraph = null;
+    };
+
+    Array.from(container.childNodes).forEach((node) => {
+      if (this.isEmptyNode(node)) return;
+
+      if (this.isInlineFlowNode(node)) {
+        if (!inlineParagraph) inlineParagraph = document.createElement("p");
+        inlineParagraph.appendChild(node);
+        return;
+      }
+
+      flushInlineParagraph();
+      nodes.push(...this.flattenFlowNode(node));
+    });
+
+    flushInlineParagraph();
+    return nodes;
+  }
+
+  private flattenFlowNode(node: ChildNode): ChildNode[] {
+    if (node.nodeType === Node.TEXT_NODE) {
+      const paragraph = document.createElement("p");
+      paragraph.appendChild(node);
+      return [paragraph];
+    }
+
+    if (node.nodeType !== Node.ELEMENT_NODE) return [node];
+
+    const element = node as HTMLElement;
+    if (!this.isSplittableContainer(element)) return [node];
+
+    return this.collectFlowNodes(element);
+  }
+
+  private trimPagesFromIndex(startIndex: number): void {
+    const keepBefore = this.pages.slice(0, startIndex);
+    let page = this.pages[startIndex];
+
+    if (!page) {
+      page = this.pageFactory();
+    }
+
+    const inner = this.getInner(page);
+    if (inner) inner.innerHTML = "";
+
+    this.pages.slice(startIndex + 1).forEach((extraPage) => extraPage.remove());
+    this.pages = [...keepBefore, page];
+  }
+
+  private appendNodeFlowing(node: ChildNode, pageIndex: number): number {
+    let currentIndex = pageIndex;
+    let currentPage = this.pages[currentIndex] ?? this.getOrCreateNextPage(currentIndex - 1);
+    let currentInner = this.getInner(currentPage);
+    if (!currentInner) return currentIndex;
+
+    if (node.nodeType === Node.ELEMENT_NODE) {
+      this.constrainAtomicElement(node as HTMLElement, currentPage);
+    }
+
+    const pageHadContent = !!this.getFirstMeaningfulChild(currentInner);
+    currentInner.appendChild(node);
+
+    if (!this.pageOverflows(currentPage)) {
+      return currentIndex;
+    }
+
+    if (pageHadContent) {
+      currentInner.removeChild(node);
+      const nextPage = this.getOrCreateNextPage(currentIndex);
+      const nextInner = this.getInner(nextPage);
+      if (!nextInner) return currentIndex;
+
+      if (node.nodeType === Node.ELEMENT_NODE) {
+        this.constrainAtomicElement(node as HTMLElement, nextPage);
+      }
+
+      nextInner.appendChild(node);
+      if (this.pageOverflows(nextPage)) {
+        this.resolveOverflow(currentIndex + 1);
+      }
+      return currentIndex + 1;
+    }
+
+    this.resolveOverflow(currentIndex);
+
+    if (this.pageOverflows(currentPage)) {
+      return currentIndex;
+    }
+
+    const nextPage = this.pages[currentIndex + 1];
+    if (!nextPage) return currentIndex;
+
+    return currentIndex + 1;
+  }
+
+  private constrainAtomicElement(element: HTMLElement, page: HTMLElement): void {
+    if (element.tagName === "IMG") {
+      const contentHeight = this.getContentHeight(page);
+      element.style.setProperty("max-width", "100%", "important");
+      element.style.setProperty("max-height", `${contentHeight}px`, "important");
+      element.style.setProperty("height", "auto", "important");
+      element.style.setProperty("object-fit", "contain");
+    }
+  }
+
+  private getContentHeight(page: HTMLElement): number {
+    const inner = this.getInner(page);
+    if (!inner) return page.clientHeight;
+
+    const styles = getComputedStyle(inner);
+    const paddingTop = parseFloat(styles.paddingTop) || 0;
+    const paddingBottom = parseFloat(styles.paddingBottom) || 0;
+    return Math.max(0, inner.clientHeight - paddingTop - paddingBottom);
+  }
+
   private resolveOverflow(index: number): void {
+    let currentIndex = index;
     let safety = 0;
 
-    while (safety++ < 300) {
-      const page = this.pages[index];
+    while (currentIndex < this.pages.length && safety++ < 500) {
+      const page = this.pages[currentIndex];
       const inner = this.getInner(page);
-      if (!inner || !this.pageOverflows(page)) break;
 
-      const nextPage = this.getOrCreateNextPage(index);
+      if (!inner || !this.pageOverflows(page)) {
+        currentIndex++;
+        continue;
+      }
+
+      const nextPage = this.getOrCreateNextPage(currentIndex);
       const nextInner = this.getInner(nextPage);
       if (!nextInner) break;
 
       const moved = this.moveOverflowPiece(inner, nextInner, page);
-      if (!moved) break;
-    }
-  }
-
-  private resolveMerge(index: number): void {
-    let safety = 0;
-
-    while (safety++ < 100) {
-      const page = this.pages[index];
-      const nextPage = this.pages[index + 1];
-      const inner = this.getInner(page);
-      const nextInner = nextPage ? this.getInner(nextPage) : null;
-
-      if (!inner || !nextInner) break;
-      if (inner.scrollHeight >= PAGE_MERGE_THRESHOLD_PX) break;
-
-      const firstChild = this.getFirstMeaningfulChild(nextInner);
-      if (!firstChild) {
-        this.removePage(index + 1);
-        break;
-      }
-
-      const targetForMerge = this.findMergeTarget(inner, firstChild);
-      if (targetForMerge) {
-        const movedChildren = this.moveAllChildren(firstChild as HTMLElement, targetForMerge);
-        firstChild.parentNode?.removeChild(firstChild);
-
-        if (this.pageOverflows(page)) {
-          movedChildren.reverse().forEach((child) => {
-            (firstChild as HTMLElement).insertBefore(child, (firstChild as HTMLElement).firstChild);
-          });
-          nextInner.insertBefore(firstChild, nextInner.firstChild);
-          break;
-        }
-      } else {
-        inner.appendChild(firstChild);
-
-        if (this.pageOverflows(page)) {
-          nextInner.insertBefore(firstChild, nextInner.firstChild);
-          break;
-        }
-      }
-
-      if (!this.getFirstMeaningfulChild(nextInner)) {
-        this.removePage(index + 1);
-        break;
+      if (!moved) {
+        currentIndex++;
       }
     }
   }
@@ -174,6 +288,7 @@ export class Paginator {
 
     const newPage = this.pageFactory();
     this.pages.splice(afterIndex + 1, 0, newPage);
+    this.onPagesChanged(this.pages);
     return newPage;
   }
 
@@ -285,7 +400,47 @@ export class Paginator {
       return false;
     }
 
+    this.ensureMinimumOverflowLines(block, overflowBlock);
+
     return true;
+  }
+
+  private ensureMinimumOverflowLines(source: HTMLElement, target: HTMLElement): void {
+    let safety = 0;
+
+    while (
+      safety++ < 100 &&
+      !this.isEmptyNode(source) &&
+      this.countVisualLines(target) < MIN_LINES_ON_SPLIT
+    ) {
+      const moved = this.moveLastInlinePiece(source, target);
+      if (!moved) break;
+
+      if (this.isEmptyNode(source)) {
+        source.remove();
+        break;
+      }
+    }
+  }
+
+  private countVisualLines(element: HTMLElement): number {
+    if (this.isEmptyNode(element)) return 0;
+
+    const range = document.createRange();
+    range.selectNodeContents(element);
+
+    const tops: number[] = [];
+    Array.from(range.getClientRects()).forEach((rect) => {
+      if (rect.width <= 0 || rect.height <= 0) return;
+
+      const hasExistingTop = tops.some(
+        (top) => Math.abs(top - rect.top) <= LINE_TOP_TOLERANCE_PX
+      );
+      if (!hasExistingTop) tops.push(rect.top);
+    });
+
+    if (tops.length > 0) return tops.length;
+    return (element.textContent ?? "").replace(/\u00a0/g, " ").trim() ? 1 : 0;
   }
 
   private moveLastInlinePiece(source: HTMLElement, target: HTMLElement): boolean {
@@ -351,32 +506,6 @@ export class Paginator {
     return true;
   }
 
-  private findMergeTarget(inner: HTMLElement, nodeFromNext: ChildNode): HTMLElement | null {
-    if (nodeFromNext.nodeType !== Node.ELEMENT_NODE) return null;
-
-    const incoming = nodeFromNext as HTMLElement;
-    const last = this.getLastMeaningfulChild(inner);
-    if (!last || last.nodeType !== Node.ELEMENT_NODE) return null;
-
-    const current = last as HTMLElement;
-    if (!this.isSplittableTextBlock(current)) return null;
-    if (current.tagName !== incoming.tagName) return null;
-
-    return current;
-  }
-
-  private moveAllChildren(source: HTMLElement, target: HTMLElement): ChildNode[] {
-    const moved: ChildNode[] = [];
-
-    while (source.firstChild) {
-      const child = source.firstChild;
-      moved.push(child);
-      target.appendChild(child);
-    }
-
-    return moved;
-  }
-
   private getInner(page: HTMLElement | undefined): HTMLElement | null {
     return page?.querySelector(".hwe-page-inner") ?? null;
   }
@@ -384,7 +513,9 @@ export class Paginator {
   private pageOverflows(page: HTMLElement): boolean {
     const inner = this.getInner(page);
     if (!inner) return false;
-    return inner.scrollHeight > PAGE_CONTENT_HEIGHT_PX + 1;
+    const limit = inner.clientHeight || page.clientHeight;
+    if (limit <= 0) return false;
+    return inner.scrollHeight > limit + 1;
   }
 
   private getLastMeaningfulChild(container: HTMLElement): ChildNode | null {
@@ -394,7 +525,8 @@ export class Paginator {
     const onlyChild = children[0];
     if (
       onlyChild?.nodeType === Node.ELEMENT_NODE &&
-      (this.isSplittableContainer(onlyChild as HTMLElement) ||
+      ((onlyChild as HTMLElement).tagName === "TABLE" ||
+        this.isSplittableContainer(onlyChild as HTMLElement) ||
         this.isSplittableTextBlock(onlyChild as HTMLElement))
     ) {
       return onlyChild;
@@ -423,13 +555,61 @@ export class Paginator {
   }
 
   private isSplittableContainer(element: HTMLElement): boolean {
-    const splittableTags = new Set(["DIV", "SECTION", "ARTICLE", "MAIN", "BODY"]);
+    const splittableTags = new Set([
+      "DIV",
+      "SECTION",
+      "ARTICLE",
+      "MAIN",
+      "BODY",
+      "CENTER",
+      "HEADER",
+      "FOOTER",
+      "ASIDE",
+      "NAV",
+    ]);
     if (!splittableTags.has(element.tagName)) return false;
     if (element.classList.contains("hwe-page") || element.classList.contains("hwe-page-inner")) {
       return false;
     }
 
     return this.getMeaningfulChildren(element).length > 0;
+  }
+
+  private isInlineFlowNode(node: ChildNode): boolean {
+    if (node.nodeType === Node.TEXT_NODE) {
+      return (node.textContent ?? "").replace(/\u00a0/g, " ").trim() !== "";
+    }
+
+    if (node.nodeType !== Node.ELEMENT_NODE) return false;
+
+    const element = node as HTMLElement;
+    if (element.hasAttribute("data-hwe-caret")) return true;
+    if (element.querySelector("img, table, tr, td, th, video, canvas, svg")) return false;
+
+    return [
+      "A",
+      "ABBR",
+      "B",
+      "BDI",
+      "BDO",
+      "CITE",
+      "CODE",
+      "EM",
+      "FONT",
+      "I",
+      "KBD",
+      "MARK",
+      "Q",
+      "S",
+      "SMALL",
+      "SPAN",
+      "STRONG",
+      "SUB",
+      "SUP",
+      "TIME",
+      "U",
+      "VAR",
+    ].includes(element.tagName);
   }
 
   private isSplittableTextBlock(element: HTMLElement): boolean {
@@ -467,6 +647,7 @@ export class Paginator {
     if (node.nodeType !== Node.ELEMENT_NODE) return false;
 
     const element = node as HTMLElement;
+    if (element.hasAttribute("data-hwe-caret")) return false;
     if (element.tagName === "BR") return true;
     if (["META", "LINK", "STYLE", "SCRIPT", "XML"].includes(element.tagName)) return true;
     if (element.querySelector("img, table, tr, td, th, video, canvas, svg")) return false;
