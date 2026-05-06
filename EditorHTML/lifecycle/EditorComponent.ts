@@ -2,6 +2,15 @@ import { Paginator } from "../Orquestador/Paginator";
 import { CaretManager } from "../Orquestador/CaretManager";
 import { Toolbar } from "../Resize/Toolbar";
 import { fetchHtmlFromFileField, saveHtmlToFileField } from "../execCommand/fileApi";
+import {
+  applyPageSetup,
+  DEFAULT_PAGE_SETUP,
+  makePageSetupWrapper,
+  normalizePageSetup,
+  PageSetup,
+  readPageSetupFromElement,
+} from "../Orquestador/PageGeometry";
+import { WordPasteImporter } from "../import/WordPasteImporter";
 
 type PcfContext = ComponentFramework.Context<IInputs>;
 type StatusType = "success" | "error" | "saving" | "";
@@ -24,13 +33,16 @@ export class EditorComponent {
   private pages: HTMLElement[] = [];
   private paginator!: Paginator;
   private toolbar!: Toolbar;
+  private readonly wordPasteImporter = new WordPasteImporter();
+  private pageSetup: PageSetup = DEFAULT_PAGE_SETUP;
 
   private readonly baseUrl: string;
   private readonly entityName: string;
   private readonly entityId: string;
   private readonly fieldName: string;
 
-  private rebalanceTimer: number | undefined;
+  private rebalanceFrame: number | undefined;
+  private pendingRebalance: { page: HTMLElement; pullFromNextPages: boolean } | null = null;
   private readonly pagesNeedingPull = new WeakSet<HTMLElement>();
   private readonly pendingInputTypes = new WeakMap<HTMLElement, string>();
   private isComposing = false;
@@ -69,6 +81,7 @@ export class EditorComponent {
 
     this.root = document.createElement("div");
     this.root.className = "hwe-root";
+    this.applyCurrentPageSetup();
 
     this.toolbar = new Toolbar();
     const toolbarEl = this.toolbar.build();
@@ -92,6 +105,15 @@ export class EditorComponent {
 
     this.root.appendChild(statusBar);
     this.container.appendChild(this.root);
+  }
+
+  private setPageSetup(setup: Partial<PageSetup> | PageSetup): void {
+    this.pageSetup = normalizePageSetup(setup);
+    this.applyCurrentPageSetup();
+  }
+
+  private applyCurrentPageSetup(): void {
+    if (this.root) applyPageSetup(this.root, this.pageSetup);
   }
 
   private getClientUrl(runtime: {
@@ -145,7 +167,10 @@ export class EditorComponent {
 
   private async renderAndPaginate(html: string): Promise<void> {
     this.workspace.innerHTML = "";
-    this.pages = [this.createPageElement(this.normalizeHtmlForPagination(html))];
+    this.setPageSetup(DEFAULT_PAGE_SETUP);
+
+    const normalizedHtml = this.normalizeHtmlForPagination(html);
+    this.pages = [this.createPageElement(normalizedHtml)];
     this.workspace.appendChild(this.pages[0]);
 
     this.paginator.setPages(this.pages);
@@ -178,6 +203,7 @@ export class EditorComponent {
       if (!this.isComposing) {
         const inputType = this.pendingInputTypes.get(page) ?? "";
         this.pendingInputTypes.delete(page);
+        this.syncEditableBlankBlocks(inner, this.isEnterInput(inputType));
         const shouldPullFromNextPages =
           this.isDeleteInput(inputType) || this.pagesNeedingPull.has(page);
         this.pagesNeedingPull.delete(page);
@@ -189,8 +215,10 @@ export class EditorComponent {
     });
     inner.addEventListener("compositionend", () => {
       this.isComposing = false;
+      this.syncEditableBlankBlocks(inner, false);
       this.scheduleRebalance(page);
     });
+    inner.addEventListener("paste", (event: ClipboardEvent) => this.onPaste(event, page));
     inner.addEventListener("keydown", (event: KeyboardEvent) => this.onPageKeyDown(event));
     inner.addEventListener("mouseup", () => this.toolbar.updateActiveStates());
 
@@ -199,30 +227,53 @@ export class EditorComponent {
   }
 
   private scheduleRebalance(page: HTMLElement, pullFromNextPages = false): void {
-    if (this.rebalanceTimer !== undefined) {
-      window.clearTimeout(this.rebalanceTimer);
-    }
+    this.queueRebalance(page, pullFromNextPages);
+    if (this.rebalanceFrame !== undefined) return;
 
-    this.rebalanceTimer = window.setTimeout(() => {
-      this.rebalanceTimer = undefined;
-      if (!this.pages.includes(page)) return;
+    this.rebalanceFrame = window.requestAnimationFrame(() => {
+      this.rebalanceFrame = undefined;
 
-      const pageIndex = this.pages.indexOf(page);
-      if (!this.shouldRebalancePage(page, pageIndex, pullFromNextPages)) return;
+      const pending = this.pendingRebalance;
+      this.pendingRebalance = null;
+      if (!pending || !this.pages.includes(pending.page)) return;
 
-      const startPage = this.pages[Math.max(0, pageIndex - 1)] ?? page;
+      const pageIndex = this.pages.indexOf(pending.page);
+      if (!this.shouldRebalancePage(pending.page, pageIndex, pending.pullFromNextPages)) return;
+
+      const startPage = this.pages[Math.max(0, pageIndex - 1)] ?? pending.page;
       const activeEditable = this.getActiveEditable();
       const marker = CaretManager.createMarker(this.root);
       const caretViewportTop = marker?.getBoundingClientRect().top ?? null;
       this.paginator.rebalanceFromPage(startPage);
       this.pages = this.paginator.getPages();
+      this.pages.forEach((currentPage) => {
+        const inner = currentPage.querySelector<HTMLElement>(".hwe-page-inner");
+        if (inner) this.syncEditableBlankBlocks(inner, false);
+      });
       this.syncWorkspace();
       this.updatePageCount();
       const fallbackEditable = this.getEditableForPageIndex(pageIndex) ?? activeEditable;
       this.restoreCaretViewport(marker, caretViewportTop);
       CaretManager.restoreMarker(marker, fallbackEditable);
       CaretManager.removeMarkers(this.root);
-    }, 180);
+    });
+  }
+
+  private queueRebalance(page: HTMLElement, pullFromNextPages: boolean): void {
+    if (!this.pendingRebalance) {
+      this.pendingRebalance = { page, pullFromNextPages };
+      return;
+    }
+
+    const currentIndex = this.pages.indexOf(this.pendingRebalance.page);
+    const nextIndex = this.pages.indexOf(page);
+    const shouldUseNextPage =
+      currentIndex === -1 || (nextIndex !== -1 && nextIndex < currentIndex);
+
+    this.pendingRebalance = {
+      page: shouldUseNextPage ? page : this.pendingRebalance.page,
+      pullFromNextPages: this.pendingRebalance.pullFromNextPages || pullFromNextPages,
+    };
   }
 
   private onPagesChanged(pages: HTMLElement[]): void {
@@ -283,11 +334,24 @@ export class EditorComponent {
   }
 
   private normalizeHtmlForPagination(html: string): string {
+    if (this.wordPasteImporter.isWordHtml(html)) {
+      const imported = this.wordPasteImporter.importFromHtml(html);
+      if (imported.pageSetup) this.setPageSetup(imported.pageSetup);
+      return imported.html;
+    }
+
     const temp = document.createElement("div");
     temp.innerHTML = html || "<p><br></p>";
 
     const body = temp.querySelector("body");
     if (body) temp.innerHTML = body.innerHTML;
+
+    const savedDocument = this.getSavedDocumentWrapper(temp);
+    if (savedDocument) {
+      const savedPageSetup = readPageSetupFromElement(savedDocument);
+      if (savedPageSetup) this.setPageSetup(savedPageSetup);
+      temp.innerHTML = savedDocument.innerHTML;
+    }
 
     this.cleanImportedHtml(temp);
 
@@ -303,6 +367,16 @@ export class EditorComponent {
     }
 
     return temp.innerHTML.trim() || "<p><br></p>";
+  }
+
+  private getSavedDocumentWrapper(root: HTMLElement): HTMLElement | null {
+    const directChildren = this.getMeaningfulChildren(root, true);
+    if (directChildren.length === 1 && directChildren[0].nodeType === Node.ELEMENT_NODE) {
+      const onlyChild = directChildren[0] as HTMLElement;
+      if (onlyChild.matches("[data-hwe-document='true']")) return onlyChild;
+    }
+
+    return root.querySelector<HTMLElement>("[data-hwe-document='true']");
   }
 
   private cleanImportedHtml(root: HTMLElement): void {
@@ -336,9 +410,6 @@ export class EditorComponent {
       .replace(/page-break-after\s*:\s*always\s*;?/gi, "")
       .replace(/break-before\s*:\s*page\s*;?/gi, "")
       .replace(/break-after\s*:\s*page\s*;?/gi, "")
-      .replace(/margin-left\s*:[^;]+;?/gi, "")
-      .replace(/margin-right\s*:[^;]+;?/gi, "")
-      .replace(/text-indent\s*:[^;]+;?/gi, "")
       .replace(/position\s*:[^;]+;?/gi, "")
       .replace(/left\s*:[^;]+;?/gi, "")
       .replace(/right\s*:[^;]+;?/gi, "")
@@ -346,14 +417,11 @@ export class EditorComponent {
       .replace(/overflow\s*:[^;]+;?/gi, "")
       .replace(/overflow-x\s*:[^;]+;?/gi, "")
       .replace(/overflow-y\s*:[^;]+;?/gi, "")
-      .replace(/min-height\s*:[^;]+;?/gi, "")
-      .replace(/max-height\s*:[^;]+;?/gi, "")
-      .replace(/height\s*:[^;]+;?/gi, "")
-      .replace(/min-width\s*:[^;]+;?/gi, "")
-      .replace(/max-width\s*:[^;]+;?/gi, "")
-      .replace(/width\s*:[^;]+;?/gi, "")
-      .replace(/white-space\s*:[^;]+;?/gi, "")
       .replace(/tab-stops\s*:[^;]+;?/gi, "")
+      .replace(/behavior\s*:[^;]+;?/gi, "")
+      .replace(/-moz-binding\s*:[^;]+;?/gi, "")
+      .replace(/url\s*\([^)]*\)\s*;?/gi, "")
+      .replace(/expression\s*\([^)]*\)\s*;?/gi, "")
       .trim();
   }
 
@@ -455,6 +523,7 @@ export class EditorComponent {
     if (node.nodeType !== Node.ELEMENT_NODE) return false;
 
     const element = node as HTMLElement;
+    if (element.hasAttribute("data-hwe-user-blank")) return false;
     if (element.tagName === "BR") return true;
     if (["META", "LINK", "STYLE", "SCRIPT", "XML"].includes(element.tagName)) return true;
     if (element.querySelector("img, table, tr, td, th, video, canvas, svg")) return false;
@@ -492,6 +561,90 @@ export class EditorComponent {
 
       return child.nodeType === Node.ELEMENT_NODE && (child as HTMLElement).tagName === "BR";
     });
+  }
+
+  private onPaste(event: ClipboardEvent, page: HTMLElement): void {
+    const html = event.clipboardData?.getData("text/html") ?? "";
+    if (!html || !this.wordPasteImporter.isWordHtml(html)) return;
+
+    event.preventDefault();
+
+    const imported = this.wordPasteImporter.importFromHtml(html);
+    if (imported.pageSetup) this.setPageSetup(imported.pageSetup);
+
+    const affectedPage = this.insertHtmlAtSelection(imported.html) ?? page;
+    const inner = affectedPage.querySelector<HTMLElement>(".hwe-page-inner");
+    if (inner) this.syncEditableBlankBlocks(inner, false);
+
+    this.isDirty = true;
+    this.toolbar.updateActiveStates();
+    this.scheduleRebalance(affectedPage, true);
+    void this.waitForImages(affectedPage).then(() => this.scheduleRebalance(affectedPage, true));
+  }
+
+  private insertHtmlAtSelection(html: string): HTMLElement | null {
+    const selection = window.getSelection();
+    const activeEditable = this.getActiveEditable();
+    if (!activeEditable) return null;
+
+    activeEditable.focus({ preventScroll: true });
+
+    if (!selection || selection.rangeCount === 0) {
+      activeEditable.insertAdjacentHTML("beforeend", html);
+      return activeEditable.closest<HTMLElement>(".hwe-page");
+    }
+
+    const range = selection.getRangeAt(0);
+    if (!activeEditable.contains(range.commonAncestorContainer)) {
+      activeEditable.insertAdjacentHTML("beforeend", html);
+      return activeEditable.closest<HTMLElement>(".hwe-page");
+    }
+
+    range.deleteContents();
+    const fragment = range.createContextualFragment(html);
+    const insertedNodes = Array.from(fragment.childNodes);
+    range.insertNode(fragment);
+
+    const lastInserted = insertedNodes[insertedNodes.length - 1];
+    if (lastInserted?.parentNode) {
+      const nextRange = document.createRange();
+      nextRange.setStartAfter(lastInserted);
+      nextRange.collapse(true);
+      selection.removeAllRanges();
+      selection.addRange(nextRange);
+    }
+
+    return activeEditable.closest<HTMLElement>(".hwe-page");
+  }
+
+  private syncEditableBlankBlocks(root: HTMLElement, markNewBlanks: boolean): void {
+    root
+      .querySelectorAll<HTMLElement>("p, div, li, h1, h2, h3, h4, h5, h6, blockquote, pre")
+      .forEach((element) => {
+        if (!this.isEditableBlankBlock(element)) {
+          element.removeAttribute("data-hwe-user-blank");
+          return;
+        }
+
+        if (markNewBlanks || element.hasAttribute("data-hwe-user-blank")) {
+          element.setAttribute("data-hwe-user-blank", "true");
+          this.ensureBlankBlockHasCaretStop(element);
+        }
+      });
+  }
+
+  private ensureBlankBlockHasCaretStop(element: HTMLElement): void {
+    if (element.childNodes.length === 0) {
+      element.appendChild(document.createElement("br"));
+      return;
+    }
+
+    const hasBreak = Array.from(element.childNodes).some(
+      (child) => child.nodeType === Node.ELEMENT_NODE && (child as HTMLElement).tagName === "BR"
+    );
+    if (!hasBreak && (element.textContent ?? "").length === 0) {
+      element.appendChild(document.createElement("br"));
+    }
   }
 
   private waitForImages(root: HTMLElement): Promise<void> {
@@ -696,6 +849,10 @@ export class EditorComponent {
     return inputType.startsWith("delete") || inputType === "historyUndo";
   }
 
+  private isEnterInput(inputType: string): boolean {
+    return inputType === "insertParagraph" || inputType === "insertLineBreak";
+  }
+
   private async save(): Promise<void> {
     const saveButton = this.toolbar.getSaveButton();
     saveButton.disabled = true;
@@ -728,14 +885,16 @@ export class EditorComponent {
   private collectHtml(): string {
     CaretManager.removeMarkers(this.root);
 
-    return this.pages
+    const html = this.pages
       .map((page, index) => {
         const inner = page.querySelector(".hwe-page-inner") as HTMLElement | null;
         const content = inner ? inner.innerHTML : page.innerHTML;
         if (index === 0) return content;
-        return `<div style="page-break-before:always">${content}</div>`;
+        return `<div data-hwe-page-break="before" style="page-break-before:always">${content}</div>`;
       })
       .join("\n");
+
+    return makePageSetupWrapper(html, this.pageSetup);
   }
 
   private updatePageCount(): void {
@@ -847,8 +1006,8 @@ export class EditorComponent {
   }
 
   destroy(): void {
-    if (this.rebalanceTimer !== undefined) {
-      window.clearTimeout(this.rebalanceTimer);
+    if (this.rebalanceFrame !== undefined) {
+      window.cancelAnimationFrame(this.rebalanceFrame);
     }
     this.paginator?.destroy();
     this.container.innerHTML = "";
