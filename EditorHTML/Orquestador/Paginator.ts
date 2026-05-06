@@ -64,6 +64,7 @@ export class Paginator {
     }
 
     this.stabilizeOverflow();
+    this.trimLeadingBlankBlocksFromContinuationPages();
     this.removeEmptyPages();
   }
 
@@ -290,6 +291,27 @@ export class Paginator {
     }
   }
 
+  private trimLeadingBlankBlocksFromContinuationPages(): void {
+    this.pages.slice(1).forEach((page) => {
+      const inner = this.getInner(page);
+      if (!inner) return;
+
+      let firstChild = inner.firstChild;
+      while (firstChild && this.isLeadingPaginationBlank(firstChild)) {
+        firstChild.remove();
+        firstChild = inner.firstChild;
+      }
+    });
+  }
+
+  private isLeadingPaginationBlank(node: ChildNode): boolean {
+    if (node.nodeType === Node.TEXT_NODE) {
+      return (node.textContent ?? "").replace(/\u00a0/g, " ").trim() === "";
+    }
+
+    return node.nodeType === Node.ELEMENT_NODE && this.isEditableBlankBlock(node as HTMLElement);
+  }
+
   private splitTable(
     table: HTMLElement,
     targetInner: HTMLElement,
@@ -354,13 +376,13 @@ export class Paginator {
       if (!moved) break;
       movedAny = true;
 
-      if (this.isEmptyNode(block)) {
+      if (this.isEmptyNode(block, false)) {
         block.remove();
         break;
       }
     }
 
-    if (!movedAny || this.isEmptyNode(overflowBlock)) {
+    if (!movedAny || this.isEmptyNode(overflowBlock, false)) {
       overflowBlock.remove();
       return false;
     }
@@ -401,7 +423,7 @@ export class Paginator {
     }
 
     target.insertBefore(clone, target.firstChild);
-    if (this.isEmptyNode(element)) element.remove();
+    if (this.isEmptyNode(element, false)) element.remove();
     return true;
   }
 
@@ -555,7 +577,7 @@ export class Paginator {
     );
   }
 
-  private isEmptyNode(node: ChildNode): boolean {
+  private isEmptyNode(node: ChildNode, preserveEditableBlankBlocks = true): boolean {
     if (node.nodeType === Node.COMMENT_NODE) return true;
 
     if (node.nodeType === Node.TEXT_NODE) {
@@ -569,11 +591,39 @@ export class Paginator {
     if (element.tagName === "BR") return true;
     if (["META", "LINK", "STYLE", "SCRIPT", "XML"].includes(element.tagName)) return true;
     if (element.querySelector("img, table, tr, td, th, video, canvas, svg")) return false;
+    if (preserveEditableBlankBlocks && this.isEditableBlankBlock(element)) return false;
 
     return (
       ["P", "DIV", "SECTION", "ARTICLE", "SPAN"].includes(element.tagName) &&
       (element.textContent ?? "").replace(/\u00a0/g, " ").trim() === "" &&
-      Array.from(element.childNodes).every((child) => this.isEmptyNode(child))
+      Array.from(element.childNodes).every((child) => this.isEmptyNode(child, false))
     );
+  }
+
+  private isEditableBlankBlock(element: HTMLElement): boolean {
+    const blankBlockTags = new Set([
+      "P",
+      "DIV",
+      "LI",
+      "H1",
+      "H2",
+      "H3",
+      "H4",
+      "H5",
+      "H6",
+      "BLOCKQUOTE",
+      "PRE",
+    ]);
+
+    if (!blankBlockTags.has(element.tagName)) return false;
+    if ((element.textContent ?? "").replace(/\u00a0/g, " ").trim() !== "") return false;
+
+    return Array.from(element.childNodes).every((child) => {
+      if (child.nodeType === Node.TEXT_NODE) {
+        return (child.textContent ?? "").replace(/\u00a0/g, " ").trim() === "";
+      }
+
+      return child.nodeType === Node.ELEMENT_NODE && (child as HTMLElement).tagName === "BR";
+    });
   }
 }
