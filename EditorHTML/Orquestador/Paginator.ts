@@ -71,7 +71,7 @@ export class Paginator {
   private stabilizeOverflow(): void {
     let safety = 0;
 
-    while (safety++ < 20) {
+    while (safety++ < 200) {
       const overflowingIndex = this.pages.findIndex((page) => this.pageOverflows(page));
       if (overflowingIndex === -1) break;
 
@@ -230,7 +230,16 @@ export class Paginator {
       lastChild.nodeType === Node.ELEMENT_NODE &&
       (lastChild as HTMLElement).tagName === "TABLE"
     ) {
-      return this.splitTable(lastChild as HTMLElement, targetInner, page);
+      if (this.splitTable(lastChild as HTMLElement, targetInner, page)) {
+        return true;
+      }
+
+      if (this.getMeaningfulChildren(sourceInner).length > 1) {
+        targetInner.insertBefore(lastChild, targetInner.firstChild);
+        return true;
+      }
+
+      return false;
     }
 
     if (
@@ -522,6 +531,7 @@ export class Paginator {
     if (
       onlyChild?.nodeType === Node.ELEMENT_NODE &&
       ((onlyChild as HTMLElement).tagName === "TABLE" ||
+        this.isTableFlowWrapper(onlyChild as HTMLElement) ||
         this.isSplittableContainer(onlyChild as HTMLElement) ||
         this.isSplittableTextBlock(onlyChild as HTMLElement))
     ) {
@@ -563,12 +573,29 @@ export class Paginator {
       "ASIDE",
       "NAV",
     ]);
-    if (!splittableTags.has(element.tagName)) return false;
     if (element.classList.contains("hwe-page") || element.classList.contains("hwe-page-inner")) {
       return false;
     }
+    if (this.isTableFlowWrapper(element)) return true;
+    if (!splittableTags.has(element.tagName)) return false;
 
     return this.getMeaningfulChildren(element).length > 0;
+  }
+
+  private isTableFlowWrapper(element: HTMLElement): boolean {
+    if (!element.querySelector("table")) return false;
+
+    return ![
+      "TABLE",
+      "THEAD",
+      "TBODY",
+      "TFOOT",
+      "TR",
+      "TD",
+      "TH",
+      "COLGROUP",
+      "COL",
+    ].includes(element.tagName);
   }
 
   private isSplittableTextBlock(element: HTMLElement): boolean {
