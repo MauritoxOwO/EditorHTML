@@ -1,4 +1,5 @@
 import { Paginator } from "../Orquestador/Paginator";
+import { CaretManager } from "../Orquestador/CaretManager";
 import { Toolbar } from "../Resize/Toolbar";
 import { fetchHtmlFromFileField, saveHtmlToFileField } from "../execCommand/fileApi";
 
@@ -38,7 +39,7 @@ export class EditorComponent {
     this.entityId = this.cleanGuid(
       runtime.page?.entityId ?? runtime.mode?.contextInfo?.entityId ?? ""
     );
-    this.entityName = runtime.mode?.contextInfo?.entityTypeName ?? "mcdev_htmldevtests";
+    this.entityName = "mcdev_htmldevtests";
     this.fieldName = "mcdev_htmlarchivooriginal";
   }
 
@@ -130,6 +131,7 @@ export class EditorComponent {
     this.paginator.setPages(this.pages);
     await this.waitForImages(this.workspace);
     await this.waitFrames(2);
+    await this.waitForLayoutReady();
 
     this.paginator.repaginateAll();
     this.pages = this.paginator.getPages();
@@ -147,11 +149,9 @@ export class EditorComponent {
     inner.setAttribute("spellcheck", "false");
     inner.innerHTML = html ?? "<p><br></p>";
 
-    inner.addEventListener("input", () => {
-      this.isDirty = true;
-      this.toolbar.updateActiveStates();
-      if (!this.isComposing) this.scheduleRebalance(page);
-    });
+    inner.addEventListener("input", (event: Event) =>
+      this.onInnerInput(page, event as InputEvent)
+    );
     inner.addEventListener("compositionstart", () => {
       this.isComposing = true;
     });
@@ -166,6 +166,35 @@ export class EditorComponent {
     return page;
   }
 
+  private onInnerInput(page: HTMLElement, event: InputEvent): void {
+    this.isDirty = true;
+    this.toolbar.updateActiveStates();
+
+    if (this.isComposing) return;
+
+    const inputType = event.inputType ?? "";
+    const shouldRebalance =
+      this.pageOverflows(page) ||
+      inputType === "insertParagraph" ||
+      inputType === "insertFromPaste" ||
+      inputType.startsWith("delete") ||
+      inputType.startsWith("history");
+
+    if (shouldRebalance) {
+      this.scheduleRebalance(page);
+    }
+  }
+
+  private pageOverflows(page: HTMLElement): boolean {
+    const inner = page.querySelector(".hwe-page-inner") as HTMLElement | null;
+    if (!inner) return false;
+
+    const limit = inner.clientHeight || page.clientHeight;
+    if (limit <= 0) return false;
+
+    return inner.scrollHeight > limit + 1;
+  }
+
   private scheduleRebalance(page: HTMLElement): void {
     if (this.rebalanceTimer !== undefined) {
       window.clearTimeout(this.rebalanceTimer);
@@ -175,10 +204,15 @@ export class EditorComponent {
       this.rebalanceTimer = undefined;
       if (!this.pages.includes(page)) return;
 
-      this.paginator.rebalanceFromPage(page);
+      const pageIndex = this.pages.indexOf(page);
+      const startPage = this.pages[Math.max(0, pageIndex - 1)] ?? page;
+      const caretMarker = CaretManager.createMarker(this.root);
+
+      this.paginator.rebalanceFromPage(startPage);
       this.pages = this.paginator.getPages();
       this.syncWorkspace();
       this.updatePageCount();
+      CaretManager.restoreMarker(caretMarker);
     }, 180);
   }
 
@@ -293,6 +327,12 @@ export class EditorComponent {
       .replace(/left\s*:[^;]+;?/gi, "")
       .replace(/right\s*:[^;]+;?/gi, "")
       .replace(/transform\s*:[^;]+;?/gi, "")
+      .replace(/overflow\s*:[^;]+;?/gi, "")
+      .replace(/overflow-x\s*:[^;]+;?/gi, "")
+      .replace(/overflow-y\s*:[^;]+;?/gi, "")
+      .replace(/min-height\s*:[^;]+;?/gi, "")
+      .replace(/max-height\s*:[^;]+;?/gi, "")
+      .replace(/height\s*:[^;]+;?/gi, "")
       .replace(/min-width\s*:[^;]+;?/gi, "")
       .replace(/max-width\s*:[^;]+;?/gi, "")
       .replace(/width\s*:[^;]+;?/gi, "")
@@ -360,7 +400,18 @@ export class EditorComponent {
   }
 
   private isSplittableContainer(element: HTMLElement): boolean {
-    const splittableTags = new Set(["DIV", "SECTION", "ARTICLE", "MAIN", "BODY"]);
+    const splittableTags = new Set([
+      "DIV",
+      "SECTION",
+      "ARTICLE",
+      "MAIN",
+      "BODY",
+      "CENTER",
+      "HEADER",
+      "FOOTER",
+      "ASIDE",
+      "NAV",
+    ]);
     if (!splittableTags.has(element.tagName)) return false;
     if (element.classList.contains("hwe-page") || element.classList.contains("hwe-page-inner")) {
       return false;
@@ -383,6 +434,7 @@ export class EditorComponent {
     if (node.nodeType !== Node.ELEMENT_NODE) return false;
 
     const element = node as HTMLElement;
+    if (element.hasAttribute("data-hwe-caret")) return false;
     if (element.tagName === "BR") return true;
     if (["META", "LINK", "STYLE", "SCRIPT", "XML"].includes(element.tagName)) return true;
     if (element.querySelector("img, table, tr, td, th, video, canvas, svg")) return false;
@@ -424,6 +476,14 @@ export class EditorComponent {
     });
   }
 
+  private async waitForLayoutReady(): Promise<void> {
+    for (let attempt = 0; attempt < 20; attempt++) {
+      const inner = this.workspace.querySelector(".hwe-page-inner") as HTMLElement | null;
+      if (inner && inner.clientHeight > 0) return;
+      await this.waitFrames(1);
+    }
+  }
+
   private onPageKeyDown(event: KeyboardEvent): void {
     if (event.ctrlKey && event.key.toLowerCase() === "s") {
       event.preventDefault();
@@ -457,6 +517,8 @@ export class EditorComponent {
   }
 
   private collectHtml(): string {
+    CaretManager.removeMarkers(this.root);
+
     return this.pages
       .map((page, index) => {
         const inner = page.querySelector(".hwe-page-inner") as HTMLElement | null;
