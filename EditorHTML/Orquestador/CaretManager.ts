@@ -16,19 +16,26 @@ export class CaretManager {
     return marker;
   }
 
-  static restoreMarker(marker: HTMLElement | null): void {
-    if (!marker || !marker.parentNode) return;
+  static restoreMarker(marker: HTMLElement | null, fallbackFocus?: HTMLElement | null): void {
+    if (!marker || !marker.parentNode) {
+      fallbackFocus?.focus({ preventScroll: true });
+      return;
+    }
 
     const range = document.createRange();
     range.setStartAfter(marker);
     range.collapse(true);
 
+    const editable = marker.closest<HTMLElement>("[contenteditable='true']") ?? fallbackFocus;
+
     const selection = window.getSelection();
     if (!selection) {
       marker.remove();
+      editable?.focus({ preventScroll: true });
       return;
     }
 
+    editable?.focus({ preventScroll: true });
     selection.removeAllRanges();
     selection.addRange(range);
     marker.remove();
