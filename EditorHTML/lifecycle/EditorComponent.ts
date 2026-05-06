@@ -1,12 +1,20 @@
 import { Paginator } from "../Orquestador/Paginator";
+import { CaretManager } from "../Orquestador/CaretManager";
 import { Toolbar } from "../Resize/Toolbar";
 import { fetchHtmlFromFileField, saveHtmlToFileField } from "../execCommand/fileApi";
 
 type PcfContext = ComponentFramework.Context<IInputs>;
 type StatusType = "success" | "error" | "saving" | "";
 
+export interface EditorComponentOptions {
+  initialHtml?: string;
+  loadHtml?: () => Promise<string> | string;
+  saveHtml?: (html: string) => Promise<void> | void;
+}
+
 export class EditorComponent {
   private readonly container: HTMLElement;
+  private readonly options: EditorComponentOptions;
 
   private root!: HTMLElement;
   private workspace!: HTMLElement;
@@ -23,13 +31,16 @@ export class EditorComponent {
   private readonly fieldName: string;
 
   private rebalanceTimer: number | undefined;
+  private readonly pagesNeedingPull = new WeakSet<HTMLElement>();
+  private readonly pendingInputTypes = new WeakMap<HTMLElement, string>();
   private isComposing = false;
   private isDirty = false;
 
-  constructor(container: HTMLElement, context: PcfContext) {
+  constructor(container: HTMLElement, context?: PcfContext, options: EditorComponentOptions = {}) {
     this.container = container;
+    this.options = options;
 
-    const runtime = context as unknown as {
+    const runtime = (context ?? {}) as unknown as {
       page?: { getClientUrl?: () => string; entityId?: string };
       mode?: { contextInfo?: { entityId?: string; entityTypeName?: string } };
     };
@@ -104,6 +115,16 @@ export class EditorComponent {
     this.setStatus("Cargando contenido...", "saving");
 
     try {
+      if (this.options.loadHtml || this.options.initialHtml !== undefined) {
+        const html = this.options.loadHtml
+          ? await this.options.loadHtml()
+          : this.options.initialHtml ?? "<p><br></p>";
+
+        await this.renderAndPaginate(html || "<p><br></p>");
+        this.setStatus("", "");
+        return;
+      }
+
       if (!this.baseUrl) throw new Error("No se pudo obtener la URL de Dataverse.");
       if (!this.entityId) throw new Error("No se pudo obtener el Id del registro actual.");
 
@@ -147,10 +168,21 @@ export class EditorComponent {
     inner.setAttribute("spellcheck", "false");
     inner.innerHTML = html ?? "<p><br></p>";
 
+    inner.addEventListener("beforeinput", (event: InputEvent) => {
+      this.pendingInputTypes.set(page, event.inputType);
+      if (this.isDeleteInput(event.inputType)) this.pagesNeedingPull.add(page);
+    });
     inner.addEventListener("input", () => {
       this.isDirty = true;
       this.toolbar.updateActiveStates();
-      if (!this.isComposing) this.scheduleRebalance(page);
+      if (!this.isComposing) {
+        const inputType = this.pendingInputTypes.get(page) ?? "";
+        this.pendingInputTypes.delete(page);
+        const shouldPullFromNextPages =
+          this.isDeleteInput(inputType) || this.pagesNeedingPull.has(page);
+        this.pagesNeedingPull.delete(page);
+        this.scheduleRebalance(page, shouldPullFromNextPages);
+      }
     });
     inner.addEventListener("compositionstart", () => {
       this.isComposing = true;
@@ -166,7 +198,7 @@ export class EditorComponent {
     return page;
   }
 
-  private scheduleRebalance(page: HTMLElement): void {
+  private scheduleRebalance(page: HTMLElement, pullFromNextPages = false): void {
     if (this.rebalanceTimer !== undefined) {
       window.clearTimeout(this.rebalanceTimer);
     }
@@ -176,11 +208,20 @@ export class EditorComponent {
       if (!this.pages.includes(page)) return;
 
       const pageIndex = this.pages.indexOf(page);
+      if (!this.shouldRebalancePage(page, pageIndex, pullFromNextPages)) return;
+
       const startPage = this.pages[Math.max(0, pageIndex - 1)] ?? page;
+      const activeEditable = this.getActiveEditable();
+      const marker = CaretManager.createMarker(this.root);
+      const caretViewportTop = marker?.getBoundingClientRect().top ?? null;
       this.paginator.rebalanceFromPage(startPage);
       this.pages = this.paginator.getPages();
       this.syncWorkspace();
       this.updatePageCount();
+      const fallbackEditable = this.getEditableForPageIndex(pageIndex) ?? activeEditable;
+      this.restoreCaretViewport(marker, caretViewportTop);
+      CaretManager.restoreMarker(marker, fallbackEditable);
+      CaretManager.removeMarkers(this.root);
     }, 180);
   }
 
@@ -191,6 +232,9 @@ export class EditorComponent {
   }
 
   private syncWorkspace(): void {
+    const shouldRestoreScroll = this.shouldPreserveWorkspaceScroll();
+    const scrollTop = this.workspace.scrollTop;
+    const scrollLeft = this.workspace.scrollLeft;
     const pageSet = new Set(this.pages);
 
     Array.from(this.workspace.querySelectorAll(".hwe-page")).forEach((page) => {
@@ -220,6 +264,10 @@ export class EditorComponent {
 
       previousPage = page;
     });
+
+    if (shouldRestoreScroll) {
+      this.restoreWorkspaceScroll(scrollTop, scrollLeft);
+    }
   }
 
   private makePageDivider(pageNumber: number): HTMLElement {
@@ -388,11 +436,16 @@ export class EditorComponent {
     return this.getMeaningfulChildren(element).length > 0;
   }
 
-  private getMeaningfulChildren(container: HTMLElement): ChildNode[] {
-    return Array.from(container.childNodes).filter((node) => !this.isEmptyNode(node));
+  private getMeaningfulChildren(
+    container: HTMLElement,
+    preserveEditableBlankBlocks = false
+  ): ChildNode[] {
+    return Array.from(container.childNodes).filter(
+      (node) => !this.isEmptyNode(node, preserveEditableBlankBlocks)
+    );
   }
 
-  private isEmptyNode(node: ChildNode): boolean {
+  private isEmptyNode(node: ChildNode, preserveEditableBlankBlocks = false): boolean {
     if (node.nodeType === Node.COMMENT_NODE) return true;
 
     if (node.nodeType === Node.TEXT_NODE) {
@@ -405,12 +458,40 @@ export class EditorComponent {
     if (element.tagName === "BR") return true;
     if (["META", "LINK", "STYLE", "SCRIPT", "XML"].includes(element.tagName)) return true;
     if (element.querySelector("img, table, tr, td, th, video, canvas, svg")) return false;
+    if (preserveEditableBlankBlocks && this.isEditableBlankBlock(element)) return false;
 
     return (
       ["P", "DIV", "SECTION", "ARTICLE", "SPAN"].includes(element.tagName) &&
       (element.textContent ?? "").replace(/\u00a0/g, " ").trim() === "" &&
-      Array.from(element.childNodes).every((child) => this.isEmptyNode(child))
+      Array.from(element.childNodes).every((child) => this.isEmptyNode(child, false))
     );
+  }
+
+  private isEditableBlankBlock(element: HTMLElement): boolean {
+    const blankBlockTags = new Set([
+      "P",
+      "DIV",
+      "LI",
+      "H1",
+      "H2",
+      "H3",
+      "H4",
+      "H5",
+      "H6",
+      "BLOCKQUOTE",
+      "PRE",
+    ]);
+
+    if (!blankBlockTags.has(element.tagName)) return false;
+    if ((element.textContent ?? "").replace(/\u00a0/g, " ").trim() !== "") return false;
+
+    return Array.from(element.childNodes).every((child) => {
+      if (child.nodeType === Node.TEXT_NODE) {
+        return (child.textContent ?? "").replace(/\u00a0/g, " ").trim() === "";
+      }
+
+      return child.nodeType === Node.ELEMENT_NODE && (child as HTMLElement).tagName === "BR";
+    });
   }
 
   private waitForImages(root: HTMLElement): Promise<void> {
@@ -448,6 +529,171 @@ export class EditorComponent {
       event.preventDefault();
       void this.save();
     }
+
+    if (event.key === "Backspace" && this.handleBackspaceAtPageStart(event)) {
+      return;
+    }
+
+    if (event.key === "Backspace" || event.key === "Delete") {
+      const page = (event.currentTarget as HTMLElement).closest<HTMLElement>(".hwe-page");
+      if (page) this.pagesNeedingPull.add(page);
+    }
+  }
+
+  private handleBackspaceAtPageStart(event: KeyboardEvent): boolean {
+    const inner = event.currentTarget as HTMLElement;
+    const page = inner.closest<HTMLElement>(".hwe-page");
+    if (!page || !this.isCaretAtStartOfEditable(inner)) return false;
+
+    const pageIndex = this.pages.indexOf(page);
+    if (pageIndex <= 0) return false;
+
+    const previousPage = this.pages[pageIndex - 1];
+    const previousInner = previousPage.querySelector<HTMLElement>(".hwe-page-inner");
+    if (!previousInner) return false;
+
+    event.preventDefault();
+    this.deleteLastContent(previousInner);
+    this.placeCaretAtEnd(previousInner);
+    this.isDirty = true;
+    this.toolbar.updateActiveStates();
+    this.scheduleRebalance(previousPage, true);
+    return true;
+  }
+
+  private isCaretAtStartOfEditable(inner: HTMLElement): boolean {
+    const selection = window.getSelection();
+    if (!selection || selection.rangeCount === 0 || !selection.isCollapsed) return false;
+
+    const range = selection.getRangeAt(0);
+    if (!inner.contains(range.startContainer)) return false;
+
+    const beforeRange = document.createRange();
+    beforeRange.selectNodeContents(inner);
+    beforeRange.setEnd(range.startContainer, range.startOffset);
+
+    const fragment = beforeRange.cloneContents();
+    return !this.fragmentHasVisibleContent(fragment);
+  }
+
+  private fragmentHasVisibleContent(fragment: DocumentFragment): boolean {
+    return Array.from(fragment.childNodes).some((node) => {
+      if (node.nodeType === Node.TEXT_NODE) {
+        return (node.textContent ?? "").replace(/\u00a0/g, " ").length > 0;
+      }
+
+      if (node.nodeType !== Node.ELEMENT_NODE) return false;
+
+      const element = node as HTMLElement;
+      if (element.tagName === "BR") return false;
+      if (element.querySelector("img, table, tr, td, th, video, canvas, svg")) return true;
+      return (element.textContent ?? "").replace(/\u00a0/g, " ").length > 0;
+    });
+  }
+
+  private deleteLastContent(container: HTMLElement): void {
+    const removed = this.deleteLastContentFromNode(container);
+    if (!removed && this.getMeaningfulChildren(container, true).length === 0) {
+      container.innerHTML = "<p><br></p>";
+    }
+  }
+
+  private deleteLastContentFromNode(node: Node): boolean {
+    for (let index = node.childNodes.length - 1; index >= 0; index--) {
+      const child = node.childNodes[index];
+
+      if (child.nodeType === Node.TEXT_NODE) {
+        const text = child.textContent ?? "";
+        if (text.length === 0) {
+          child.remove();
+          continue;
+        }
+
+        child.textContent = text.slice(0, -1);
+        if (child.textContent.length === 0) child.remove();
+        return true;
+      }
+
+      if (child.nodeType !== Node.ELEMENT_NODE) {
+        child.remove();
+        return true;
+      }
+
+      const element = child as HTMLElement;
+      if (element.hasAttribute("data-hwe-caret")) {
+        element.remove();
+        continue;
+      }
+
+      if (element.tagName === "BR" || this.isAtomicEditableElement(element)) {
+        element.remove();
+        return true;
+      }
+
+      if (this.deleteLastContentFromNode(element)) {
+        if (this.isEmptyNode(element, false)) element.remove();
+        return true;
+      }
+
+      if (this.isEditableBlankBlock(element)) {
+        element.remove();
+        return true;
+      }
+    }
+
+    return false;
+  }
+
+  private isAtomicEditableElement(element: HTMLElement): boolean {
+    return ["IMG", "TABLE", "VIDEO", "CANVAS", "SVG"].includes(element.tagName);
+  }
+
+  private placeCaretAtEnd(inner: HTMLElement): void {
+    inner.focus({ preventScroll: true });
+
+    const range = document.createRange();
+    const endPosition = this.getLastCaretPosition(inner);
+    if (endPosition) {
+      range.setStart(endPosition.node, endPosition.offset);
+    } else {
+      range.selectNodeContents(inner);
+      range.collapse(false);
+    }
+
+    const selection = window.getSelection();
+    selection?.removeAllRanges();
+    selection?.addRange(range);
+  }
+
+  private getLastCaretPosition(root: Node): { node: Node; offset: number } | null {
+    for (let index = root.childNodes.length - 1; index >= 0; index--) {
+      const child = root.childNodes[index];
+
+      if (child.nodeType === Node.TEXT_NODE) {
+        return { node: child, offset: child.textContent?.length ?? 0 };
+      }
+
+      if (child.nodeType !== Node.ELEMENT_NODE) continue;
+
+      const element = child as HTMLElement;
+      if (element.hasAttribute("data-hwe-caret")) continue;
+      if (element.tagName === "BR") {
+        return { node: root, offset: index };
+      }
+
+      const nested = this.getLastCaretPosition(element);
+      if (nested) return nested;
+
+      if (!this.isEmptyNode(element, false)) {
+        return { node: root, offset: index + 1 };
+      }
+    }
+
+    return null;
+  }
+
+  private isDeleteInput(inputType: string): boolean {
+    return inputType.startsWith("delete") || inputType === "historyUndo";
   }
 
   private async save(): Promise<void> {
@@ -457,13 +703,17 @@ export class EditorComponent {
 
     try {
       const html = this.collectHtml();
-      await saveHtmlToFileField(
-        this.baseUrl,
-        this.entityName,
-        this.entityId,
-        this.fieldName,
-        html
-      );
+      if (this.options.saveHtml) {
+        await this.options.saveHtml(html);
+      } else {
+        await saveHtmlToFileField(
+          this.baseUrl,
+          this.entityName,
+          this.entityId,
+          this.fieldName,
+          html
+        );
+      }
 
       this.isDirty = false;
       this.setStatus("Guardado correctamente", "success");
@@ -476,6 +726,8 @@ export class EditorComponent {
   }
 
   private collectHtml(): string {
+    CaretManager.removeMarkers(this.root);
+
     return this.pages
       .map((page, index) => {
         const inner = page.querySelector(".hwe-page-inner") as HTMLElement | null;
@@ -493,6 +745,105 @@ export class EditorComponent {
   private setStatus(message: string, type: StatusType): void {
     this.statusMsg.textContent = message;
     this.statusMsg.className = "hwe-status-msg" + (type ? ` ${type}` : "");
+  }
+
+  private getActiveEditable(): HTMLElement | null {
+    const active = document.activeElement as HTMLElement | null;
+    if (active?.matches("[contenteditable='true']") && this.root.contains(active)) {
+      return active;
+    }
+
+    const selection = window.getSelection();
+    const anchorNode = selection?.anchorNode;
+    if (!anchorNode || !this.root.contains(anchorNode)) return null;
+
+    const element =
+      anchorNode.nodeType === Node.ELEMENT_NODE
+        ? (anchorNode as HTMLElement)
+        : anchorNode.parentElement;
+
+    return element?.closest<HTMLElement>("[contenteditable='true']") ?? null;
+  }
+
+  private getEditableForPageIndex(pageIndex: number): HTMLElement | null {
+    if (this.pages.length === 0) return null;
+
+    const safeIndex = Math.max(0, Math.min(pageIndex, this.pages.length - 1));
+    return this.pages[safeIndex].querySelector<HTMLElement>(".hwe-page-inner");
+  }
+
+  private shouldRebalancePage(
+    page: HTMLElement,
+    pageIndex: number,
+    pullFromNextPages: boolean
+  ): boolean {
+    if (this.pageOverflows(page)) return true;
+    return pullFromNextPages && pageIndex >= 0 && pageIndex < this.pages.length - 1;
+  }
+
+  private pageOverflows(page: HTMLElement): boolean {
+    const inner = page.querySelector<HTMLElement>(".hwe-page-inner");
+    if (!inner) return false;
+
+    const contentBottom = this.getContentBottom(inner);
+    if (contentBottom === null) return false;
+
+    return contentBottom > this.getContentLimitBottom(inner) + 1;
+  }
+
+  private getContentLimitBottom(inner: HTMLElement): number {
+    const styles = getComputedStyle(inner);
+    const paddingBottom = parseFloat(styles.paddingBottom) || 0;
+    return inner.getBoundingClientRect().bottom - paddingBottom;
+  }
+
+  private getContentBottom(inner: HTMLElement): number | null {
+    const children = this.getMeaningfulChildren(inner, true);
+    if (children.length === 0) return null;
+
+    return children.reduce<number | null>((bottom, child) => {
+      const childBottom = this.getNodeBottom(child);
+      if (childBottom === null) return bottom;
+      return bottom === null ? childBottom : Math.max(bottom, childBottom);
+    }, null);
+  }
+
+  private getNodeBottom(node: ChildNode): number | null {
+    if (node.nodeType === Node.ELEMENT_NODE) {
+      return (node as HTMLElement).getBoundingClientRect().bottom;
+    }
+
+    const range = document.createRange();
+    range.selectNodeContents(node);
+    const rect = range.getBoundingClientRect();
+    return rect.width > 0 || rect.height > 0 ? rect.bottom : null;
+  }
+
+  private shouldPreserveWorkspaceScroll(): boolean {
+    const active = document.activeElement;
+    return !!active && this.root.contains(active);
+  }
+
+  private restoreWorkspaceScroll(scrollTop: number, scrollLeft: number): void {
+    this.workspace.scrollTop = scrollTop;
+    this.workspace.scrollLeft = scrollLeft;
+  }
+
+  private restoreCaretViewport(marker: HTMLElement | null, previousTop: number | null): void {
+    if (!marker || !marker.parentNode || previousTop === null) return;
+
+    const currentTop = marker.getBoundingClientRect().top;
+    this.workspace.scrollTop += currentTop - previousTop;
+  }
+
+  async loadHtml(html: string): Promise<void> {
+    await this.renderAndPaginate(html || "<p><br></p>");
+    this.isDirty = false;
+    this.setStatus("", "");
+  }
+
+  getHtml(): string {
+    return this.collectHtml();
   }
 
   destroy(): void {
