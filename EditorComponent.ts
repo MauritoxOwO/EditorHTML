@@ -6,8 +6,15 @@ import { fetchHtmlFromFileField, saveHtmlToFileField } from "../execCommand/file
 type PcfContext = ComponentFramework.Context<IInputs>;
 type StatusType = "success" | "error" | "saving" | "";
 
+export interface EditorComponentOptions {
+  initialHtml?: string;
+  loadHtml?: () => Promise<string> | string;
+  saveHtml?: (html: string) => Promise<void> | void;
+}
+
 export class EditorComponent {
   private readonly container: HTMLElement;
+  private readonly options: EditorComponentOptions;
 
   private root!: HTMLElement;
   private workspace!: HTMLElement;
@@ -27,10 +34,11 @@ export class EditorComponent {
   private isComposing = false;
   private isDirty = false;
 
-  constructor(container: HTMLElement, context: PcfContext) {
+  constructor(container: HTMLElement, context?: PcfContext, options: EditorComponentOptions = {}) {
     this.container = container;
+    this.options = options;
 
-    const runtime = context as unknown as {
+    const runtime = (context ?? {}) as unknown as {
       page?: { getClientUrl?: () => string; entityId?: string };
       mode?: { contextInfo?: { entityId?: string; entityTypeName?: string } };
     };
@@ -105,6 +113,16 @@ export class EditorComponent {
     this.setStatus("Cargando contenido...", "saving");
 
     try {
+      if (this.options.loadHtml || this.options.initialHtml !== undefined) {
+        const html = this.options.loadHtml
+          ? await this.options.loadHtml()
+          : this.options.initialHtml ?? "<p><br></p>";
+
+        await this.renderAndPaginate(html || "<p><br></p>");
+        this.setStatus("", "");
+        return;
+      }
+
       if (!this.baseUrl) throw new Error("No se pudo obtener la URL de Dataverse.");
       if (!this.entityId) throw new Error("No se pudo obtener el Id del registro actual.");
 
@@ -131,7 +149,6 @@ export class EditorComponent {
     this.paginator.setPages(this.pages);
     await this.waitForImages(this.workspace);
     await this.waitFrames(2);
-    await this.waitForLayoutReady();
 
     this.paginator.repaginateAll();
     this.pages = this.paginator.getPages();
@@ -149,9 +166,11 @@ export class EditorComponent {
     inner.setAttribute("spellcheck", "false");
     inner.innerHTML = html ?? "<p><br></p>";
 
-    inner.addEventListener("input", (event: Event) =>
-      this.onInnerInput(page, event as InputEvent)
-    );
+    inner.addEventListener("input", () => {
+      this.isDirty = true;
+      this.toolbar.updateActiveStates();
+      if (!this.isComposing) this.scheduleRebalance(page);
+    });
     inner.addEventListener("compositionstart", () => {
       this.isComposing = true;
     });
@@ -166,35 +185,6 @@ export class EditorComponent {
     return page;
   }
 
-  private onInnerInput(page: HTMLElement, event: InputEvent): void {
-    this.isDirty = true;
-    this.toolbar.updateActiveStates();
-
-    if (this.isComposing) return;
-
-    const inputType = event.inputType ?? "";
-    const shouldRebalance =
-      this.pageOverflows(page) ||
-      inputType === "insertParagraph" ||
-      inputType === "insertFromPaste" ||
-      inputType.startsWith("delete") ||
-      inputType.startsWith("history");
-
-    if (shouldRebalance) {
-      this.scheduleRebalance(page);
-    }
-  }
-
-  private pageOverflows(page: HTMLElement): boolean {
-    const inner = page.querySelector(".hwe-page-inner") as HTMLElement | null;
-    if (!inner) return false;
-
-    const limit = inner.clientHeight || page.clientHeight;
-    if (limit <= 0) return false;
-
-    return inner.scrollHeight > limit + 1;
-  }
-
   private scheduleRebalance(page: HTMLElement): void {
     if (this.rebalanceTimer !== undefined) {
       window.clearTimeout(this.rebalanceTimer);
@@ -205,14 +195,18 @@ export class EditorComponent {
       if (!this.pages.includes(page)) return;
 
       const pageIndex = this.pages.indexOf(page);
-      const startPage = this.pages[Math.max(0, pageIndex - 1)] ?? page;
-      const caretMarker = CaretManager.createMarker(this.root);
+      if (!this.shouldRebalancePage(page, pageIndex)) return;
 
+      const startPage = this.pages[Math.max(0, pageIndex - 1)] ?? page;
+      const activeEditable = this.getActiveEditable();
+      const marker = CaretManager.createMarker(this.root);
       this.paginator.rebalanceFromPage(startPage);
       this.pages = this.paginator.getPages();
       this.syncWorkspace();
       this.updatePageCount();
-      CaretManager.restoreMarker(caretMarker);
+      const fallbackEditable = this.getEditableForPageIndex(pageIndex) ?? activeEditable;
+      CaretManager.restoreMarker(marker, fallbackEditable);
+      CaretManager.removeMarkers(this.root);
     }, 180);
   }
 
@@ -223,6 +217,9 @@ export class EditorComponent {
   }
 
   private syncWorkspace(): void {
+    const shouldRestoreScroll = this.shouldPreserveWorkspaceScroll();
+    const scrollTop = this.workspace.scrollTop;
+    const scrollLeft = this.workspace.scrollLeft;
     const pageSet = new Set(this.pages);
 
     Array.from(this.workspace.querySelectorAll(".hwe-page")).forEach((page) => {
@@ -252,6 +249,10 @@ export class EditorComponent {
 
       previousPage = page;
     });
+
+    if (shouldRestoreScroll) {
+      this.restoreWorkspaceScroll(scrollTop, scrollLeft);
+    }
   }
 
   private makePageDivider(pageNumber: number): HTMLElement {
@@ -434,7 +435,6 @@ export class EditorComponent {
     if (node.nodeType !== Node.ELEMENT_NODE) return false;
 
     const element = node as HTMLElement;
-    if (element.hasAttribute("data-hwe-caret")) return false;
     if (element.tagName === "BR") return true;
     if (["META", "LINK", "STYLE", "SCRIPT", "XML"].includes(element.tagName)) return true;
     if (element.querySelector("img, table, tr, td, th, video, canvas, svg")) return false;
@@ -476,14 +476,6 @@ export class EditorComponent {
     });
   }
 
-  private async waitForLayoutReady(): Promise<void> {
-    for (let attempt = 0; attempt < 20; attempt++) {
-      const inner = this.workspace.querySelector(".hwe-page-inner") as HTMLElement | null;
-      if (inner && inner.clientHeight > 0) return;
-      await this.waitFrames(1);
-    }
-  }
-
   private onPageKeyDown(event: KeyboardEvent): void {
     if (event.ctrlKey && event.key.toLowerCase() === "s") {
       event.preventDefault();
@@ -498,13 +490,17 @@ export class EditorComponent {
 
     try {
       const html = this.collectHtml();
-      await saveHtmlToFileField(
-        this.baseUrl,
-        this.entityName,
-        this.entityId,
-        this.fieldName,
-        html
-      );
+      if (this.options.saveHtml) {
+        await this.options.saveHtml(html);
+      } else {
+        await saveHtmlToFileField(
+          this.baseUrl,
+          this.entityName,
+          this.entityId,
+          this.fieldName,
+          html
+        );
+      }
 
       this.isDirty = false;
       this.setStatus("Guardado correctamente", "success");
@@ -536,6 +532,99 @@ export class EditorComponent {
   private setStatus(message: string, type: StatusType): void {
     this.statusMsg.textContent = message;
     this.statusMsg.className = "hwe-status-msg" + (type ? ` ${type}` : "");
+  }
+
+  private getActiveEditable(): HTMLElement | null {
+    const active = document.activeElement as HTMLElement | null;
+    if (active?.matches("[contenteditable='true']") && this.root.contains(active)) {
+      return active;
+    }
+
+    const selection = window.getSelection();
+    const anchorNode = selection?.anchorNode;
+    if (!anchorNode || !this.root.contains(anchorNode)) return null;
+
+    const element =
+      anchorNode.nodeType === Node.ELEMENT_NODE
+        ? (anchorNode as HTMLElement)
+        : anchorNode.parentElement;
+
+    return element?.closest<HTMLElement>("[contenteditable='true']") ?? null;
+  }
+
+  private getEditableForPageIndex(pageIndex: number): HTMLElement | null {
+    if (this.pages.length === 0) return null;
+
+    const safeIndex = Math.max(0, Math.min(pageIndex, this.pages.length - 1));
+    return this.pages[safeIndex].querySelector<HTMLElement>(".hwe-page-inner");
+  }
+
+  private shouldRebalancePage(page: HTMLElement, pageIndex: number): boolean {
+    if (this.pageOverflows(page)) return true;
+    return pageIndex >= 0 && pageIndex < this.pages.length - 1;
+  }
+
+  private pageOverflows(page: HTMLElement): boolean {
+    const inner = page.querySelector<HTMLElement>(".hwe-page-inner");
+    if (!inner) return false;
+
+    const contentBottom = this.getContentBottom(inner);
+    if (contentBottom === null) return false;
+
+    return contentBottom > this.getContentLimitBottom(inner) + 1;
+  }
+
+  private getContentLimitBottom(inner: HTMLElement): number {
+    const styles = getComputedStyle(inner);
+    const paddingBottom = parseFloat(styles.paddingBottom) || 0;
+    return inner.getBoundingClientRect().bottom - paddingBottom;
+  }
+
+  private getContentBottom(inner: HTMLElement): number | null {
+    const children = this.getMeaningfulChildren(inner);
+    if (children.length === 0) return null;
+
+    return children.reduce<number | null>((bottom, child) => {
+      const childBottom = this.getNodeBottom(child);
+      if (childBottom === null) return bottom;
+      return bottom === null ? childBottom : Math.max(bottom, childBottom);
+    }, null);
+  }
+
+  private getNodeBottom(node: ChildNode): number | null {
+    if (node.nodeType === Node.ELEMENT_NODE) {
+      return (node as HTMLElement).getBoundingClientRect().bottom;
+    }
+
+    const range = document.createRange();
+    range.selectNodeContents(node);
+    const rect = range.getBoundingClientRect();
+    return rect.width > 0 || rect.height > 0 ? rect.bottom : null;
+  }
+
+  private shouldPreserveWorkspaceScroll(): boolean {
+    const active = document.activeElement;
+    return !!active && this.root.contains(active);
+  }
+
+  private restoreWorkspaceScroll(scrollTop: number, scrollLeft: number): void {
+    this.workspace.scrollTop = scrollTop;
+    this.workspace.scrollLeft = scrollLeft;
+
+    requestAnimationFrame(() => {
+      this.workspace.scrollTop = scrollTop;
+      this.workspace.scrollLeft = scrollLeft;
+    });
+  }
+
+  async loadHtml(html: string): Promise<void> {
+    await this.renderAndPaginate(html || "<p><br></p>");
+    this.isDirty = false;
+    this.setStatus("", "");
+  }
+
+  getHtml(): string {
+    return this.collectHtml();
   }
 
   destroy(): void {
