@@ -9,21 +9,22 @@ export async function fetchHtmlFromFileField(
   const response = await fetch(url, {
     method: "GET",
     headers: {
-      Accept: "text/html, application/octet-stream, */*",
-      "OData-MaxVersion": "4.0",
-      "OData-Version": "4.0",
+      Accept: "text/html, application/octet-stream, */*"
     },
     credentials: "same-origin",
   });
 
   if (!response.ok) {
     const body = await response.text().catch(() => "");
+    console.log(`Error in url: ${url}`);
     throw new Error(
       `No se pudo cargar el contenido (HTTP ${response.status}). ${body}`
     );
+
   }
 
-  return response.text();
+  const buffer = await response.arrayBuffer();
+  return new TextDecoder("utf-8").decode(buffer);
 }
 
 export async function saveHtmlToFileField(
@@ -33,6 +34,7 @@ export async function saveHtmlToFileField(
   fieldName: string,
   htmlContent: string
 ): Promise<void> {
+  console.log(baseUrl);
   const url = `${baseUrl}/api/data/v9.2/${entityName}(${entityId})/${fieldName}`;
 
   const blob = new Blob([htmlContent], { type: "text/html; charset=utf-8" });

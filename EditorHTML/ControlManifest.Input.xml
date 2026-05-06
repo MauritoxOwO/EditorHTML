@@ -1,10 +1,10 @@
 <?xml version="1.0" encoding="utf-8" ?>
 <manifest>
   <control namespace="EditorHTMLPBOC" 
-          constructor="EditorHTML"
-          version="0.0.2" 
-          display-name-key="EditorHTMLv0.2"
-          description-key="EditorHTML description" 
+          constructor="EditorHTML2"
+          version="0.0.3" 
+          display-name-key="EditorHTMLv0.3"
+          description-key="EditorHTML v0.3 for testing" 
           control-type="standard" 
   >
 

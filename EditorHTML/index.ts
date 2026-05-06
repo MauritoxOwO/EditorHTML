@@ -2,7 +2,7 @@ import { IInputs, IOutputs } from "./generated/ManifestTypes";
 import { EditorComponent } from "./lifecycle/EditorComponent";
 
 
-export class EditorHTML implements ComponentFramework.StandardControl<IInputs, IOutputs> {
+export class EditorHTML2 implements ComponentFramework.StandardControl<IInputs, IOutputs> {
 
     private editor!: EditorComponent;
 
