@@ -2,6 +2,21 @@ import { Paginator } from "../Orquestador/Paginator";
 import { CaretManager } from "../Orquestador/CaretManager";
 import { Toolbar } from "../Resize/Toolbar";
 import { fetchHtmlFromFileField, saveHtmlToFileField } from "../execCommand/fileApi";
+import {
+  applyPageSetup,
+  DEFAULT_PAGE_SETUP,
+  normalizePageSetup,
+  PageSetup,
+} from "../Orquestador/PageGeometry";
+import { BlankLineController } from "./BlankLineController";
+import { DocumentSerializer } from "./DocumentSerializer";
+import { PasteController } from "./PasteController";
+import { AssetLayoutManager } from "./AssetLayoutManager";
+import {
+  getMeaningfulChildren,
+  isEditableBlankBlock,
+  isEmptyNode,
+} from "../dom/EditableDom";
 
 type PcfContext = ComponentFramework.Context<IInputs>;
 type StatusType = "success" | "error" | "saving" | "";
@@ -24,13 +39,19 @@ export class EditorComponent {
   private pages: HTMLElement[] = [];
   private paginator!: Paginator;
   private toolbar!: Toolbar;
+  private readonly blankLineController = new BlankLineController();
+  private readonly documentSerializer = new DocumentSerializer();
+  private readonly assetLayoutManager = new AssetLayoutManager();
+  private readonly pasteController = new PasteController();
+  private pageSetup: PageSetup = DEFAULT_PAGE_SETUP;
 
   private readonly baseUrl: string;
   private readonly entityName: string;
   private readonly entityId: string;
   private readonly fieldName: string;
 
-  private rebalanceTimer: number | undefined;
+  private rebalanceFrame: number | undefined;
+  private pendingRebalance: { page: HTMLElement; pullFromNextPages: boolean } | null = null;
   private readonly pagesNeedingPull = new WeakSet<HTMLElement>();
   private readonly pendingInputTypes = new WeakMap<HTMLElement, string>();
   private isComposing = false;
@@ -69,6 +90,7 @@ export class EditorComponent {
 
     this.root = document.createElement("div");
     this.root.className = "hwe-root";
+    this.applyCurrentPageSetup();
 
     this.toolbar = new Toolbar();
     const toolbarEl = this.toolbar.build();
@@ -92,6 +114,15 @@ export class EditorComponent {
 
     this.root.appendChild(statusBar);
     this.container.appendChild(this.root);
+  }
+
+  private setPageSetup(setup: Partial<PageSetup> | PageSetup): void {
+    this.pageSetup = normalizePageSetup(setup);
+    this.applyCurrentPageSetup();
+  }
+
+  private applyCurrentPageSetup(): void {
+    if (this.root) applyPageSetup(this.root, this.pageSetup);
   }
 
   private getClientUrl(runtime: {
@@ -145,12 +176,16 @@ export class EditorComponent {
 
   private async renderAndPaginate(html: string): Promise<void> {
     this.workspace.innerHTML = "";
-    this.pages = [this.createPageElement(this.normalizeHtmlForPagination(html))];
+    this.setPageSetup(DEFAULT_PAGE_SETUP);
+
+    const normalizedDocument = this.documentSerializer.normalizeHtmlForPagination(html);
+    if (normalizedDocument.pageSetup) this.setPageSetup(normalizedDocument.pageSetup);
+
+    this.pages = [this.createPageElement(normalizedDocument.html)];
     this.workspace.appendChild(this.pages[0]);
 
     this.paginator.setPages(this.pages);
-    await this.waitForImages(this.workspace);
-    await this.waitFrames(2);
+    await this.assetLayoutManager.waitForStableLayout(this.workspace);
 
     this.paginator.repaginateAll();
     this.pages = this.paginator.getPages();
@@ -178,6 +213,7 @@ export class EditorComponent {
       if (!this.isComposing) {
         const inputType = this.pendingInputTypes.get(page) ?? "";
         this.pendingInputTypes.delete(page);
+        this.blankLineController.syncEditableBlankBlocks(inner, this.isEnterInput(inputType));
         const shouldPullFromNextPages =
           this.isDeleteInput(inputType) || this.pagesNeedingPull.has(page);
         this.pagesNeedingPull.delete(page);
@@ -189,8 +225,10 @@ export class EditorComponent {
     });
     inner.addEventListener("compositionend", () => {
       this.isComposing = false;
+      this.blankLineController.syncEditableBlankBlocks(inner, false);
       this.scheduleRebalance(page);
     });
+    inner.addEventListener("paste", (event: ClipboardEvent) => this.onPaste(event, page));
     inner.addEventListener("keydown", (event: KeyboardEvent) => this.onPageKeyDown(event));
     inner.addEventListener("mouseup", () => this.toolbar.updateActiveStates());
 
@@ -199,30 +237,53 @@ export class EditorComponent {
   }
 
   private scheduleRebalance(page: HTMLElement, pullFromNextPages = false): void {
-    if (this.rebalanceTimer !== undefined) {
-      window.clearTimeout(this.rebalanceTimer);
-    }
+    this.queueRebalance(page, pullFromNextPages);
+    if (this.rebalanceFrame !== undefined) return;
 
-    this.rebalanceTimer = window.setTimeout(() => {
-      this.rebalanceTimer = undefined;
-      if (!this.pages.includes(page)) return;
+    this.rebalanceFrame = window.requestAnimationFrame(() => {
+      this.rebalanceFrame = undefined;
 
-      const pageIndex = this.pages.indexOf(page);
-      if (!this.shouldRebalancePage(page, pageIndex, pullFromNextPages)) return;
+      const pending = this.pendingRebalance;
+      this.pendingRebalance = null;
+      if (!pending || !this.pages.includes(pending.page)) return;
 
-      const startPage = this.pages[Math.max(0, pageIndex - 1)] ?? page;
+      const pageIndex = this.pages.indexOf(pending.page);
+      if (!this.shouldRebalancePage(pending.page, pageIndex, pending.pullFromNextPages)) return;
+
+      const startPage = this.pages[Math.max(0, pageIndex - 1)] ?? pending.page;
       const activeEditable = this.getActiveEditable();
       const marker = CaretManager.createMarker(this.root);
       const caretViewportTop = marker?.getBoundingClientRect().top ?? null;
       this.paginator.rebalanceFromPage(startPage);
       this.pages = this.paginator.getPages();
+      this.pages.forEach((currentPage) => {
+        const inner = currentPage.querySelector<HTMLElement>(".hwe-page-inner");
+        if (inner) this.blankLineController.syncEditableBlankBlocks(inner, false);
+      });
       this.syncWorkspace();
       this.updatePageCount();
       const fallbackEditable = this.getEditableForPageIndex(pageIndex) ?? activeEditable;
       this.restoreCaretViewport(marker, caretViewportTop);
       CaretManager.restoreMarker(marker, fallbackEditable);
       CaretManager.removeMarkers(this.root);
-    }, 180);
+    });
+  }
+
+  private queueRebalance(page: HTMLElement, pullFromNextPages: boolean): void {
+    if (!this.pendingRebalance) {
+      this.pendingRebalance = { page, pullFromNextPages };
+      return;
+    }
+
+    const currentIndex = this.pages.indexOf(this.pendingRebalance.page);
+    const nextIndex = this.pages.indexOf(page);
+    const shouldUseNextPage =
+      currentIndex === -1 || (nextIndex !== -1 && nextIndex < currentIndex);
+
+    this.pendingRebalance = {
+      page: shouldUseNextPage ? page : this.pendingRebalance.page,
+      pullFromNextPages: this.pendingRebalance.pullFromNextPages || pullFromNextPages,
+    };
   }
 
   private onPagesChanged(pages: HTMLElement[]): void {
@@ -282,246 +343,21 @@ export class EditorComponent {
     return divider;
   }
 
-  private normalizeHtmlForPagination(html: string): string {
-    const temp = document.createElement("div");
-    temp.innerHTML = html || "<p><br></p>";
+  private onPaste(event: ClipboardEvent, page: HTMLElement): void {
+    const result = this.pasteController.handlePaste(event, page);
+    if (!result.handled) return;
+    if (result.pageSetup) this.setPageSetup(result.pageSetup);
 
-    const body = temp.querySelector("body");
-    if (body) temp.innerHTML = body.innerHTML;
+    const affectedPage = result.affectedPage ?? page;
+    const inner = affectedPage.querySelector<HTMLElement>(".hwe-page-inner");
+    if (inner) this.blankLineController.syncEditableBlankBlocks(inner, false);
 
-    this.cleanImportedHtml(temp);
-
-    let safety = 0;
-    while (safety++ < 20) {
-      const children = this.getMeaningfulChildren(temp);
-      if (children.length !== 1 || children[0].nodeType !== Node.ELEMENT_NODE) break;
-
-      const onlyChild = children[0] as HTMLElement;
-      if (!this.isSplittableContainer(onlyChild)) break;
-
-      temp.innerHTML = onlyChild.innerHTML;
-    }
-
-    return temp.innerHTML.trim() || "<p><br></p>";
-  }
-
-  private cleanImportedHtml(root: HTMLElement): void {
-    this.removeComments(root);
-    root.querySelectorAll("style, meta, link, xml, script, object, hr").forEach((node) => {
-      node.remove();
-    });
-    this.removeOfficeNamespacedNodes(root);
-
-    root.querySelectorAll<HTMLElement>("[style]").forEach((element) => {
-      element.style.cssText = this.sanitizeInlineStyle(element.style.cssText);
-      if (!element.getAttribute("style")) element.removeAttribute("style");
-    });
-
-    root.querySelectorAll<HTMLElement>("[width]").forEach((element) => {
-      if (element.tagName !== "IMG") element.removeAttribute("width");
-    });
-    root.querySelectorAll<HTMLElement>("[height]").forEach((element) => {
-      if (element.tagName !== "IMG") element.removeAttribute("height");
-    });
-
-    this.unwrapKnownWordContainers(root);
-    this.removeVisuallyEmptyNodes(root);
-    this.removeBorderOnlyBlocks(root);
-  }
-
-  private sanitizeInlineStyle(style: string): string {
-    return style
-      .replace(/mso-[^:;]+:[^;]+;?/gi, "")
-      .replace(/page-break-before\s*:\s*always\s*;?/gi, "")
-      .replace(/page-break-after\s*:\s*always\s*;?/gi, "")
-      .replace(/break-before\s*:\s*page\s*;?/gi, "")
-      .replace(/break-after\s*:\s*page\s*;?/gi, "")
-      .replace(/margin-left\s*:[^;]+;?/gi, "")
-      .replace(/margin-right\s*:[^;]+;?/gi, "")
-      .replace(/text-indent\s*:[^;]+;?/gi, "")
-      .replace(/position\s*:[^;]+;?/gi, "")
-      .replace(/left\s*:[^;]+;?/gi, "")
-      .replace(/right\s*:[^;]+;?/gi, "")
-      .replace(/transform\s*:[^;]+;?/gi, "")
-      .replace(/overflow\s*:[^;]+;?/gi, "")
-      .replace(/overflow-x\s*:[^;]+;?/gi, "")
-      .replace(/overflow-y\s*:[^;]+;?/gi, "")
-      .replace(/min-height\s*:[^;]+;?/gi, "")
-      .replace(/max-height\s*:[^;]+;?/gi, "")
-      .replace(/height\s*:[^;]+;?/gi, "")
-      .replace(/min-width\s*:[^;]+;?/gi, "")
-      .replace(/max-width\s*:[^;]+;?/gi, "")
-      .replace(/width\s*:[^;]+;?/gi, "")
-      .replace(/white-space\s*:[^;]+;?/gi, "")
-      .replace(/tab-stops\s*:[^;]+;?/gi, "")
-      .trim();
-  }
-
-  private removeComments(root: HTMLElement): void {
-    const walker = document.createTreeWalker(root, NodeFilter.SHOW_COMMENT);
-    const comments: Node[] = [];
-
-    while (walker.nextNode()) {
-      comments.push(walker.currentNode);
-    }
-
-    comments.forEach((comment) => comment.parentNode?.removeChild(comment));
-  }
-
-  private removeOfficeNamespacedNodes(root: HTMLElement): void {
-    Array.from(root.querySelectorAll("*")).forEach((node) => {
-      const tagName = node.tagName.toLowerCase();
-      if (tagName.includes(":") && /^(o|v|w|m):/i.test(tagName)) node.remove();
-    });
-  }
-
-  private unwrapKnownWordContainers(root: HTMLElement): void {
-    root.querySelectorAll<HTMLElement>("div.WordSection1, div[class*='WordSection']").forEach(
-      (element) => this.unwrapElement(element)
-    );
-  }
-
-  private removeVisuallyEmptyNodes(root: HTMLElement): void {
-    Array.from(root.childNodes).forEach((node) => {
-      if (node.nodeType === Node.ELEMENT_NODE) {
-        this.removeVisuallyEmptyNodes(node as HTMLElement);
-      }
-
-      if (this.isEmptyNode(node)) {
-        node.parentNode?.removeChild(node);
-      }
-    });
-  }
-
-  private removeBorderOnlyBlocks(root: HTMLElement): void {
-    Array.from(root.querySelectorAll<HTMLElement>("p, div, section, article, span")).forEach(
-      (element) => {
-        const text = (element.textContent ?? "").replace(/\u00a0/g, " ").trim();
-        const hasMedia = !!element.querySelector("img, table, tr, td, th, video, canvas, svg");
-        const hasBorder = /border/i.test(element.getAttribute("style") ?? "");
-
-        if (!text && !hasMedia && hasBorder) element.remove();
-      }
-    );
-  }
-
-  private unwrapElement(element: HTMLElement): void {
-    if (!element.parentNode) return;
-
-    const parent = element.parentNode;
-    while (element.firstChild) {
-      parent.insertBefore(element.firstChild, element);
-    }
-    parent.removeChild(element);
-  }
-
-  private isSplittableContainer(element: HTMLElement): boolean {
-    const splittableTags = new Set([
-      "DIV",
-      "SECTION",
-      "ARTICLE",
-      "MAIN",
-      "BODY",
-      "CENTER",
-      "HEADER",
-      "FOOTER",
-      "ASIDE",
-      "NAV",
-    ]);
-    if (!splittableTags.has(element.tagName)) return false;
-    if (element.classList.contains("hwe-page") || element.classList.contains("hwe-page-inner")) {
-      return false;
-    }
-
-    return this.getMeaningfulChildren(element).length > 0;
-  }
-
-  private getMeaningfulChildren(
-    container: HTMLElement,
-    preserveEditableBlankBlocks = false
-  ): ChildNode[] {
-    return Array.from(container.childNodes).filter(
-      (node) => !this.isEmptyNode(node, preserveEditableBlankBlocks)
-    );
-  }
-
-  private isEmptyNode(node: ChildNode, preserveEditableBlankBlocks = false): boolean {
-    if (node.nodeType === Node.COMMENT_NODE) return true;
-
-    if (node.nodeType === Node.TEXT_NODE) {
-      return (node.textContent ?? "").replace(/\u00a0/g, " ").trim() === "";
-    }
-
-    if (node.nodeType !== Node.ELEMENT_NODE) return false;
-
-    const element = node as HTMLElement;
-    if (element.tagName === "BR") return true;
-    if (["META", "LINK", "STYLE", "SCRIPT", "XML"].includes(element.tagName)) return true;
-    if (element.querySelector("img, table, tr, td, th, video, canvas, svg")) return false;
-    if (preserveEditableBlankBlocks && this.isEditableBlankBlock(element)) return false;
-
-    return (
-      ["P", "DIV", "SECTION", "ARTICLE", "SPAN"].includes(element.tagName) &&
-      (element.textContent ?? "").replace(/\u00a0/g, " ").trim() === "" &&
-      Array.from(element.childNodes).every((child) => this.isEmptyNode(child, false))
-    );
-  }
-
-  private isEditableBlankBlock(element: HTMLElement): boolean {
-    const blankBlockTags = new Set([
-      "P",
-      "DIV",
-      "LI",
-      "H1",
-      "H2",
-      "H3",
-      "H4",
-      "H5",
-      "H6",
-      "BLOCKQUOTE",
-      "PRE",
-    ]);
-
-    if (!blankBlockTags.has(element.tagName)) return false;
-    if ((element.textContent ?? "").replace(/\u00a0/g, " ").trim() !== "") return false;
-
-    return Array.from(element.childNodes).every((child) => {
-      if (child.nodeType === Node.TEXT_NODE) {
-        return (child.textContent ?? "").replace(/\u00a0/g, " ").trim() === "";
-      }
-
-      return child.nodeType === Node.ELEMENT_NODE && (child as HTMLElement).tagName === "BR";
-    });
-  }
-
-  private waitForImages(root: HTMLElement): Promise<void> {
-    const pending = Array.from(root.querySelectorAll("img")).filter((img) => !img.complete);
-    if (pending.length === 0) return Promise.resolve();
-
-    return Promise.all(
-      pending.map(
-        (img) =>
-          new Promise<void>((resolve) => {
-            img.addEventListener("load", () => resolve(), { once: true });
-            img.addEventListener("error", () => resolve(), { once: true });
-          })
-      )
-    ).then(() => undefined);
-  }
-
-  private waitFrames(count: number): Promise<void> {
-    return new Promise((resolve) => {
-      let frame = 0;
-      const tick = () => {
-        frame++;
-        if (frame >= count) {
-          resolve();
-          return;
-        }
-        requestAnimationFrame(tick);
-      };
-      requestAnimationFrame(tick);
-    });
+    this.isDirty = true;
+    this.toolbar.updateActiveStates();
+    this.scheduleRebalance(affectedPage, true);
+    void this.assetLayoutManager
+      .waitForStableLayout(affectedPage)
+      .then(() => this.scheduleRebalance(affectedPage, true));
   }
 
   private onPageKeyDown(event: KeyboardEvent): void {
@@ -593,7 +429,7 @@ export class EditorComponent {
 
   private deleteLastContent(container: HTMLElement): void {
     const removed = this.deleteLastContentFromNode(container);
-    if (!removed && this.getMeaningfulChildren(container, true).length === 0) {
+    if (!removed && getMeaningfulChildren(container, true).length === 0) {
       container.innerHTML = "<p><br></p>";
     }
   }
@@ -631,11 +467,11 @@ export class EditorComponent {
       }
 
       if (this.deleteLastContentFromNode(element)) {
-        if (this.isEmptyNode(element, false)) element.remove();
+        if (isEmptyNode(element, false)) element.remove();
         return true;
       }
 
-      if (this.isEditableBlankBlock(element)) {
+      if (isEditableBlankBlock(element)) {
         element.remove();
         return true;
       }
@@ -684,7 +520,7 @@ export class EditorComponent {
       const nested = this.getLastCaretPosition(element);
       if (nested) return nested;
 
-      if (!this.isEmptyNode(element, false)) {
+      if (!isEmptyNode(element, false)) {
         return { node: root, offset: index + 1 };
       }
     }
@@ -694,6 +530,10 @@ export class EditorComponent {
 
   private isDeleteInput(inputType: string): boolean {
     return inputType.startsWith("delete") || inputType === "historyUndo";
+  }
+
+  private isEnterInput(inputType: string): boolean {
+    return inputType === "insertParagraph" || inputType === "insertLineBreak";
   }
 
   private async save(): Promise<void> {
@@ -726,16 +566,11 @@ export class EditorComponent {
   }
 
   private collectHtml(): string {
-    CaretManager.removeMarkers(this.root);
-
-    return this.pages
-      .map((page, index) => {
-        const inner = page.querySelector(".hwe-page-inner") as HTMLElement | null;
-        const content = inner ? inner.innerHTML : page.innerHTML;
-        if (index === 0) return content;
-        return `<div style="page-break-before:always">${content}</div>`;
-      })
-      .join("\n");
+    return this.documentSerializer.collectHtml(
+      this.root,
+      this.pages,
+      this.pageSetup
+    );
   }
 
   private updatePageCount(): void {
@@ -798,7 +633,7 @@ export class EditorComponent {
   }
 
   private getContentBottom(inner: HTMLElement): number | null {
-    const children = this.getMeaningfulChildren(inner, true);
+    const children = getMeaningfulChildren(inner, true);
     if (children.length === 0) return null;
 
     return children.reduce<number | null>((bottom, child) => {
@@ -847,8 +682,8 @@ export class EditorComponent {
   }
 
   destroy(): void {
-    if (this.rebalanceTimer !== undefined) {
-      window.clearTimeout(this.rebalanceTimer);
+    if (this.rebalanceFrame !== undefined) {
+      window.cancelAnimationFrame(this.rebalanceFrame);
     }
     this.paginator?.destroy();
     this.container.innerHTML = "";
