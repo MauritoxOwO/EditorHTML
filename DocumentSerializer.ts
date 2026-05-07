@@ -12,6 +12,7 @@ import {
   removeComments,
   unwrapElement,
 } from "../dom/EditableDom";
+import { unwrapGeneratedKeepTogetherGroups } from "../Orquestador/KeepTogetherController";
 
 export interface NormalizedDocument {
   html: string;
@@ -30,11 +31,9 @@ export class DocumentSerializer {
       };
     }
 
+    const doc = new DOMParser().parseFromString(html || "<p><br></p>", "text/html");
     const temp = document.createElement("div");
-    temp.innerHTML = html || "<p><br></p>";
-
-    const body = temp.querySelector("body");
-    if (body) temp.innerHTML = body.innerHTML;
+    temp.innerHTML = doc.body?.innerHTML || html || "<p><br></p>";
 
     const savedDocument = this.getSavedDocumentWrapper(temp);
     const pageSetup = savedDocument ? readPageSetupFromElement(savedDocument) ?? undefined : undefined;
@@ -61,13 +60,17 @@ export class DocumentSerializer {
     };
   }
 
-  collectHtml(root: HTMLElement, pages: HTMLElement[], pageSetup: PageSetup): string {
+  collectHtml(
+    root: HTMLElement,
+    pages: HTMLElement[],
+    pageSetup: PageSetup
+  ): string {
     CaretManager.removeMarkers(root);
 
     const html = pages
       .map((page, index) => {
         const inner = page.querySelector(".hwe-page-inner") as HTMLElement | null;
-        const content = inner ? inner.innerHTML : page.innerHTML;
+        const content = this.prepareContentForSave(inner ?? page);
         if (index === 0) return content;
         return `<div data-hwe-page-break="before" style="page-break-before:always">${content}</div>`;
       })
@@ -108,6 +111,12 @@ export class DocumentSerializer {
     this.unwrapKnownWordContainers(root);
     this.removeVisuallyEmptyNodes(root);
     this.removeBorderOnlyBlocks(root);
+  }
+
+  private prepareContentForSave(element: HTMLElement): string {
+    const clone = element.cloneNode(true) as HTMLElement;
+    unwrapGeneratedKeepTogetherGroups(clone);
+    return clone.innerHTML;
   }
 
   private sanitizeInlineStyle(style: string): string {
