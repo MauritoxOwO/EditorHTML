@@ -10,10 +10,10 @@ export interface PageSetup {
 export const DEFAULT_PAGE_SETUP: PageSetup = {
   width: "210mm",
   height: "297mm",
-  marginTop: "25.4mm",
-  marginRight: "25.4mm",
-  marginBottom: "25.4mm",
-  marginLeft: "25.4mm",
+  marginTop: "12.5mm",
+  marginRight: "12.5mm",
+  marginBottom: "20mm",
+  marginLeft: "12.5mm",
 };
 
 const PAGE_SETUP_ATTRS: Record<keyof PageSetup, string> = {
