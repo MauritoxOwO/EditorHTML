@@ -64,13 +64,14 @@ export class Paginator {
     }
 
     this.stabilizeOverflow();
+    this.trimLeadingBlankBlocksFromContinuationPages();
     this.removeEmptyPages();
   }
 
   private stabilizeOverflow(): void {
     let safety = 0;
 
-    while (safety++ < 20) {
+    while (safety++ < 200) {
       const overflowingIndex = this.pages.findIndex((page) => this.pageOverflows(page));
       if (overflowingIndex === -1) break;
 
@@ -229,7 +230,16 @@ export class Paginator {
       lastChild.nodeType === Node.ELEMENT_NODE &&
       (lastChild as HTMLElement).tagName === "TABLE"
     ) {
-      return this.splitTable(lastChild as HTMLElement, targetInner, page);
+      if (this.splitTable(lastChild as HTMLElement, targetInner, page)) {
+        return true;
+      }
+
+      if (this.getMeaningfulChildren(sourceInner).length > 1) {
+        targetInner.insertBefore(lastChild, targetInner.firstChild);
+        return true;
+      }
+
+      return false;
     }
 
     if (
@@ -290,15 +300,44 @@ export class Paginator {
     }
   }
 
+  private trimLeadingBlankBlocksFromContinuationPages(): void {
+    this.pages.slice(1).forEach((page) => {
+      const inner = this.getInner(page);
+      if (!inner) return;
+
+      let firstChild = inner.firstChild;
+      while (firstChild && this.isLeadingPaginationBlank(firstChild)) {
+        firstChild.remove();
+        firstChild = inner.firstChild;
+      }
+    });
+  }
+
+  private isLeadingPaginationBlank(node: ChildNode): boolean {
+    if (node.nodeType === Node.TEXT_NODE) {
+      return (node.textContent ?? "").replace(/\u00a0/g, " ").trim() === "";
+    }
+
+    if (node.nodeType !== Node.ELEMENT_NODE) return false;
+
+    const element = node as HTMLElement;
+    if (element.hasAttribute("data-hwe-user-blank")) return false;
+
+    return this.isEditableBlankBlock(element);
+  }
+
   private splitTable(
     table: HTMLElement,
     targetInner: HTMLElement,
     page: HTMLElement
   ): boolean {
-    const rows = Array.from(table.querySelectorAll("tr")) as HTMLElement[];
+    const rows = this.getSplittableTableRows(table);
     if (rows.length <= 1) return false;
 
-    const pageBottom = page.getBoundingClientRect().bottom;
+    const inner = this.getInner(page);
+    const pageBottom = inner
+      ? this.getContentLimitBottom(inner)
+      : page.getBoundingClientRect().bottom;
     let splitRowIndex = -1;
 
     for (let i = 0; i < rows.length; i++) {
@@ -322,7 +361,9 @@ export class Paginator {
     if (colgroup) newTable.appendChild(colgroup.cloneNode(true));
 
     const thead = table.querySelector("thead");
-    if (thead) newTable.appendChild(thead.cloneNode(true));
+    if (thead && this.shouldRepeatTableHeader(table)) {
+      newTable.appendChild(thead.cloneNode(true));
+    }
 
     const tbody = document.createElement("tbody");
     rowsForNext.forEach((row) => tbody.appendChild(row));
@@ -334,6 +375,17 @@ export class Paginator {
     if (remainingRows.length === 0) table.remove();
 
     return true;
+  }
+
+  private getSplittableTableRows(table: HTMLElement): HTMLElement[] {
+    const thead = table.querySelector("thead");
+    const allRows = Array.from(table.querySelectorAll("tr")) as HTMLElement[];
+
+    return allRows.filter((row) => !thead?.contains(row));
+  }
+
+  private shouldRepeatTableHeader(table: HTMLElement): boolean {
+    return table.getAttribute("data-hwe-repeat-header") === "true";
   }
 
   private splitTextBlock(
@@ -354,13 +406,13 @@ export class Paginator {
       if (!moved) break;
       movedAny = true;
 
-      if (this.isEmptyNode(block)) {
+      if (this.isEmptyNode(block, false)) {
         block.remove();
         break;
       }
     }
 
-    if (!movedAny || this.isEmptyNode(overflowBlock)) {
+    if (!movedAny || this.isEmptyNode(overflowBlock, false)) {
       overflowBlock.remove();
       return false;
     }
@@ -401,20 +453,24 @@ export class Paginator {
     }
 
     target.insertBefore(clone, target.firstChild);
-    if (this.isEmptyNode(element)) element.remove();
+    if (this.isEmptyNode(element, false)) element.remove();
     return true;
   }
 
   private moveLastWordFromTextNode(textNode: Text, target: HTMLElement): boolean {
     const text = textNode.textContent ?? "";
-    const trimmedEnd = text.replace(/\s+$/g, "");
 
-    if (!trimmedEnd) {
-      textNode.remove();
+    if (!text) {
       return true;
     }
 
-    const match = /(\s*\S+)$/.exec(trimmedEnd);
+    if (/^\s+$/.test(text)) {
+      if (target.childNodes.length > 0) return false;
+      target.insertBefore(textNode, target.firstChild);
+      return true;
+    }
+
+    const match = /(\s*\S+\s*)$/.exec(text);
     if (!match) return false;
 
     if (match.index <= 0) {
@@ -423,8 +479,8 @@ export class Paginator {
       return true;
     }
 
-    const prefix = trimmedEnd.slice(0, match.index);
-    const suffix = trimmedEnd.slice(match.index);
+    const prefix = text.slice(0, match.index);
+    const suffix = text.slice(match.index);
 
     textNode.textContent = prefix;
     target.insertBefore(document.createTextNode(suffix), target.firstChild);
@@ -481,6 +537,7 @@ export class Paginator {
     if (
       onlyChild?.nodeType === Node.ELEMENT_NODE &&
       ((onlyChild as HTMLElement).tagName === "TABLE" ||
+        this.isTableFlowWrapper(onlyChild as HTMLElement) ||
         this.isSplittableContainer(onlyChild as HTMLElement) ||
         this.isSplittableTextBlock(onlyChild as HTMLElement))
     ) {
@@ -522,12 +579,29 @@ export class Paginator {
       "ASIDE",
       "NAV",
     ]);
-    if (!splittableTags.has(element.tagName)) return false;
     if (element.classList.contains("hwe-page") || element.classList.contains("hwe-page-inner")) {
       return false;
     }
+    if (this.isTableFlowWrapper(element)) return true;
+    if (!splittableTags.has(element.tagName)) return false;
 
     return this.getMeaningfulChildren(element).length > 0;
+  }
+
+  private isTableFlowWrapper(element: HTMLElement): boolean {
+    if (!element.querySelector("table")) return false;
+
+    return ![
+      "TABLE",
+      "THEAD",
+      "TBODY",
+      "TFOOT",
+      "TR",
+      "TD",
+      "TH",
+      "COLGROUP",
+      "COL",
+    ].includes(element.tagName);
   }
 
   private isSplittableTextBlock(element: HTMLElement): boolean {
@@ -555,7 +629,7 @@ export class Paginator {
     );
   }
 
-  private isEmptyNode(node: ChildNode): boolean {
+  private isEmptyNode(node: ChildNode, preserveEditableBlankBlocks = true): boolean {
     if (node.nodeType === Node.COMMENT_NODE) return true;
 
     if (node.nodeType === Node.TEXT_NODE) {
@@ -565,15 +639,44 @@ export class Paginator {
     if (node.nodeType !== Node.ELEMENT_NODE) return false;
 
     const element = node as HTMLElement;
+    if (element.hasAttribute("data-hwe-user-blank")) return false;
     if (element.hasAttribute("data-hwe-caret")) return false;
     if (element.tagName === "BR") return true;
     if (["META", "LINK", "STYLE", "SCRIPT", "XML"].includes(element.tagName)) return true;
     if (element.querySelector("img, table, tr, td, th, video, canvas, svg")) return false;
+    if (preserveEditableBlankBlocks && this.isEditableBlankBlock(element)) return false;
 
     return (
       ["P", "DIV", "SECTION", "ARTICLE", "SPAN"].includes(element.tagName) &&
       (element.textContent ?? "").replace(/\u00a0/g, " ").trim() === "" &&
-      Array.from(element.childNodes).every((child) => this.isEmptyNode(child))
+      Array.from(element.childNodes).every((child) => this.isEmptyNode(child, false))
     );
+  }
+
+  private isEditableBlankBlock(element: HTMLElement): boolean {
+    const blankBlockTags = new Set([
+      "P",
+      "DIV",
+      "LI",
+      "H1",
+      "H2",
+      "H3",
+      "H4",
+      "H5",
+      "H6",
+      "BLOCKQUOTE",
+      "PRE",
+    ]);
+
+    if (!blankBlockTags.has(element.tagName)) return false;
+    if ((element.textContent ?? "").replace(/\u00a0/g, " ").trim() !== "") return false;
+
+    return Array.from(element.childNodes).every((child) => {
+      if (child.nodeType === Node.TEXT_NODE) {
+        return (child.textContent ?? "").replace(/\u00a0/g, " ").trim() === "";
+      }
+
+      return child.nodeType === Node.ELEMENT_NODE && (child as HTMLElement).tagName === "BR";
+    });
   }
 }
