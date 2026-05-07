@@ -1,0 +1,117 @@
+html,
+body {
+  width: 100%;
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  overflow: hidden;
+  background: #d0d0d0;
+  color: #1f1f1f;
+  font-family: "Segoe UI", Arial, sans-serif;
+}
+
+button,
+input {
+  font: inherit;
+}
+
+.local-app {
+  width: 100vw;
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.local-topbar {
+  min-height: 44px;
+  padding: 6px 12px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border-bottom: 1px solid #b8b8b8;
+  background: #fafafa;
+  box-sizing: border-box;
+}
+
+.local-title {
+  min-width: 0;
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  white-space: nowrap;
+}
+
+.local-title strong {
+  font-size: 14px;
+}
+
+.local-title span {
+  overflow: hidden;
+  color: #616161;
+  font-size: 12px;
+  text-overflow: ellipsis;
+}
+
+.local-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.local-actions button,
+.local-file-button {
+  height: 30px;
+  padding: 0 10px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid #8f8f8f;
+  border-radius: 3px;
+  background: #fff;
+  color: #1f1f1f;
+  cursor: pointer;
+  font-size: 12px;
+  line-height: 1;
+  box-sizing: border-box;
+}
+
+.local-actions button:hover,
+.local-file-button:hover {
+  border-color: #0078d4;
+  background: #eef6fc;
+}
+
+.local-file-button input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.local-editor-host {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
+@media (max-width: 720px) {
+  .local-topbar {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .local-title,
+  .local-actions {
+    width: 100%;
+  }
+
+  .local-actions {
+    overflow-x: auto;
+  }
+}

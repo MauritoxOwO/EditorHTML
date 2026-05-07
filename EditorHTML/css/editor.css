@@ -236,6 +236,8 @@
   width: auto;
   table-layout: auto;
   border-collapse: collapse;
+  margin-top: 0;
+  margin-bottom: 0;
   page-break-inside: auto;
 }
 
@@ -251,15 +253,46 @@
   overflow-wrap: break-word;
 }
 
+.hwe-page table.hwe-word-table p {
+  min-height: 0;
+  margin: 0;
+  line-height: inherit;
+}
+
+.hwe-page table.hwe-word-table thead,
+.hwe-page table.hwe-word-table tbody,
+.hwe-page table.hwe-word-table tfoot {
+  break-inside: auto;
+  page-break-inside: auto;
+}
+
 .hwe-page table.hwe-word-table tr {
   break-inside: avoid;
   page-break-inside: avoid;
+}
+
+.hwe-page .hwe-keep-together,
+.hwe-page [data-hwe-keep-together="true"] {
+  display: block;
+  break-inside: avoid;
+  page-break-inside: avoid;
+}
+
+.hwe-page [data-hwe-keep-with-next="true"] {
+  break-after: avoid;
+  page-break-after: avoid;
+}
+
+.hwe-page [data-hwe-user-blank="true"] {
+  min-height: 1em;
 }
 
 .hwe-page img {
   display: block;
   max-width: 100% !important;
   height: auto;
+  break-inside: avoid;
+  page-break-inside: avoid;
 }
 
 /* Separador visual entre paginas */
