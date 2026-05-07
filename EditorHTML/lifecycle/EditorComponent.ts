@@ -20,6 +20,7 @@ import {
 
 type PcfContext = ComponentFramework.Context<IInputs>;
 type StatusType = "success" | "error" | "saving" | "";
+type EditorView = "visual" | "source";
 
 export interface EditorComponentOptions {
   initialHtml?: string;
@@ -33,6 +34,10 @@ export class EditorComponent {
 
   private root!: HTMLElement;
   private workspace!: HTMLElement;
+  private viewTabs!: HTMLElement;
+  private visualTabBtn!: HTMLButtonElement;
+  private sourceTabBtn!: HTMLButtonElement;
+  private sourceEditor!: HTMLTextAreaElement;
   private statusMsg!: HTMLElement;
   private pageCountEl!: HTMLElement;
 
@@ -56,6 +61,8 @@ export class EditorComponent {
   private readonly pendingInputTypes = new WeakMap<HTMLElement, string>();
   private isComposing = false;
   private isDirty = false;
+  private activeView: EditorView = "visual";
+  private sourceDirty = false;
 
   constructor(container: HTMLElement, context?: PcfContext, options: EditorComponentOptions = {}) {
     this.container = container;
@@ -97,9 +104,21 @@ export class EditorComponent {
     this.toolbar.getSaveButton().addEventListener("click", () => void this.save());
     this.root.appendChild(toolbarEl);
 
+    this.buildViewTabs();
+
     this.workspace = document.createElement("div");
     this.workspace.className = "hwe-workspace";
     this.root.appendChild(this.workspace);
+
+    this.sourceEditor = document.createElement("textarea");
+    this.sourceEditor.className = "hwe-source-editor";
+    this.sourceEditor.setAttribute("spellcheck", "false");
+    this.sourceEditor.addEventListener("input", () => {
+      this.sourceDirty = true;
+      this.isDirty = true;
+    });
+    this.root.appendChild(this.sourceEditor);
+    this.updateViewTabs();
 
     const statusBar = document.createElement("div");
     statusBar.className = "hwe-statusbar";
@@ -114,6 +133,62 @@ export class EditorComponent {
 
     this.root.appendChild(statusBar);
     this.container.appendChild(this.root);
+  }
+
+  private buildViewTabs(): void {
+    this.viewTabs = document.createElement("div");
+    this.viewTabs.className = "hwe-view-tabs";
+
+    this.visualTabBtn = this.makeViewTabButton("Editor", "visual");
+    this.sourceTabBtn = this.makeViewTabButton("HTML", "source");
+
+    this.viewTabs.appendChild(this.visualTabBtn);
+    this.viewTabs.appendChild(this.sourceTabBtn);
+    this.root.appendChild(this.viewTabs);
+    this.updateViewTabs();
+  }
+
+  private makeViewTabButton(label: string, view: EditorView): HTMLButtonElement {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.textContent = label;
+    button.addEventListener("click", () => {
+      void this.switchView(view);
+    });
+    return button;
+  }
+
+  private async switchView(view: EditorView): Promise<void> {
+    if (view === this.activeView) return;
+
+    if (view === "source") {
+      this.sourceEditor.value = this.collectHtml();
+      this.sourceDirty = false;
+      this.activeView = "source";
+      this.updateViewTabs();
+      this.sourceEditor.focus();
+      return;
+    }
+
+    if (this.sourceDirty) {
+      await this.renderAndPaginate(this.sourceEditor.value || "<p><br></p>");
+      this.sourceDirty = false;
+    }
+
+    this.activeView = "visual";
+    this.updateViewTabs();
+  }
+
+  private updateViewTabs(): void {
+    this.visualTabBtn.classList.toggle("hwe-active", this.activeView === "visual");
+    this.sourceTabBtn.classList.toggle("hwe-active", this.activeView === "source");
+
+    if (this.workspace) {
+      this.workspace.hidden = this.activeView !== "visual";
+    }
+    if (this.sourceEditor) {
+      this.sourceEditor.hidden = this.activeView !== "source";
+    }
   }
 
   private setPageSetup(setup: Partial<PageSetup> | PageSetup): void {
@@ -542,6 +617,14 @@ export class EditorComponent {
     this.setStatus("Guardando...", "saving");
 
     try {
+      if (this.activeView === "source" && this.sourceDirty) {
+        await this.renderAndPaginate(this.sourceEditor.value || "<p><br></p>");
+        this.sourceEditor.value = this.collectHtml();
+        this.sourceDirty = false;
+        this.activeView = "source";
+        this.updateViewTabs();
+      }
+
       const html = this.collectHtml();
       if (this.options.saveHtml) {
         await this.options.saveHtml(html);
@@ -673,11 +756,19 @@ export class EditorComponent {
 
   async loadHtml(html: string): Promise<void> {
     await this.renderAndPaginate(html || "<p><br></p>");
+    if (this.activeView === "source") {
+      this.sourceEditor.value = this.collectHtml();
+      this.sourceDirty = false;
+    }
     this.isDirty = false;
     this.setStatus("", "");
   }
 
   getHtml(): string {
+    if (this.activeView === "source" && this.sourceDirty) {
+      return this.sourceEditor.value;
+    }
+
     return this.collectHtml();
   }
 
