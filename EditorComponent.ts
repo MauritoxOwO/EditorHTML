@@ -11,6 +11,7 @@ import {
 import { BlankLineController } from "./BlankLineController";
 import { DocumentSerializer } from "./DocumentSerializer";
 import { PasteController } from "./PasteController";
+import { AssetLayoutManager } from "./AssetLayoutManager";
 import {
   getMeaningfulChildren,
   isEditableBlankBlock,
@@ -40,6 +41,7 @@ export class EditorComponent {
   private toolbar!: Toolbar;
   private readonly blankLineController = new BlankLineController();
   private readonly documentSerializer = new DocumentSerializer();
+  private readonly assetLayoutManager = new AssetLayoutManager();
   private readonly pasteController = new PasteController();
   private pageSetup: PageSetup = DEFAULT_PAGE_SETUP;
 
@@ -183,8 +185,7 @@ export class EditorComponent {
     this.workspace.appendChild(this.pages[0]);
 
     this.paginator.setPages(this.pages);
-    await this.waitForImages(this.workspace);
-    await this.waitFrames(2);
+    await this.assetLayoutManager.waitForStableLayout(this.workspace);
 
     this.paginator.repaginateAll();
     this.pages = this.paginator.getPages();
@@ -354,37 +355,9 @@ export class EditorComponent {
     this.isDirty = true;
     this.toolbar.updateActiveStates();
     this.scheduleRebalance(affectedPage, true);
-    void this.waitForImages(affectedPage).then(() => this.scheduleRebalance(affectedPage, true));
-  }
-
-  private waitForImages(root: HTMLElement): Promise<void> {
-    const pending = Array.from(root.querySelectorAll("img")).filter((img) => !img.complete);
-    if (pending.length === 0) return Promise.resolve();
-
-    return Promise.all(
-      pending.map(
-        (img) =>
-          new Promise<void>((resolve) => {
-            img.addEventListener("load", () => resolve(), { once: true });
-            img.addEventListener("error", () => resolve(), { once: true });
-          })
-      )
-    ).then(() => undefined);
-  }
-
-  private waitFrames(count: number): Promise<void> {
-    return new Promise((resolve) => {
-      let frame = 0;
-      const tick = () => {
-        frame++;
-        if (frame >= count) {
-          resolve();
-          return;
-        }
-        requestAnimationFrame(tick);
-      };
-      requestAnimationFrame(tick);
-    });
+    void this.assetLayoutManager
+      .waitForStableLayout(affectedPage)
+      .then(() => this.scheduleRebalance(affectedPage, true));
   }
 
   private onPageKeyDown(event: KeyboardEvent): void {
@@ -593,7 +566,11 @@ export class EditorComponent {
   }
 
   private collectHtml(): string {
-    return this.documentSerializer.collectHtml(this.root, this.pages, this.pageSetup);
+    return this.documentSerializer.collectHtml(
+      this.root,
+      this.pages,
+      this.pageSetup
+    );
   }
 
   private updatePageCount(): void {
