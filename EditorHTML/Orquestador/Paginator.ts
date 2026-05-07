@@ -71,6 +71,8 @@ export class Paginator {
     }
 
     this.stabilizeOverflow();
+    this.compactPages();
+    this.stabilizeOverflow();
     this.trimLeadingBlankBlocksFromContinuationPages();
     this.removeEmptyPages();
   }
@@ -194,6 +196,10 @@ export class Paginator {
 
     if (!this.pageOverflows(currentPage)) {
       return currentIndex;
+    }
+
+    if (node.nodeType === Node.ELEMENT_NODE && this.fitImagesToAvailableSpace(currentPage)) {
+      if (!this.pageOverflows(currentPage)) return currentIndex;
     }
 
     if (pageHadContent) {
@@ -328,6 +334,10 @@ export class Paginator {
       lastChild.nodeType === Node.ELEMENT_NODE &&
       this.keepTogetherController.isKeepTogetherGroup(lastChild as HTMLElement)
     ) {
+      if (this.fitImagesToAvailableSpace(page) && !this.pageOverflows(page)) {
+        return true;
+      }
+
       if (this.getMeaningfulChildren(sourceInner).length > 1) {
         targetInner.insertBefore(lastChild, targetInner.firstChild);
         return true;
@@ -350,6 +360,60 @@ export class Paginator {
 
     targetInner.insertBefore(lastChild, targetInner.firstChild);
     return true;
+  }
+
+  private compactPages(): void {
+    let index = 0;
+
+    while (index < this.pages.length - 1) {
+      const currentInner = this.getInner(this.pages[index]);
+      const nextInner = this.getInner(this.pages[index + 1]);
+      if (!currentInner || !nextInner) {
+        index++;
+        continue;
+      }
+
+      let movedAny = false;
+      let safety = 0;
+
+      while (safety++ < 100) {
+        const candidates = this.takeCompactCandidates(nextInner);
+        if (candidates.length === 0) break;
+
+        const nextReference = candidates[candidates.length - 1].nextSibling;
+        candidates.forEach((candidate) => currentInner.appendChild(candidate));
+        this.fitImagesToAvailableSpace(this.pages[index]);
+
+        if (this.pageOverflows(this.pages[index])) {
+          candidates.forEach((candidate) => nextInner.insertBefore(candidate, nextReference));
+          break;
+        }
+
+        movedAny = true;
+      }
+
+      if (!movedAny) index++;
+    }
+
+    this.removeEmptyPages();
+  }
+
+  private takeCompactCandidates(nextInner: HTMLElement): ChildNode[] {
+    const first = this.getFirstMeaningfulChild(nextInner);
+    if (!first) return [];
+
+    const candidates = [first];
+    if (
+      first.nodeType === Node.ELEMENT_NODE &&
+      (first as HTMLElement).getAttribute("data-hwe-keep-with-next") === "true"
+    ) {
+      const next = this.getNextMeaningfulSibling(first);
+      if (next && this.isKeepWithNextTarget(next)) {
+        candidates.push(next);
+      }
+    }
+
+    return candidates;
   }
 
   private getOrCreateNextPage(afterIndex: number): HTMLElement {
@@ -606,6 +670,15 @@ export class Paginator {
     return previous;
   }
 
+  private getNextMeaningfulSibling(node: ChildNode): ChildNode | null {
+    let next = node.nextSibling;
+    while (next && this.isEmptyNode(next)) {
+      next = next.nextSibling;
+    }
+
+    return next;
+  }
+
   private isKeepWithNextTarget(node: ChildNode): boolean {
     if (node.nodeType !== Node.ELEMENT_NODE) return false;
 
@@ -620,6 +693,31 @@ export class Paginator {
 
   private isTableElement(node: ChildNode): boolean {
     return node.nodeType === Node.ELEMENT_NODE && (node as HTMLElement).tagName === "TABLE";
+  }
+
+  private fitImagesToAvailableSpace(page: HTMLElement): boolean {
+    const inner = this.getInner(page);
+    if (!inner) return false;
+
+    const contentBottom = this.getContentLimitBottom(inner);
+    let changed = false;
+
+    inner.querySelectorAll<HTMLImageElement>("img").forEach((image) => {
+      const imageTop = image.getBoundingClientRect().top;
+      const availableHeight = Math.floor(contentBottom - imageTop);
+      if (availableHeight < 120) return;
+
+      const currentMaxHeight = parseFloat(image.style.maxHeight || "0");
+      if (currentMaxHeight > 0 && currentMaxHeight <= availableHeight) return;
+
+      image.style.maxWidth = "100%";
+      image.style.maxHeight = `${availableHeight}px`;
+      image.style.height = "auto";
+      image.style.objectFit = "contain";
+      changed = true;
+    });
+
+    return changed;
   }
 
   private unwrapIfSplittableContainer(element: HTMLElement): boolean {
