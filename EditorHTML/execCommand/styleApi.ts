@@ -6,7 +6,6 @@ export interface ParagraphStyleDefinition {
 
 export interface ParagraphStyleTableConfig {
   entitySetName: string;
-  labelField: string;
   classField: string;
   cssField: string;
 }
@@ -15,11 +14,11 @@ export async function fetchParagraphStyles(
   baseUrl: string,
   config: ParagraphStyleTableConfig
 ): Promise<ParagraphStyleDefinition[]> {
-  const select = [config.labelField, config.classField, config.cssField].join(",");
+  const select = [config.classField, config.cssField].join(",");
   const url =
     `${baseUrl}/api/data/v9.2/${config.entitySetName}` +
     `?$select=${encodeURIComponent(select)}` +
-    `&$orderby=${encodeURIComponent(config.labelField)} asc`;
+    `&$orderby=${encodeURIComponent(config.classField)} asc`;
 
   const response = await fetch(url, {
     method: "GET",
@@ -38,10 +37,13 @@ export async function fetchParagraphStyles(
 
   const payload = (await response.json()) as { value?: Array<Record<string, unknown>> };
   return (payload.value ?? [])
-    .map((row) => ({
-      label: String(row[config.labelField] ?? row[config.classField] ?? "").trim(),
-      className: String(row[config.classField] ?? "").trim().replace(/^\./, ""),
-      cssText: String(row[config.cssField] ?? "").trim(),
-    }))
-    .filter((style) => style.label && style.className);
+    .map((row) => {
+      const className = String(row[config.classField] ?? "").trim().replace(/^\./, "");
+      return {
+        label: className,
+        className,
+        cssText: String(row[config.cssField] ?? "").trim(),
+      };
+    })
+    .filter((style) => style.className && style.cssText);
 }

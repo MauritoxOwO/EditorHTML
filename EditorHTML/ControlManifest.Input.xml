@@ -42,14 +42,6 @@
               required="false"
     />
 
-    <property name="styleLabelField"
-              display-name-key="Style Label Field"
-              description-key="Dataverse field used as style display label"
-              of-type="SingleLine.Text"
-              usage="input"
-              required="false"
-    />
-
     <property name="styleClassField"
               display-name-key="Style Class Field"
               description-key="Dataverse field that stores the CSS class name"

@@ -30,7 +30,6 @@ type EditorView = "visual" | "source";
 const PARAGRAPH_STYLE_BLOCK_SELECTOR = "p, li, h1, h2, h3, h4, h5, h6, blockquote, pre";
 const DEFAULT_STYLE_TABLE_CONFIG: ParagraphStyleTableConfig = {
   entitySetName: "mcdev_htmlstyles",
-  labelField: "mcdev_name",
   classField: "mcdev_cssclass",
   cssField: "mcdev_css",
 };
@@ -126,9 +125,6 @@ export class EditorComponent {
       entitySetName:
         this.getParameterValue(runtime.parameters, "styleEntitySetName") ??
         DEFAULT_STYLE_TABLE_CONFIG.entitySetName,
-      labelField:
-        this.getParameterValue(runtime.parameters, "styleLabelField") ??
-        DEFAULT_STYLE_TABLE_CONFIG.labelField,
       classField:
         this.getParameterValue(runtime.parameters, "styleClassField") ??
         DEFAULT_STYLE_TABLE_CONFIG.classField,
@@ -1212,7 +1208,6 @@ interface IInputs {
   entityName: ComponentFramework.PropertyTypes.StringProperty;
   fieldName: ComponentFramework.PropertyTypes.StringProperty;
   styleEntitySetName: ComponentFramework.PropertyTypes.StringProperty;
-  styleLabelField: ComponentFramework.PropertyTypes.StringProperty;
   styleClassField: ComponentFramework.PropertyTypes.StringProperty;
   styleCssField: ComponentFramework.PropertyTypes.StringProperty;
 }
