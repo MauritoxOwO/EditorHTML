@@ -1,6 +1,10 @@
-import { Paginator } from "../Orquestador/Paginator";
+import { Paginator, RebalanceOptions } from "../Orquestador/Paginator";
 import { CaretManager } from "../Orquestador/CaretManager";
-import { ParagraphStyleOption, Toolbar } from "../Resize/Toolbar";
+import {
+  CLEAR_PARAGRAPH_STYLE_VALUE,
+  ParagraphStyleOption,
+  Toolbar,
+} from "../Resize/Toolbar";
 import { fetchHtmlFromFileField, saveHtmlToFileField } from "../execCommand/fileApi";
 import {
   fetchParagraphStyles,
@@ -22,10 +26,15 @@ import {
   isEditableBlankBlock,
   isEmptyNode,
 } from "../dom/EditableDom";
+import { ImageOcrService } from "../ocr/ImageOcrService";
 
 type PcfContext = ComponentFramework.Context<IInputs>;
 type StatusType = "success" | "error" | "saving" | "";
 type EditorView = "visual" | "source";
+type QueuedRebalance = Required<RebalanceOptions> & {
+  page: HTMLElement;
+  pullFromNextPages: boolean;
+};
 
 const PARAGRAPH_STYLE_BLOCK_SELECTOR = "p, li, h1, h2, h3, h4, h5, h6, blockquote, pre";
 const DEFAULT_STYLE_TABLE_CONFIG: ParagraphStyleTableConfig = {
@@ -83,6 +92,9 @@ export class EditorComponent {
   private readonly documentSerializer = new DocumentSerializer();
   private readonly assetLayoutManager = new AssetLayoutManager();
   private readonly pasteController = new PasteController();
+  private readonly imageOcrService = new ImageOcrService({
+    setStatus: (message, type) => this.setStatus(message, type),
+  });
   private pageSetup: PageSetup = DEFAULT_PAGE_SETUP;
 
   private readonly baseUrl: string;
@@ -93,7 +105,7 @@ export class EditorComponent {
   private currentFileName = "content.html";
 
   private rebalanceFrame: number | undefined;
-  private pendingRebalance: { page: HTMLElement; pullFromNextPages: boolean } | null = null;
+  private pendingRebalance: QueuedRebalance | null = null;
   private readonly pagesNeedingPull = new WeakSet<HTMLElement>();
   private readonly pendingInputTypes = new WeakMap<HTMLElement, string>();
   private readonly paragraphStyleClasses = new Set<string>();
@@ -163,7 +175,9 @@ export class EditorComponent {
       onInsertTable: () => this.insertTable(),
       onInsertRowAfter: () => this.insertTableRowAfter(),
       onApplyParagraphStyle: (className) => this.applyParagraphStyle(className),
-      onExportPdf: () => this.exportPdf(),
+      onExportPdf: () => {
+        void this.exportPdf();
+      },
     });
     const toolbarEl = this.toolbar.build();
     this.toolbar.getSaveButton().addEventListener("click", () => void this.save());
@@ -395,18 +409,20 @@ export class EditorComponent {
     this.setPageSetup(DEFAULT_PAGE_SETUP);
 
     const normalizedDocument = this.documentSerializer.normalizeHtmlForPagination(html);
-    if (normalizedDocument.pageSetup) this.setPageSetup(normalizedDocument.pageSetup);
 
     this.pages = [this.createPageElement(normalizedDocument.html)];
     this.workspace.appendChild(this.pages[0]);
+    this.applyOfficialTableWidths(this.workspace);
 
     this.paginator.setPages(this.pages);
     await this.assetLayoutManager.waitForStableLayout(this.workspace);
 
     this.paginator.repaginateAll();
     this.pages = this.paginator.getPages();
+    this.applyOfficialTableWidths(this.workspace);
     this.syncWorkspace();
     this.updatePageCount();
+    this.imageOcrService.queue(this.workspace);
   }
 
   private createPageElement(html?: string): HTMLElement {
@@ -418,6 +434,7 @@ export class EditorComponent {
     inner.setAttribute("contenteditable", "true");
     inner.setAttribute("spellcheck", "false");
     inner.innerHTML = html ?? "<p><br></p>";
+    this.applyOfficialTableWidths(inner);
 
     inner.addEventListener("beforeinput", (event: InputEvent) => {
       this.pendingInputTypes.set(page, event.inputType);
@@ -465,8 +482,12 @@ export class EditorComponent {
     return page;
   }
 
-  private scheduleRebalance(page: HTMLElement, pullFromNextPages = false): void {
-    this.queueRebalance(page, pullFromNextPages);
+  private scheduleRebalance(
+    page: HTMLElement,
+    pullFromNextPages = false,
+    options: RebalanceOptions = {}
+  ): void {
+    this.queueRebalance(page, pullFromNextPages, options);
     if (this.rebalanceFrame !== undefined) return;
 
     this.rebalanceFrame = window.requestAnimationFrame(() => {
@@ -479,11 +500,15 @@ export class EditorComponent {
       const pageIndex = this.pages.indexOf(pending.page);
       if (!this.shouldRebalancePage(pending.page, pageIndex, pending.pullFromNextPages)) return;
 
-      const startPage = this.pages[Math.max(0, pageIndex - 1)] ?? pending.page;
+      const startPageIndex = pending.includePreviousPage ? Math.max(0, pageIndex - 1) : pageIndex;
+      const startPage = this.pages[startPageIndex] ?? pending.page;
       const activeEditable = this.getActiveEditable();
       const marker = CaretManager.createMarker(this.root);
       const caretViewportTop = marker?.getBoundingClientRect().top ?? null;
-      this.paginator.rebalanceFromPage(startPage);
+      this.paginator.rebalanceFromPage(startPage, {
+        includePreviousPage: false,
+        compactPages: pending.compactPages,
+      });
       this.pages = this.paginator.getPages();
       this.pages.forEach((currentPage) => {
         const inner = currentPage.querySelector<HTMLElement>(".hwe-page-inner");
@@ -498,9 +523,20 @@ export class EditorComponent {
     });
   }
 
-  private queueRebalance(page: HTMLElement, pullFromNextPages: boolean): void {
+  private queueRebalance(
+    page: HTMLElement,
+    pullFromNextPages: boolean,
+    options: RebalanceOptions
+  ): void {
+    const nextRebalance: QueuedRebalance = {
+      page,
+      pullFromNextPages,
+      includePreviousPage: options.includePreviousPage ?? true,
+      compactPages: options.compactPages ?? true,
+    };
+
     if (!this.pendingRebalance) {
-      this.pendingRebalance = { page, pullFromNextPages };
+      this.pendingRebalance = nextRebalance;
       return;
     }
 
@@ -512,11 +548,15 @@ export class EditorComponent {
     this.pendingRebalance = {
       page: shouldUseNextPage ? page : this.pendingRebalance.page,
       pullFromNextPages: this.pendingRebalance.pullFromNextPages || pullFromNextPages,
+      includePreviousPage:
+        this.pendingRebalance.includePreviousPage || nextRebalance.includePreviousPage,
+      compactPages: this.pendingRebalance.compactPages || nextRebalance.compactPages,
     };
   }
 
   private onPagesChanged(pages: HTMLElement[]): void {
     this.pages = pages;
+    this.applyOfficialTableWidths(this.workspace);
     this.syncWorkspace();
     this.updatePageCount();
   }
@@ -572,25 +612,57 @@ export class EditorComponent {
     return divider;
   }
 
+  private applyOfficialTableWidths(root: HTMLElement): void {
+    const inners = root.classList.contains("hwe-page-inner")
+      ? [root]
+      : Array.from(root.querySelectorAll<HTMLElement>(".hwe-page-inner"));
+
+    inners.forEach((inner) => {
+      Array.from(inner.children).forEach((child) => {
+        const table = this.getDirectFlowTable(child as HTMLElement);
+        if (!table) return;
+
+        table.style.setProperty("width", "100%", "important");
+        table.style.setProperty("max-width", "100%", "important");
+        table.style.setProperty("margin-left", "0", "important");
+        table.style.setProperty("margin-right", "0", "important");
+      });
+    });
+  }
+
+  private getDirectFlowTable(element: HTMLElement): HTMLTableElement | null {
+    if (element.tagName === "TABLE") return element as HTMLTableElement;
+
+    const children = getMeaningfulChildren(element, true);
+    if (children.length !== 1 || children[0].nodeType !== Node.ELEMENT_NODE) return null;
+
+    const onlyChild = children[0] as HTMLElement;
+    return onlyChild.tagName === "TABLE" ? (onlyChild as HTMLTableElement) : null;
+  }
+
   private onPaste(event: ClipboardEvent, page: HTMLElement): void {
     const result = this.pasteController.handlePaste(event, page);
     if (!result.handled) return;
-    if (result.pageSetup) this.setPageSetup(result.pageSetup);
 
     const affectedPage = result.affectedPage ?? page;
     const inner = affectedPage.querySelector<HTMLElement>(".hwe-page-inner");
     if (inner) this.blankLineController.syncEditableBlankBlocks(inner, false);
+    this.applyOfficialTableWidths(affectedPage);
 
     this.isDirty = true;
     this.toolbar.updateActiveStates();
     this.scheduleRebalance(affectedPage, true);
     void this.assetLayoutManager
       .waitForStableLayout(affectedPage)
-      .then(() => this.scheduleRebalance(affectedPage, true));
+      .then(() => {
+        this.scheduleRebalance(affectedPage, true);
+        this.imageOcrService.queue(affectedPage);
+      });
   }
 
   private applyParagraphStyle(className: string): void {
-    if (!this.paragraphStyleClasses.has(className)) return;
+    const shouldClearStyle = className === CLEAR_PARAGRAPH_STYLE_VALUE;
+    if (!shouldClearStyle && !this.paragraphStyleClasses.has(className)) return;
     if (this.activeView !== "visual") {
       this.setStatus("Vuelve al editor visual para aplicar estilos.", "error");
       return;
@@ -605,11 +677,26 @@ export class EditorComponent {
 
     blocks.forEach((block) => {
       this.paragraphStyleClasses.forEach((styleClass) => block.classList.remove(styleClass));
-      block.classList.add(className);
+      if (!shouldClearStyle) block.classList.add(className);
     });
 
     this.rememberTextSelection();
-    this.markEditedAndRebalance(blocks[0]);
+    this.markEditedAfterStyleChange(blocks[0]);
+  }
+
+  private markEditedAfterStyleChange(element: HTMLElement): void {
+    const page = element.closest<HTMLElement>(".hwe-page");
+    if (!page) return;
+
+    this.isDirty = true;
+    this.toolbar.updateActiveStates();
+
+    if (this.pageOverflows(page)) {
+      this.scheduleRebalance(page, false, {
+        includePreviousPage: false,
+        compactPages: false,
+      });
+    }
   }
 
   private getSelectedStyleBlocks(): HTMLElement[] {
@@ -1029,6 +1116,8 @@ export class EditorComponent {
         this.updateViewTabs();
       }
 
+      await this.imageOcrService.run(this.workspace, true);
+
       const html = this.collectHtml();
       if (this.options.saveHtml) {
         await this.options.saveHtml(html);
@@ -1053,11 +1142,13 @@ export class EditorComponent {
     }
   }
 
-  private exportPdf(): void {
+  private async exportPdf(): Promise<void> {
     if (this.activeView === "source" && this.sourceDirty) {
       this.setStatus("Vuelve al editor visual o guarda los cambios del HTML antes de exportar.", "error");
       return;
     }
+
+    await this.imageOcrService.run(this.workspace, true);
 
     const html = this.documentSerializer.collectPdfHtml(
       this.root,
@@ -1219,6 +1310,7 @@ export class EditorComponent {
       window.cancelAnimationFrame(this.rebalanceFrame);
     }
     document.removeEventListener("selectionchange", this.handleSelectionChange);
+    this.imageOcrService.destroy();
     this.toolbar?.destroy();
     this.paginator?.destroy();
     this.container.innerHTML = "";

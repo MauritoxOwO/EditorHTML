@@ -4,6 +4,11 @@ import { TablePaginator } from "./TablePaginator";
 export type PageFactory = (html?: string) => HTMLElement;
 export type OnPagesChanged = (pages: HTMLElement[]) => void;
 
+export interface RebalanceOptions {
+  includePreviousPage?: boolean;
+  compactPages?: boolean;
+}
+
 export class Paginator {
   private static textFlowCounter = 0;
 
@@ -40,15 +45,17 @@ export class Paginator {
     }
   }
 
-  rebalanceFromPage(page: HTMLElement): void {
+  rebalanceFromPage(page: HTMLElement, options: RebalanceOptions = {}): void {
     if (this.rebalancing) return;
 
     const index = this.pages.indexOf(page);
     if (index === -1) return;
 
+    const includePreviousPage = options.includePreviousPage ?? true;
+
     this.rebalancing = true;
     try {
-      this.repaginateFromIndex(Math.max(0, index - 1));
+      this.repaginateFromIndex(includePreviousPage ? Math.max(0, index - 1) : index, options);
       this.onPagesChanged(this.pages);
     } finally {
       this.rebalancing = false;
@@ -59,8 +66,9 @@ export class Paginator {
     this.pages = [];
   }
 
-  private repaginateFromIndex(startIndex: number): void {
+  private repaginateFromIndex(startIndex: number, options: RebalanceOptions = {}): void {
     const safeStart = Math.max(0, Math.min(startIndex, this.pages.length - 1));
+    const shouldCompactPages = options.compactPages ?? true;
     const nodes = this.keepTogetherController.groupFlowNodes(
       this.mergeFlowFragments(this.collectNodesFromIndex(safeStart))
     );
@@ -73,7 +81,7 @@ export class Paginator {
     }
 
     this.stabilizeOverflow();
-    this.compactPages();
+    if (shouldCompactPages) this.compactPages();
     this.stabilizeOverflow();
     this.trimLeadingBlankBlocksFromContinuationPages();
     this.removeEmptyPages();
@@ -662,13 +670,13 @@ export class Paginator {
     const child = source.lastChild;
     if (!child) return false;
 
+    if (child.nodeType === Node.TEXT_NODE) {
+      return this.moveLastWordFromTextNode(child as Text, target);
+    }
+
     if (this.isEmptyNode(child)) {
       child.remove();
       return true;
-    }
-
-    if (child.nodeType === Node.TEXT_NODE) {
-      return this.moveLastWordFromTextNode(child as Text, target);
     }
 
     if (child.nodeType !== Node.ELEMENT_NODE) {

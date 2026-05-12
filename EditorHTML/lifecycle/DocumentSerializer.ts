@@ -13,6 +13,7 @@ import {
   unwrapElement,
 } from "../dom/EditableDom";
 import { unwrapGeneratedKeepTogetherGroups } from "../Orquestador/KeepTogetherController";
+import { addOcrTextLayers } from "../ocr/PdfOcrLayer";
 
 export interface NormalizedDocument {
   html: string;
@@ -93,13 +94,12 @@ export class DocumentSerializer {
     pageSetup: PageSetup,
     additionalCss = ""
   ): string {
-    const savedHtml = this.collectHtml(root, pages, pageSetup);
-    const temp = document.createElement("div");
-    temp.innerHTML = savedHtml;
+    CaretManager.removeMarkers(root);
 
-    const savedDocument = this.getSavedDocumentWrapper(temp);
-    const content = savedDocument?.innerHTML ?? temp.innerHTML;
-    const preservedCss = Array.from(temp.querySelectorAll("style"))
+    const content = pages
+      .map((page) => this.preparePageForPdf(page))
+      .join("\n");
+    const preservedCss = Array.from(root.querySelectorAll("style"))
       .map((style) => style.textContent ?? "")
       .filter(Boolean)
       .join("\n");
@@ -118,6 +118,20 @@ ${css}
 ${content}
 </body>
 </html>`;
+  }
+
+  private preparePageForPdf(page: HTMLElement): string {
+    const clone = page.cloneNode(true) as HTMLElement;
+    unwrapGeneratedKeepTogetherGroups(clone);
+    this.removeRuntimeOnlyState(clone);
+    clone.querySelectorAll<HTMLElement>("[contenteditable]").forEach((element) => {
+      element.removeAttribute("contenteditable");
+    });
+    clone.querySelectorAll<HTMLElement>("[spellcheck]").forEach((element) => {
+      element.removeAttribute("spellcheck");
+    });
+    addOcrTextLayers(clone);
+    return clone.outerHTML;
   }
 
   private getSavedDocumentWrapper(root: HTMLElement): HTMLElement | null {
@@ -203,6 +217,9 @@ ${content}
     root.querySelectorAll<HTMLElement>("[data-hwe-caret], [data-hwe-paste-marker]").forEach(
       (element) => element.remove()
     );
+    root.querySelectorAll<HTMLElement>("[data-hwe-ocr-state]").forEach((element) => {
+      element.removeAttribute("data-hwe-ocr-state");
+    });
   }
 
   private hasFormattingShell(element: HTMLElement): boolean {
@@ -286,7 +303,7 @@ ${content}
     return `
 @page {
   size: ${setup.width} ${setup.height};
-  margin: ${setup.marginTop} ${setup.marginRight} ${setup.marginBottom} ${setup.marginLeft};
+  margin: 0;
 }
 html,
 body {
@@ -295,20 +312,173 @@ body {
   background: #fff;
 }
 body {
+  width: ${setup.width};
   color: #000;
   -webkit-print-color-adjust: exact;
   print-color-adjust: exact;
 }
-[data-hwe-page-break="before"] {
-  break-before: page;
-  page-break-before: always;
+.hwe-page {
+  width: ${setup.width};
+  height: ${setup.height};
+  margin: 0;
+  padding: 0;
+  position: relative;
+  overflow: hidden;
+  box-sizing: border-box;
+  background: #fff;
+  box-shadow: none;
+  break-after: page;
+  page-break-after: always;
+}
+.hwe-page:last-child {
+  break-after: auto;
+  page-break-after: auto;
+}
+.hwe-page-inner {
+  width: 100%;
+  height: 100%;
+  padding: ${setup.marginTop} ${setup.marginRight} ${setup.marginBottom} ${setup.marginLeft};
+  box-sizing: border-box;
+  outline: none;
+  overflow: visible;
+  color: #000;
+  font-family: Calibri, "Segoe UI", Arial, sans-serif;
+  font-size: 11pt;
+  line-height: 1.15;
+  overflow-wrap: break-word;
+  word-wrap: break-word;
+  white-space: normal;
+}
+.hwe-page-inner *,
+.hwe-page-inner *::before,
+.hwe-page-inner *::after {
+  box-sizing: border-box;
+  max-width: 100%;
+}
+.hwe-page p {
+  min-height: 1em;
+  margin: 0 0 8pt;
+}
+.hwe-page h1 {
+  margin: 12pt 0 6pt;
+  font-size: 20pt;
+  font-weight: 700;
+  line-height: 1.2;
+}
+.hwe-page h2 {
+  margin: 10pt 0 4pt;
+  font-size: 16pt;
+  font-weight: 700;
+  line-height: 1.2;
+}
+.hwe-page h3 {
+  margin: 8pt 0 4pt;
+  font-size: 13pt;
+  font-weight: 700;
+  line-height: 1.2;
+}
+.hwe-page ul,
+.hwe-page ol {
+  margin: 0 0 8pt;
+  padding-left: 24pt;
+}
+.hwe-page li {
+  margin-bottom: 2pt;
+}
+.hwe-page-inner
+  > :where(p, h1, h2, h3, h4, h5, h6, blockquote, pre, ul, ol, li) {
+  display: block !important;
+  width: 140mm !important;
+  max-width: 100%;
+  margin-left: auto !important;
+  margin-right: auto !important;
 }
 table {
   border-collapse: collapse;
+  max-width: 100% !important;
+  break-inside: auto;
+}
+.hwe-page-inner > table,
+.hwe-page-inner > div:has(> table:only-child),
+.hwe-page-inner > section:has(> table:only-child),
+.hwe-page-inner > article:has(> table:only-child) {
+  width: 100% !important;
+  max-width: 100% !important;
+  margin-left: 0;
+  margin-right: 0;
+}
+.hwe-page-inner > div:has(> table:only-child) > table,
+.hwe-page-inner > section:has(> table:only-child) > table,
+.hwe-page-inner > article:has(> table:only-child) > table,
+.hwe-page table.hwe-word-table {
+  width: 100% !important;
+}
+.hwe-page table:not(.hwe-word-table) {
+  width: 100% !important;
+  table-layout: fixed;
+}
+.hwe-page table:not(.hwe-word-table) td,
+.hwe-page table:not(.hwe-word-table) th {
+  padding: 4pt 6pt;
+  border: 1px solid #999;
+  vertical-align: top;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+}
+.hwe-page table:not(.hwe-word-table) th {
+  background: #f0f0f0;
+  font-weight: 700;
+}
+.hwe-page table.hwe-word-table {
+  table-layout: auto;
+  border-collapse: collapse;
+  margin-top: 0;
+  margin-bottom: 0;
+  page-break-inside: auto;
+}
+.hwe-page table.hwe-word-table td,
+.hwe-page table.hwe-word-table th {
+  vertical-align: top;
+  word-break: normal;
+  overflow-wrap: break-word;
+}
+.hwe-page table.hwe-word-table p {
+  min-height: 0;
+  margin: 0;
+  line-height: inherit;
+  width: auto !important;
+}
+.hwe-page table.hwe-word-table thead,
+.hwe-page table.hwe-word-table tbody,
+.hwe-page table.hwe-word-table tfoot {
+  break-inside: auto;
+  page-break-inside: auto;
+}
+.hwe-page table.hwe-word-table tr {
+  break-inside: avoid;
+  page-break-inside: avoid;
 }
 img {
+  display: block;
   max-width: 100%;
   height: auto;
+  break-inside: avoid;
+  page-break-inside: avoid;
+}
+.hwe-ocr-wrapper {
+  display: block;
+  position: relative;
+  max-width: 100%;
+}
+.hwe-ocr-layer {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  color: rgba(0, 0, 0, 0.01);
+  font-size: 1px;
+  line-height: 1;
+  white-space: pre-wrap;
+  pointer-events: none;
 }
 `;
   }
