@@ -67,6 +67,7 @@ export class EditorComponent {
   private readonly options: EditorComponentOptions;
 
   private root!: HTMLElement;
+  private editorHeader!: HTMLElement;
   private workspace!: HTMLElement;
   private viewTabs!: HTMLElement;
   private visualTabBtn!: HTMLButtonElement;
@@ -89,6 +90,7 @@ export class EditorComponent {
   private readonly entityId: string;
   private readonly fieldName: string;
   private readonly styleTableConfig: ParagraphStyleTableConfig;
+  private currentFileName = "content.html";
 
   private rebalanceFrame: number | undefined;
   private pendingRebalance: { page: HTMLElement; pullFromNextPages: boolean } | null = null;
@@ -153,6 +155,10 @@ export class EditorComponent {
     this.root.className = "hwe-root";
     this.applyCurrentPageSetup();
 
+    this.editorHeader = document.createElement("div");
+    this.editorHeader.className = "hwe-editor-header";
+    this.root.appendChild(this.editorHeader);
+
     this.toolbar = new Toolbar({
       onInsertTable: () => this.insertTable(),
       onInsertRowAfter: () => this.insertTableRowAfter(),
@@ -161,10 +167,8 @@ export class EditorComponent {
     });
     const toolbarEl = this.toolbar.build();
     this.toolbar.getSaveButton().addEventListener("click", () => void this.save());
-    this.root.appendChild(toolbarEl);
+    this.editorHeader.appendChild(toolbarEl);
     document.addEventListener("selectionchange", this.handleSelectionChange);
-
-    this.buildViewTabs();
 
     this.buildViewTabs();
 
@@ -206,7 +210,7 @@ export class EditorComponent {
 
     this.viewTabs.appendChild(this.visualTabBtn);
     this.viewTabs.appendChild(this.sourceTabBtn);
-    this.root.appendChild(this.viewTabs);
+    this.editorHeader.appendChild(this.viewTabs);
     this.updateViewTabs();
   }
 
@@ -329,8 +333,24 @@ export class EditorComponent {
   }
 
   private formatParagraphStyleCss(style: ParagraphStyleDefinition): string {
-    if (style.cssText.includes("{")) return style.cssText;
-    return `.${style.className} { ${style.cssText} }`;
+    const declarations = this.extractCssDeclarations(style.cssText);
+    return declarations ? `.hwe-page-inner .${style.className} { ${declarations} }` : "";
+  }
+
+  private extractCssDeclarations(cssText: string): string {
+    const css = cssText.trim();
+    if (!css) return "";
+
+    if (css.startsWith("{") && css.endsWith("}")) {
+      return css.slice(1, -1).trim();
+    }
+
+    if (css.includes("{")) {
+      const ruleMatch = /[^{]+\{([\s\S]*?)\}/.exec(css);
+      return ruleMatch?.[1]?.trim() ?? "";
+    }
+
+    return css;
   }
 
   private isValidCssClassName(className: string): boolean {
@@ -354,14 +374,15 @@ export class EditorComponent {
       if (!this.baseUrl) throw new Error("No se pudo obtener la URL de Dataverse.");
       if (!this.entityId) throw new Error("No se pudo obtener el Id del registro actual.");
 
-      const html = await fetchHtmlFromFileField(
+      const fileContent = await fetchHtmlFromFileField(
         this.baseUrl,
         this.entityName,
         this.entityId,
         this.fieldName
       );
+      this.currentFileName = fileContent.fileName || this.currentFileName;
 
-      await this.renderAndPaginate(html || "<p><br></p>");
+      await this.renderAndPaginate(fileContent.html || "<p><br></p>");
       this.setStatus("", "");
     } catch (err) {
       this.setStatus(`Error al cargar: ${(err as Error).message}`, "error");
@@ -1017,7 +1038,8 @@ export class EditorComponent {
           this.entityName,
           this.entityId,
           this.fieldName,
-          html
+          html,
+          this.currentFileName
         );
       }
 

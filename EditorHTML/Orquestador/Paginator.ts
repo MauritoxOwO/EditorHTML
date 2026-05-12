@@ -434,6 +434,11 @@ export class Paginator {
       let movedAny = false;
       let safety = 0;
 
+      if (this.endsWithUserBlankBlock(currentInner)) {
+        index++;
+        continue;
+      }
+
       while (safety++ < 100) {
         const candidates = this.takeCompactCandidates(nextInner);
         if (candidates.length === 0) break;
@@ -465,6 +470,18 @@ export class Paginator {
     }
 
     this.removeEmptyPages();
+  }
+
+  private endsWithUserBlankBlock(container: HTMLElement): boolean {
+    const children = this.getMeaningfulChildren(container);
+    const lastChild = children[children.length - 1];
+    if (!lastChild || lastChild.nodeType !== Node.ELEMENT_NODE) return false;
+
+    const element = lastChild as HTMLElement;
+    return (
+      element.getAttribute("data-hwe-user-blank") === "true" &&
+      this.isEditableBlankBlock(element)
+    );
   }
 
   private takeCompactCandidates(nextInner: HTMLElement): ChildNode[] {

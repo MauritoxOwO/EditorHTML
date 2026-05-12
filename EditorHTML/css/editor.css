@@ -15,11 +15,16 @@
   font-family: "Segoe UI", sans-serif;
 }
 
+.hwe-editor-header {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  z-index: 10;
+}
+
 /* Toolbar */
 .hwe-toolbar {
   flex-shrink: 0;
-  position: sticky;
-  top: 0;
   background: #f3f3f3;
   border-bottom: 1px solid #ccc;
   padding: 5px 10px;
@@ -28,7 +33,6 @@
   gap: 4px;
   align-items: center;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
-  z-index: 20;
 }
 
 .hwe-toolbar button {
@@ -125,7 +129,8 @@
 
 /* Workspace */
 .hwe-workspace {
-  flex: 1;
+  flex: 1 1 auto;
+  min-height: 0;
   overflow: auto;
   overflow-anchor: none;
   padding: 32px 20px 48px;
@@ -138,7 +143,7 @@
 }
 
 .hwe-source-editor {
-  flex: 1;
+  flex: 1 1 auto;
   width: 100%;
   min-height: 0;
   padding: 16px;
@@ -410,6 +415,7 @@
 }
 
 @media print {
+  .hwe-editor-header,
   .hwe-toolbar,
   .hwe-view-tabs,
   .hwe-source-editor,
