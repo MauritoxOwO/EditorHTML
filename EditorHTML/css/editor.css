@@ -18,6 +18,8 @@
 /* Toolbar */
 .hwe-toolbar {
   flex-shrink: 0;
+  position: sticky;
+  top: 0;
   background: #f3f3f3;
   border-bottom: 1px solid #ccc;
   padding: 5px 10px;
@@ -26,7 +28,7 @@
   gap: 4px;
   align-items: center;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
-  z-index: 10;
+  z-index: 20;
 }
 
 .hwe-toolbar button {
@@ -61,6 +63,10 @@
   background: #fff;
   cursor: pointer;
   font-size: 12px;
+}
+
+.hwe-toolbar .hwe-style-select {
+  min-width: 120px;
 }
 
 .hwe-toolbar .hwe-sep {

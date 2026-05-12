@@ -33,6 +33,39 @@
               usage="bound" 
               required="true"
     />
+
+    <property name="styleEntitySetName"
+              display-name-key="Paragraph Style Table"
+              description-key="Dataverse entity set name that stores paragraph styles"
+              of-type="SingleLine.Text"
+              usage="input"
+              required="false"
+    />
+
+    <property name="styleLabelField"
+              display-name-key="Style Label Field"
+              description-key="Dataverse field used as style display label"
+              of-type="SingleLine.Text"
+              usage="input"
+              required="false"
+    />
+
+    <property name="styleClassField"
+              display-name-key="Style Class Field"
+              description-key="Dataverse field that stores the CSS class name"
+              of-type="SingleLine.Text"
+              usage="input"
+              required="false"
+    />
+
+    <property name="styleCssField"
+              display-name-key="Style CSS Field"
+              description-key="Dataverse field that stores the CSS rule or declarations"
+              of-type="SingleLine.Text"
+              usage="input"
+              required="false"
+    />
+
     <resources>
       <code path="index.ts" order="1"/>
       <css path="css/editor.css" order="1"/>

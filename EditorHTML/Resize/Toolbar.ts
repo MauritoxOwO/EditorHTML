@@ -1,9 +1,25 @@
 
+export interface ParagraphStyleOption {
+  label: string;
+  className: string;
+}
+
+export interface ToolbarOptions {
+  onInsertTable?: () => void;
+  onInsertRowAfter?: () => void;
+  onApplyParagraphStyle?: (className: string) => void;
+  onExportPdf?: () => void;
+}
+
 export class Toolbar {
   private toolbar!: HTMLElement;
   private saveBtn!: HTMLButtonElement;
+  private styleSelect!: HTMLSelectElement;
 
-  private commandButtons = new Map<string, HTMLButtonElement>;
+  private commandButtons = new Map<string, HTMLButtonElement>();
+  private readonly handleSelectionChange = (): void => this.updateActiveStates();
+
+  constructor(private readonly options: ToolbarOptions = {}) {}
 
   build(): HTMLElement {
     this.toolbar = document.createElement("div");
@@ -28,6 +44,19 @@ export class Toolbar {
     this.addSep();
 
     // Fuente 
+    this.styleSelect = this.makeSelect(
+      "Estilo de parrafo",
+      [{ value: "", label: "Estilo", selected: true }],
+      (value) => {
+        if (value) this.options.onApplyParagraphStyle?.(value);
+        this.styleSelect.value = "";
+      }
+    );
+    this.styleSelect.className = "hwe-style-select";
+    this.styleSelect.disabled = true;
+    this.toolbar.appendChild(this.styleSelect);
+    this.addSep();
+
     const fontSelect = this.makeSelect(
       "Fuente",
       [
@@ -93,6 +122,10 @@ export class Toolbar {
     this.addSep();
 
     // Salto de página manual 
+    this.addActionButton("Tabla", "Insertar tabla", () => this.options.onInsertTable?.());
+    this.addActionButton("+ Fila", "Insertar fila debajo", () => this.options.onInsertRowAfter?.());
+    this.addSep();
+
     const breakBtn = document.createElement("button");
     breakBtn.title = "Insertar salto de página manual";
     breakBtn.textContent = "⊞ Salto";
@@ -109,21 +142,43 @@ export class Toolbar {
 
     this.addSep();
 
+    this.addActionButton("PDF", "Exportar a PDF", () => this.options.onExportPdf?.());
+
+    this.addSep();
+
     // btnGuardar
     this.saveBtn = document.createElement("button");
     this.saveBtn.className = "hwe-save-btn";
     this.saveBtn.textContent = "💾 Guardar";
     this.toolbar.appendChild(this.saveBtn);
 
-    document.addEventListener("selectionchange", () =>
-      this.updateActiveStates()
-    );
+    document.addEventListener("selectionchange", this.handleSelectionChange);
 
     return this.toolbar;
   }
 
   getSaveButton(): HTMLButtonElement {
     return this.saveBtn;
+  }
+
+  setParagraphStyles(styles: ParagraphStyleOption[]): void {
+    if (!this.styleSelect) return;
+
+    this.styleSelect.innerHTML = "";
+    const placeholder = document.createElement("option");
+    placeholder.value = "";
+    placeholder.textContent = styles.length > 0 ? "Estilo" : "Sin estilos";
+    placeholder.selected = true;
+    this.styleSelect.appendChild(placeholder);
+
+    styles.forEach((style) => {
+      const option = document.createElement("option");
+      option.value = style.className;
+      option.textContent = style.label;
+      this.styleSelect.appendChild(option);
+    });
+
+    this.styleSelect.disabled = styles.length === 0;
   }
 
   updateActiveStates(): void {
@@ -135,6 +190,10 @@ export class Toolbar {
         console.log(error);
       }
     });
+  }
+
+  destroy(): void {
+    document.removeEventListener("selectionchange", this.handleSelectionChange);
   }
 
 // Funciones auxiliares
@@ -154,6 +213,17 @@ export class Toolbar {
     });
 
     this.commandButtons.set(command, btn);
+    this.toolbar.appendChild(btn);
+  }
+
+  private addActionButton(label: string, title: string, onAction: () => void): void {
+    const btn = document.createElement("button");
+    btn.textContent = label;
+    btn.title = title;
+    btn.addEventListener("mousedown", (e) => {
+      e.preventDefault();
+      onAction();
+    });
     this.toolbar.appendChild(btn);
   }
 

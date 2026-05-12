@@ -106,6 +106,7 @@ export class WordPasteImporter {
     const fragment = this.getClipboardFragment(doc, html);
 
     this.cleanFragment(fragment);
+    this.preserveHeadStyles(doc, fragment);
 
     return {
       html: fragment.innerHTML.trim() || "<p><br></p>",
@@ -201,7 +202,7 @@ export class WordPasteImporter {
 
   private cleanFragment(root: HTMLElement): void {
     this.removeComments(root);
-    root.querySelectorAll("style, meta, link, xml, script, object, iframe, form").forEach((node) => {
+    root.querySelectorAll("meta, link, xml, script, object, iframe, form").forEach((node) => {
       node.remove();
     });
     root.querySelectorAll<HTMLElement>("div.WordSection1, div[class*='WordSection']").forEach(
@@ -233,7 +234,12 @@ export class WordPasteImporter {
       if (name === "style") return;
       if (name.startsWith("data-hwe-")) return;
       if (name === "class") {
-        element.removeAttribute(attr.name);
+        const className = this.sanitizeClassValue(value);
+        if (className) {
+          element.setAttribute(attr.name, className);
+        } else {
+          element.removeAttribute(attr.name);
+        }
         return;
       }
       if (name === "align") return;
@@ -329,6 +335,20 @@ export class WordPasteImporter {
     element.removeAttribute("align");
   }
 
+  private preserveHeadStyles(doc: Document, root: HTMLElement): void {
+    const css = Array.from(doc.head?.querySelectorAll("style") ?? [])
+      .map((style) => style.textContent ?? "")
+      .filter(Boolean)
+      .join("\n");
+    const sanitizedCss = this.sanitizeStyleText(css);
+    if (!sanitizedCss) return;
+
+    const style = document.createElement("style");
+    style.setAttribute("data-hwe-preserved-style", "true");
+    style.textContent = sanitizedCss;
+    root.insertBefore(style, root.firstChild);
+  }
+
   private moveLengthAttributeToStyle(element: HTMLElement, attrName: "width" | "height"): void {
     const value = element.getAttribute(attrName);
     if (!value || element.style.getPropertyValue(attrName)) return;
@@ -379,5 +399,21 @@ export class WordPasteImporter {
 
   private isUnsafeCssValue(value: string): boolean {
     return /(expression\s*\(|javascript:|behavior\s*:|-moz-binding|url\s*\()/i.test(value);
+  }
+
+  private sanitizeClassValue(value: string): string {
+    return value
+      .split(/\s+/)
+      .map((className) => className.trim())
+      .filter((className) => className && !className.startsWith("hwe-"))
+      .filter((className) => /^-?[_a-zA-Z]+[_a-zA-Z0-9-]*$/.test(className))
+      .join(" ");
+  }
+
+  private sanitizeStyleText(css: string): string {
+    return css
+      .replace(/<\/style/gi, "<\\/style")
+      .replace(/expression\s*\([^)]*\)/gi, "")
+      .replace(/url\s*\(\s*(['"]?)javascript:[^)]*\)/gi, "url()");
   }
 }
