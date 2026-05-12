@@ -442,14 +442,12 @@ export class Paginator {
       let movedAny = false;
       let safety = 0;
 
-      if (this.endsWithUserBlankBlock(currentInner)) {
-        index++;
-        continue;
-      }
-
       while (safety++ < 100) {
         const candidates = this.takeCompactCandidates(nextInner);
         if (candidates.length === 0) break;
+        if (this.shouldRespectUserBlankBarrier(currentInner, candidates)) {
+          break;
+        }
 
         const nextReference = candidates[candidates.length - 1].nextSibling;
         candidates.forEach((candidate) => currentInner.appendChild(candidate));
@@ -489,6 +487,23 @@ export class Paginator {
     return (
       element.getAttribute("data-hwe-user-blank") === "true" &&
       this.isEditableBlankBlock(element)
+    );
+  }
+
+  private shouldRespectUserBlankBarrier(container: HTMLElement, candidates: ChildNode[]): boolean {
+    if (!this.endsWithUserBlankBlock(container)) return false;
+    return candidates.some((candidate) => this.isBlankBarrierTarget(candidate));
+  }
+
+  private isBlankBarrierTarget(node: ChildNode): boolean {
+    if (node.nodeType !== Node.ELEMENT_NODE) return false;
+
+    const element = node as HTMLElement;
+    return (
+      this.isKeepWithNextTarget(element) ||
+      this.isTableElement(element) ||
+      this.isTableFlowWrapper(element) ||
+      this.keepTogetherController.isKeepTogetherGroup(element)
     );
   }
 

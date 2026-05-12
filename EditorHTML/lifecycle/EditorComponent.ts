@@ -419,7 +419,7 @@ export class EditorComponent {
 
     this.paginator.repaginateAll();
     this.pages = this.paginator.getPages();
-    this.applyOfficialTableWidths(this.workspace);
+    this.pages.forEach((page) => this.applyOfficialTableWidths(page));
     this.syncWorkspace();
     this.updatePageCount();
     this.imageOcrService.queue(this.workspace);
@@ -450,7 +450,9 @@ export class EditorComponent {
         const shouldPullFromNextPages =
           this.isDeleteInput(inputType) || this.pagesNeedingPull.has(page);
         this.pagesNeedingPull.delete(page);
-        this.scheduleRebalance(page, shouldPullFromNextPages);
+        this.scheduleRebalance(page, shouldPullFromNextPages, {
+          includePreviousPage: shouldPullFromNextPages,
+        });
       }
     });
     inner.addEventListener("compositionstart", () => {
@@ -459,7 +461,7 @@ export class EditorComponent {
     inner.addEventListener("compositionend", () => {
       this.isComposing = false;
       this.blankLineController.syncEditableBlankBlocks(inner, false);
-      this.scheduleRebalance(page);
+      this.scheduleRebalance(page, false, { includePreviousPage: false });
     });
     inner.addEventListener("paste", (event: ClipboardEvent) => this.onPaste(event, page));
     inner.addEventListener("keydown", (event: KeyboardEvent) => this.onPageKeyDown(event));
@@ -531,7 +533,7 @@ export class EditorComponent {
     const nextRebalance: QueuedRebalance = {
       page,
       pullFromNextPages,
-      includePreviousPage: options.includePreviousPage ?? true,
+      includePreviousPage: options.includePreviousPage ?? pullFromNextPages,
       compactPages: options.compactPages ?? true,
     };
 
@@ -556,7 +558,7 @@ export class EditorComponent {
 
   private onPagesChanged(pages: HTMLElement[]): void {
     this.pages = pages;
-    this.applyOfficialTableWidths(this.workspace);
+    this.pages.forEach((page) => this.applyOfficialTableWidths(page));
     this.syncWorkspace();
     this.updatePageCount();
   }
@@ -651,11 +653,11 @@ export class EditorComponent {
 
     this.isDirty = true;
     this.toolbar.updateActiveStates();
-    this.scheduleRebalance(affectedPage, true);
+    this.scheduleRebalance(affectedPage, true, { includePreviousPage: false });
     void this.assetLayoutManager
       .waitForStableLayout(affectedPage)
       .then(() => {
-        this.scheduleRebalance(affectedPage, true);
+        this.scheduleRebalance(affectedPage, true, { includePreviousPage: false });
         this.imageOcrService.queue(affectedPage);
       });
   }
@@ -820,7 +822,7 @@ export class EditorComponent {
     this.placeCaretAtEnd(previousInner);
     this.isDirty = true;
     this.toolbar.updateActiveStates();
-    this.scheduleRebalance(previousPage, true);
+    this.scheduleRebalance(previousPage, true, { includePreviousPage: true });
     return true;
   }
 
@@ -1034,7 +1036,7 @@ export class EditorComponent {
     if (!page) return;
     this.isDirty = true;
     this.toolbar.updateActiveStates();
-    this.scheduleRebalance(page, true);
+    this.scheduleRebalance(page, true, { includePreviousPage: false });
   }
 
   private placeCaretAtEnd(inner: HTMLElement): void {
