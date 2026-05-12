@@ -9,6 +9,8 @@
   --hwe-text-width: 140mm;
   width: 100%;
   height: 100%;
+  min-height: 0;
+  max-height: 100%;
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -20,7 +22,9 @@
   flex: 0 0 auto;
   display: flex;
   flex-direction: column;
+  position: relative;
   z-index: 10;
+  background: #ededed;
 }
 
 /* Toolbar */

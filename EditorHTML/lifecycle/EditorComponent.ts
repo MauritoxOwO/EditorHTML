@@ -96,6 +96,8 @@ export class EditorComponent {
     setStatus: (message, type) => this.setStatus(message, type),
   });
   private pageSetup: PageSetup = DEFAULT_PAGE_SETUP;
+  private allocatedWidth?: number;
+  private allocatedHeight?: number;
 
   private readonly baseUrl: string;
   private readonly entityName: string;
@@ -161,7 +163,8 @@ export class EditorComponent {
   private buildShell(): void {
     this.container.innerHTML = "";
     this.container.style.cssText =
-      "width:100%;height:100%;overflow:hidden;display:flex;flex-direction:column;";
+      "width:100%;height:100%;min-height:0;overflow:hidden;display:flex;flex-direction:column;";
+    this.applyAllocatedSize();
 
     this.root = document.createElement("div");
     this.root.className = "hwe-root";
@@ -422,7 +425,6 @@ export class EditorComponent {
     this.pages.forEach((page) => this.applyOfficialTableWidths(page));
     this.syncWorkspace();
     this.updatePageCount();
-    this.imageOcrService.queue(this.workspace);
   }
 
   private createPageElement(html?: string): HTMLElement {
@@ -446,12 +448,14 @@ export class EditorComponent {
       if (!this.isComposing) {
         const inputType = this.pendingInputTypes.get(page) ?? "";
         this.pendingInputTypes.delete(page);
-        this.blankLineController.syncEditableBlankBlocks(inner, this.isEnterInput(inputType));
+        const isEnterInput = this.isEnterInput(inputType);
         const shouldPullFromNextPages =
           this.isDeleteInput(inputType) || this.pagesNeedingPull.has(page);
+        this.blankLineController.syncEditableBlankBlocks(inner, isEnterInput);
         this.pagesNeedingPull.delete(page);
         this.scheduleRebalance(page, shouldPullFromNextPages, {
           includePreviousPage: shouldPullFromNextPages,
+          compactPages: shouldPullFromNextPages || !isEnterInput,
         });
       }
     });
@@ -547,12 +551,17 @@ export class EditorComponent {
     const shouldUseNextPage =
       currentIndex === -1 || (nextIndex !== -1 && nextIndex < currentIndex);
 
+    const mergedPullFromNextPages =
+      this.pendingRebalance.pullFromNextPages || nextRebalance.pullFromNextPages;
+
     this.pendingRebalance = {
       page: shouldUseNextPage ? page : this.pendingRebalance.page,
-      pullFromNextPages: this.pendingRebalance.pullFromNextPages || pullFromNextPages,
+      pullFromNextPages: mergedPullFromNextPages,
       includePreviousPage:
         this.pendingRebalance.includePreviousPage || nextRebalance.includePreviousPage,
-      compactPages: this.pendingRebalance.compactPages || nextRebalance.compactPages,
+      compactPages: mergedPullFromNextPages
+        ? true
+        : this.pendingRebalance.compactPages && nextRebalance.compactPages,
     };
   }
 
@@ -658,7 +667,6 @@ export class EditorComponent {
       .waitForStableLayout(affectedPage)
       .then(() => {
         this.scheduleRebalance(affectedPage, true, { includePreviousPage: false });
-        this.imageOcrService.queue(affectedPage);
       });
   }
 
@@ -1118,8 +1126,6 @@ export class EditorComponent {
         this.updateViewTabs();
       }
 
-      await this.imageOcrService.run(this.workspace, true);
-
       const html = this.collectHtml();
       if (this.options.saveHtml) {
         await this.options.saveHtml(html);
@@ -1149,8 +1155,6 @@ export class EditorComponent {
       this.setStatus("Vuelve al editor visual o guarda los cambios del HTML antes de exportar.", "error");
       return;
     }
-
-    await this.imageOcrService.run(this.workspace, true);
 
     const html = this.documentSerializer.collectPdfHtml(
       this.root,
@@ -1299,6 +1303,12 @@ export class EditorComponent {
     this.setStatus("", "");
   }
 
+  resize(width?: number, height?: number): void {
+    this.allocatedWidth = width;
+    this.allocatedHeight = height;
+    this.applyAllocatedSize();
+  }
+
   getHtml(): string {
     if (this.activeView === "source" && this.sourceDirty) {
       return this.sourceEditor.value;
@@ -1316,6 +1326,24 @@ export class EditorComponent {
     this.toolbar?.destroy();
     this.paginator?.destroy();
     this.container.innerHTML = "";
+  }
+
+  private applyAllocatedSize(): void {
+    const width = this.formatAllocatedSize(this.allocatedWidth);
+    const height = this.formatAllocatedSize(this.allocatedHeight);
+
+    this.container.style.width = width;
+    this.container.style.height = height;
+    this.container.style.minHeight = "0";
+    this.container.style.overflow = "hidden";
+    this.container.style.display = "flex";
+    this.container.style.flexDirection = "column";
+  }
+
+  private formatAllocatedSize(value: number | undefined): string {
+    return typeof value === "number" && Number.isFinite(value) && value > 0
+      ? `${value}px`
+      : "100%";
   }
 }
 

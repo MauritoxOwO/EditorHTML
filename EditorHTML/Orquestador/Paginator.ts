@@ -245,7 +245,11 @@ export class Paginator {
       return currentIndex;
     }
 
-    if (node.nodeType === Node.ELEMENT_NODE && this.fitImagesToAvailableSpace(currentPage)) {
+    if (
+      !pageHadContent &&
+      node.nodeType === Node.ELEMENT_NODE &&
+      this.fitImagesToAvailableSpace(currentPage)
+    ) {
       if (!this.pageOverflows(currentPage)) return currentIndex;
     }
 
@@ -491,20 +495,7 @@ export class Paginator {
   }
 
   private shouldRespectUserBlankBarrier(container: HTMLElement, candidates: ChildNode[]): boolean {
-    if (!this.endsWithUserBlankBlock(container)) return false;
-    return candidates.some((candidate) => this.isBlankBarrierTarget(candidate));
-  }
-
-  private isBlankBarrierTarget(node: ChildNode): boolean {
-    if (node.nodeType !== Node.ELEMENT_NODE) return false;
-
-    const element = node as HTMLElement;
-    return (
-      this.isKeepWithNextTarget(element) ||
-      this.isTableElement(element) ||
-      this.isTableFlowWrapper(element) ||
-      this.keepTogetherController.isKeepTogetherGroup(element)
-    );
+    return this.endsWithUserBlankBlock(container);
   }
 
   private takeCompactCandidates(nextInner: HTMLElement): ChildNode[] {
