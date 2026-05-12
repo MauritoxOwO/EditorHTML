@@ -23,14 +23,6 @@ export class DocumentSerializer {
   private readonly wordPasteImporter = new WordPasteImporter();
 
   normalizeHtmlForPagination(html: string): NormalizedDocument {
-    if (this.wordPasteImporter.isWordHtml(html)) {
-      const imported = this.wordPasteImporter.importFromHtml(html);
-      return {
-        html: imported.html,
-        pageSetup: imported.pageSetup,
-      };
-    }
-
     const doc = new DOMParser().parseFromString(html || "<p><br></p>", "text/html");
     const temp = document.createElement("div");
     temp.innerHTML = doc.body?.innerHTML || html || "<p><br></p>";
@@ -39,8 +31,23 @@ export class DocumentSerializer {
     const pageSetup = savedDocument ? readPageSetupFromElement(savedDocument) ?? undefined : undefined;
     if (savedDocument) {
       temp.innerHTML = savedDocument.innerHTML;
+      this.removeRuntimeOnlyState(temp);
+      return {
+        html: temp.innerHTML || "<p><br></p>",
+        pageSetup,
+      };
     }
 
+    if (this.wordPasteImporter.isWordHtml(html)) {
+      const imported = this.wordPasteImporter.importFromHtml(html);
+      return {
+        html: imported.html,
+        pageSetup: imported.pageSetup,
+      };
+    }
+
+    this.preserveHeadStyles(doc, temp);
+    this.applyBodyFormattingWrapper(doc, temp);
     this.cleanImportedHtml(temp);
 
     let safety = 0;
@@ -50,12 +57,13 @@ export class DocumentSerializer {
 
       const onlyChild = children[0] as HTMLElement;
       if (!isSplittableContainer(onlyChild)) break;
+      if (this.hasFormattingShell(onlyChild)) break;
 
       temp.innerHTML = onlyChild.innerHTML;
     }
 
     return {
-      html: temp.innerHTML.trim() || "<p><br></p>",
+      html: temp.innerHTML || "<p><br></p>",
       pageSetup,
     };
   }
@@ -79,6 +87,39 @@ export class DocumentSerializer {
     return makePageSetupWrapper(html, pageSetup);
   }
 
+  collectPdfHtml(
+    root: HTMLElement,
+    pages: HTMLElement[],
+    pageSetup: PageSetup,
+    additionalCss = ""
+  ): string {
+    const savedHtml = this.collectHtml(root, pages, pageSetup);
+    const temp = document.createElement("div");
+    temp.innerHTML = savedHtml;
+
+    const savedDocument = this.getSavedDocumentWrapper(temp);
+    const content = savedDocument?.innerHTML ?? temp.innerHTML;
+    const preservedCss = Array.from(temp.querySelectorAll("style"))
+      .map((style) => style.textContent ?? "")
+      .filter(Boolean)
+      .join("\n");
+    const css = this.sanitizeStyleText([preservedCss, additionalCss].filter(Boolean).join("\n"));
+
+    return `<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+${this.makePdfPageCss(pageSetup)}
+${css}
+</style>
+</head>
+<body>
+${content}
+</body>
+</html>`;
+  }
+
   private getSavedDocumentWrapper(root: HTMLElement): HTMLElement | null {
     const directChildren = getMeaningfulChildren(root, true);
     if (directChildren.length === 1 && directChildren[0].nodeType === Node.ELEMENT_NODE) {
@@ -91,7 +132,7 @@ export class DocumentSerializer {
 
   private cleanImportedHtml(root: HTMLElement): void {
     removeComments(root);
-    root.querySelectorAll("style, meta, link, xml, script, object, hr").forEach((node) => {
+    root.querySelectorAll("meta, link, xml, script, object, hr").forEach((node) => {
       node.remove();
     });
     this.removeOfficeNamespacedNodes(root);
@@ -102,10 +143,10 @@ export class DocumentSerializer {
     });
 
     root.querySelectorAll<HTMLElement>("[width]").forEach((element) => {
-      if (element.tagName !== "IMG") element.removeAttribute("width");
+      if (!this.canKeepDimensionAttribute(element)) element.removeAttribute("width");
     });
     root.querySelectorAll<HTMLElement>("[height]").forEach((element) => {
-      if (element.tagName !== "IMG") element.removeAttribute("height");
+      if (!this.canKeepDimensionAttribute(element)) element.removeAttribute("height");
     });
 
     this.unwrapKnownWordContainers(root);
@@ -113,10 +154,69 @@ export class DocumentSerializer {
     this.removeBorderOnlyBlocks(root);
   }
 
+  private preserveHeadStyles(doc: Document, root: HTMLElement): void {
+    const css = Array.from(doc.head?.querySelectorAll("style") ?? [])
+      .map((style) => style.textContent ?? "")
+      .filter(Boolean)
+      .join("\n");
+    const sanitizedCss = this.sanitizeStyleText(css);
+    if (!sanitizedCss) return;
+
+    const style = document.createElement("style");
+    style.setAttribute("data-hwe-preserved-style", "true");
+    style.textContent = sanitizedCss;
+    root.insertBefore(style, root.firstChild);
+  }
+
   private prepareContentForSave(element: HTMLElement): string {
     const clone = element.cloneNode(true) as HTMLElement;
     unwrapGeneratedKeepTogetherGroups(clone);
+    this.removeRuntimeOnlyState(clone);
     return clone.innerHTML;
+  }
+
+  private applyBodyFormattingWrapper(doc: Document, root: HTMLElement): void {
+    const body = doc.body;
+    if (!body) return;
+
+    const style = body.getAttribute("style");
+    const className = body.getAttribute("class");
+    if (!style && !className) return;
+
+    const wrapper = document.createElement("div");
+    if (style) wrapper.setAttribute("style", this.sanitizeInlineStyle(style));
+    if (className) wrapper.setAttribute("class", className);
+    if (!wrapper.getAttribute("style") && !wrapper.getAttribute("class")) return;
+
+    while (root.firstChild) {
+      wrapper.appendChild(root.firstChild);
+    }
+    root.appendChild(wrapper);
+  }
+
+  private canKeepDimensionAttribute(element: HTMLElement): boolean {
+    return ["IMG", "TABLE", "COL", "COLGROUP", "TD", "TH"].includes(element.tagName);
+  }
+
+  private removeRuntimeOnlyState(root: HTMLElement): void {
+    CaretManager.removeMarkers(root);
+    root.querySelectorAll<HTMLElement>("[data-hwe-caret], [data-hwe-paste-marker]").forEach(
+      (element) => element.remove()
+    );
+  }
+
+  private hasFormattingShell(element: HTMLElement): boolean {
+    return Array.from(element.attributes).some((attr) => {
+      const name = attr.name.toLowerCase();
+      const value = attr.value.trim();
+      if (!value) return false;
+      if (name.startsWith("data-hwe-")) return false;
+      if (name === "style" && /^page-break-before\s*:\s*always\s*;?$/i.test(value)) {
+        return false;
+      }
+
+      return true;
+    });
   }
 
   private sanitizeInlineStyle(style: string): string {
@@ -156,6 +256,10 @@ export class DocumentSerializer {
 
   private removeVisuallyEmptyNodes(root: HTMLElement): void {
     Array.from(root.childNodes).forEach((node) => {
+      if (node.nodeType === Node.ELEMENT_NODE && (node as HTMLElement).tagName === "STYLE") {
+        return;
+      }
+
       if (node.nodeType === Node.ELEMENT_NODE) {
         this.removeVisuallyEmptyNodes(node as HTMLElement);
       }
@@ -176,5 +280,43 @@ export class DocumentSerializer {
         if (!text && !hasMedia && hasBorder) element.remove();
       }
     );
+  }
+
+  private makePdfPageCss(setup: PageSetup): string {
+    return `
+@page {
+  size: ${setup.width} ${setup.height};
+  margin: ${setup.marginTop} ${setup.marginRight} ${setup.marginBottom} ${setup.marginLeft};
+}
+html,
+body {
+  margin: 0;
+  padding: 0;
+  background: #fff;
+}
+body {
+  color: #000;
+  -webkit-print-color-adjust: exact;
+  print-color-adjust: exact;
+}
+[data-hwe-page-break="before"] {
+  break-before: page;
+  page-break-before: always;
+}
+table {
+  border-collapse: collapse;
+}
+img {
+  max-width: 100%;
+  height: auto;
+}
+`;
+  }
+
+  private sanitizeStyleText(css: string): string {
+    return css
+      .replace(/<\/style/gi, "<\\/style")
+      .replace(/expression\s*\([^)]*\)/gi, "")
+      .replace(/url\s*\(\s*(['"]?)javascript:[^)]*\)/gi, "url()");
   }
 }

@@ -1,7 +1,12 @@
 import { Paginator } from "../Orquestador/Paginator";
 import { CaretManager } from "../Orquestador/CaretManager";
-import { Toolbar } from "../Resize/Toolbar";
+import { ParagraphStyleOption, Toolbar } from "../Resize/Toolbar";
 import { fetchHtmlFromFileField, saveHtmlToFileField } from "../execCommand/fileApi";
+import {
+  fetchParagraphStyles,
+  ParagraphStyleDefinition,
+  ParagraphStyleTableConfig,
+} from "../execCommand/styleApi";
 import {
   applyPageSetup,
   DEFAULT_PAGE_SETUP,
@@ -20,11 +25,41 @@ import {
 
 type PcfContext = ComponentFramework.Context<IInputs>;
 type StatusType = "success" | "error" | "saving" | "";
+type EditorView = "visual" | "source";
+
+const PARAGRAPH_STYLE_BLOCK_SELECTOR = "p, li, h1, h2, h3, h4, h5, h6, blockquote, pre";
+const DEFAULT_STYLE_TABLE_CONFIG: ParagraphStyleTableConfig = {
+  entitySetName: "mcdev_htmlstyles",
+  classField: "mcdev_cssclass",
+  cssField: "mcdev_css",
+};
+const LOCAL_PARAGRAPH_STYLES: ParagraphStyleDefinition[] = [
+  {
+    label: "Texto general",
+    className: "texto-general",
+    cssText: `.texto-general {
+  display: inline-block;
+  text-indent: 20pt;
+  margin: 0;
+  text-align: justify;
+  hyphens: auto;
+  -webkit-hyphens: auto;
+  -ms-hyphens: auto;
+  orphans: 2;
+  widows: 2;
+  font-family: 'Swis721 BT','SwissRoman', Helvetica, Arial, sans-serif;
+  font-weight: normal;
+  font-style: normal;
+  font-size: 11pt;
+}`,
+  },
+];
 
 export interface EditorComponentOptions {
   initialHtml?: string;
   loadHtml?: () => Promise<string> | string;
   saveHtml?: (html: string) => Promise<void> | void;
+  paragraphStyles?: ParagraphStyleDefinition[];
 }
 
 export class EditorComponent {
@@ -33,6 +68,10 @@ export class EditorComponent {
 
   private root!: HTMLElement;
   private workspace!: HTMLElement;
+  private viewTabs!: HTMLElement;
+  private visualTabBtn!: HTMLButtonElement;
+  private sourceTabBtn!: HTMLButtonElement;
+  private sourceEditor!: HTMLTextAreaElement;
   private statusMsg!: HTMLElement;
   private pageCountEl!: HTMLElement;
 
@@ -49,13 +88,22 @@ export class EditorComponent {
   private readonly entityName: string;
   private readonly entityId: string;
   private readonly fieldName: string;
+  private readonly styleTableConfig: ParagraphStyleTableConfig;
 
   private rebalanceFrame: number | undefined;
   private pendingRebalance: { page: HTMLElement; pullFromNextPages: boolean } | null = null;
   private readonly pagesNeedingPull = new WeakSet<HTMLElement>();
   private readonly pendingInputTypes = new WeakMap<HTMLElement, string>();
+  private readonly paragraphStyleClasses = new Set<string>();
+  private lastSelectedTableRow: HTMLTableRowElement | null = null;
+  private lastTextSelection: Range | null = null;
+  private lastStyleBlock: HTMLElement | null = null;
+  private paragraphStyleElement: HTMLStyleElement | null = null;
+  private readonly handleSelectionChange = (): void => this.rememberTextSelection();
   private isComposing = false;
   private isDirty = false;
+  private activeView: EditorView = "visual";
+  private sourceDirty = false;
 
   constructor(container: HTMLElement, context?: PcfContext, options: EditorComponentOptions = {}) {
     this.container = container;
@@ -64,6 +112,7 @@ export class EditorComponent {
     const runtime = (context ?? {}) as unknown as {
       page?: { getClientUrl?: () => string; entityId?: string };
       mode?: { contextInfo?: { entityId?: string; entityTypeName?: string } };
+      parameters?: Record<string, { raw?: string | null }>;
     };
 
     this.baseUrl = this.getClientUrl(runtime);
@@ -72,10 +121,22 @@ export class EditorComponent {
     );
     this.entityName = "mcdev_htmldevtests";
     this.fieldName = "mcdev_htmlarchivooriginal";
+    this.styleTableConfig = {
+      entitySetName:
+        this.getParameterValue(runtime.parameters, "styleEntitySetName") ??
+        DEFAULT_STYLE_TABLE_CONFIG.entitySetName,
+      classField:
+        this.getParameterValue(runtime.parameters, "styleClassField") ??
+        DEFAULT_STYLE_TABLE_CONFIG.classField,
+      cssField:
+        this.getParameterValue(runtime.parameters, "styleCssField") ??
+        DEFAULT_STYLE_TABLE_CONFIG.cssField,
+    };
   }
 
   async init(): Promise<void> {
     this.buildShell();
+    void this.loadParagraphStyles();
     this.paginator = new Paginator(
       (html?: string) => this.createPageElement(html),
       (pages: HTMLElement[]) => this.onPagesChanged(pages)
@@ -92,14 +153,34 @@ export class EditorComponent {
     this.root.className = "hwe-root";
     this.applyCurrentPageSetup();
 
-    this.toolbar = new Toolbar();
+    this.toolbar = new Toolbar({
+      onInsertTable: () => this.insertTable(),
+      onInsertRowAfter: () => this.insertTableRowAfter(),
+      onApplyParagraphStyle: (className) => this.applyParagraphStyle(className),
+      onExportPdf: () => this.exportPdf(),
+    });
     const toolbarEl = this.toolbar.build();
     this.toolbar.getSaveButton().addEventListener("click", () => void this.save());
     this.root.appendChild(toolbarEl);
+    document.addEventListener("selectionchange", this.handleSelectionChange);
+
+    this.buildViewTabs();
+
+    this.buildViewTabs();
 
     this.workspace = document.createElement("div");
     this.workspace.className = "hwe-workspace";
     this.root.appendChild(this.workspace);
+
+    this.sourceEditor = document.createElement("textarea");
+    this.sourceEditor.className = "hwe-source-editor";
+    this.sourceEditor.setAttribute("spellcheck", "false");
+    this.sourceEditor.addEventListener("input", () => {
+      this.sourceDirty = true;
+      this.isDirty = true;
+    });
+    this.root.appendChild(this.sourceEditor);
+    this.updateViewTabs();
 
     const statusBar = document.createElement("div");
     statusBar.className = "hwe-statusbar";
@@ -114,6 +195,62 @@ export class EditorComponent {
 
     this.root.appendChild(statusBar);
     this.container.appendChild(this.root);
+  }
+
+  private buildViewTabs(): void {
+    this.viewTabs = document.createElement("div");
+    this.viewTabs.className = "hwe-view-tabs";
+
+    this.visualTabBtn = this.makeViewTabButton("Editor", "visual");
+    this.sourceTabBtn = this.makeViewTabButton("HTML", "source");
+
+    this.viewTabs.appendChild(this.visualTabBtn);
+    this.viewTabs.appendChild(this.sourceTabBtn);
+    this.root.appendChild(this.viewTabs);
+    this.updateViewTabs();
+  }
+
+  private makeViewTabButton(label: string, view: EditorView): HTMLButtonElement {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.textContent = label;
+    button.addEventListener("click", () => {
+      void this.switchView(view);
+    });
+    return button;
+  }
+
+  private async switchView(view: EditorView): Promise<void> {
+    if (view === this.activeView) return;
+
+    if (view === "source") {
+      this.sourceEditor.value = this.collectHtml();
+      this.sourceDirty = false;
+      this.activeView = "source";
+      this.updateViewTabs();
+      this.sourceEditor.focus();
+      return;
+    }
+
+    if (this.sourceDirty) {
+      await this.renderAndPaginate(this.sourceEditor.value || "<p><br></p>");
+      this.sourceDirty = false;
+    }
+
+    this.activeView = "visual";
+    this.updateViewTabs();
+  }
+
+  private updateViewTabs(): void {
+    this.visualTabBtn.classList.toggle("hwe-active", this.activeView === "visual");
+    this.sourceTabBtn.classList.toggle("hwe-active", this.activeView === "source");
+
+    if (this.workspace) {
+      this.workspace.hidden = this.activeView !== "visual";
+    }
+    if (this.sourceEditor) {
+      this.sourceEditor.hidden = this.activeView !== "source";
+    }
   }
 
   private setPageSetup(setup: Partial<PageSetup> | PageSetup): void {
@@ -140,6 +277,64 @@ export class EditorComponent {
 
   private cleanGuid(value: string): string {
     return value.replace(/[{}]/g, "");
+  }
+
+  private getParameterValue(
+    parameters: Record<string, { raw?: string | null }> | undefined,
+    name: string
+  ): string | undefined {
+    const value = parameters?.[name]?.raw?.trim();
+    return value || undefined;
+  }
+
+  private async loadParagraphStyles(): Promise<void> {
+    try {
+      const styles = this.options.paragraphStyles
+        ? this.options.paragraphStyles
+        : this.baseUrl
+          ? await fetchParagraphStyles(this.baseUrl, this.styleTableConfig)
+          : LOCAL_PARAGRAPH_STYLES;
+
+      this.setParagraphStyles(styles.length > 0 ? styles : LOCAL_PARAGRAPH_STYLES);
+    } catch (error) {
+      console.warn("[HtmlWordEditor] paragraph styles fallback:", error);
+      this.setParagraphStyles(LOCAL_PARAGRAPH_STYLES);
+    }
+  }
+
+  private setParagraphStyles(styles: ParagraphStyleDefinition[]): void {
+    const validStyles = styles.filter((style) => this.isValidCssClassName(style.className));
+
+    this.paragraphStyleClasses.clear();
+    validStyles.forEach((style) => this.paragraphStyleClasses.add(style.className));
+    this.toolbar.setParagraphStyles(
+      validStyles.map<ParagraphStyleOption>((style) => ({
+        label: style.label,
+        className: style.className,
+      }))
+    );
+    this.injectParagraphStyleCss(validStyles);
+  }
+
+  private injectParagraphStyleCss(styles: ParagraphStyleDefinition[]): void {
+    if (!this.paragraphStyleElement) {
+      this.paragraphStyleElement = document.createElement("style");
+      this.paragraphStyleElement.setAttribute("data-hwe-style-catalog", "true");
+      this.root.insertBefore(this.paragraphStyleElement, this.root.firstChild);
+    }
+
+    this.paragraphStyleElement.textContent = styles
+      .map((style) => this.formatParagraphStyleCss(style))
+      .join("\n\n");
+  }
+
+  private formatParagraphStyleCss(style: ParagraphStyleDefinition): string {
+    if (style.cssText.includes("{")) return style.cssText;
+    return `.${style.className} { ${style.cssText} }`;
+  }
+
+  private isValidCssClassName(className: string): boolean {
+    return /^-?[_a-zA-Z]+[_a-zA-Z0-9-]*$/.test(className);
   }
 
   private async loadContent(): Promise<void> {
@@ -230,7 +425,20 @@ export class EditorComponent {
     });
     inner.addEventListener("paste", (event: ClipboardEvent) => this.onPaste(event, page));
     inner.addEventListener("keydown", (event: KeyboardEvent) => this.onPageKeyDown(event));
-    inner.addEventListener("mouseup", () => this.toolbar.updateActiveStates());
+    inner.addEventListener("keyup", () => {
+      this.rememberTextSelection();
+      this.rememberSelectedTableRow();
+    });
+    inner.addEventListener("click", (event) => {
+      this.rememberTableRowFromEvent(event);
+      this.rememberStyleBlockFromEvent(event);
+    });
+    inner.addEventListener("mouseup", (event) => {
+      this.rememberStyleBlockFromEvent(event);
+      this.rememberTextSelection();
+      this.rememberSelectedTableRow();
+      this.toolbar.updateActiveStates();
+    });
 
     page.appendChild(inner);
     return page;
@@ -360,6 +568,108 @@ export class EditorComponent {
       .then(() => this.scheduleRebalance(affectedPage, true));
   }
 
+  private applyParagraphStyle(className: string): void {
+    if (!this.paragraphStyleClasses.has(className)) return;
+    if (this.activeView !== "visual") {
+      this.setStatus("Vuelve al editor visual para aplicar estilos.", "error");
+      return;
+    }
+
+    this.restoreTextSelection();
+    const blocks = this.getSelectedStyleBlocks();
+    if (blocks.length === 0) {
+      this.setStatus("Selecciona un parrafo para aplicar el estilo.", "error");
+      return;
+    }
+
+    blocks.forEach((block) => {
+      this.paragraphStyleClasses.forEach((styleClass) => block.classList.remove(styleClass));
+      block.classList.add(className);
+    });
+
+    this.rememberTextSelection();
+    this.markEditedAndRebalance(blocks[0]);
+  }
+
+  private getSelectedStyleBlocks(): HTMLElement[] {
+    const selection = window.getSelection();
+    const range = selection && selection.rangeCount > 0 ? selection.getRangeAt(0) : null;
+    if (!range || !this.root.contains(range.commonAncestorContainer)) {
+      return this.lastStyleBlock && this.root.contains(this.lastStyleBlock)
+        ? [this.lastStyleBlock]
+        : [];
+    }
+
+    const editable = this.getActiveEditable();
+    const scope = editable ?? this.root;
+    const blocks = Array.from(
+      scope.querySelectorAll<HTMLElement>(PARAGRAPH_STYLE_BLOCK_SELECTOR)
+    ).filter((block) => this.rangeOverlapsBlock(range, block));
+
+    if (blocks.length > 0) {
+      this.lastStyleBlock = blocks[0];
+      return blocks;
+    }
+
+    const element =
+      range.startContainer.nodeType === Node.ELEMENT_NODE
+        ? (range.startContainer as HTMLElement)
+        : range.startContainer.parentElement;
+    const currentBlock = element?.closest<HTMLElement>(PARAGRAPH_STYLE_BLOCK_SELECTOR);
+    if (currentBlock && this.root.contains(currentBlock)) {
+      this.lastStyleBlock = currentBlock;
+      return [currentBlock];
+    }
+
+    return this.lastStyleBlock && this.root.contains(this.lastStyleBlock)
+      ? [this.lastStyleBlock]
+      : [];
+  }
+
+  private rangeOverlapsBlock(range: Range, block: HTMLElement): boolean {
+    if (range.collapsed) return block.contains(range.startContainer);
+
+    const blockRange = document.createRange();
+    blockRange.selectNodeContents(block);
+
+    const startsBeforeBlockEnds =
+      range.compareBoundaryPoints(Range.START_TO_END, blockRange) < 0;
+    const endsAfterBlockStarts =
+      range.compareBoundaryPoints(Range.END_TO_START, blockRange) > 0;
+    return startsBeforeBlockEnds && endsAfterBlockStarts;
+  }
+
+  private rememberTextSelection(): void {
+    const selection = window.getSelection();
+    if (!selection || selection.rangeCount === 0) return;
+
+    const range = selection.getRangeAt(0);
+    if (!this.root?.contains(range.commonAncestorContainer)) return;
+
+    const element =
+      range.commonAncestorContainer.nodeType === Node.ELEMENT_NODE
+        ? (range.commonAncestorContainer as HTMLElement)
+        : range.commonAncestorContainer.parentElement;
+    if (!element?.closest("[contenteditable='true']")) return;
+
+    this.lastTextSelection = range.cloneRange();
+    this.lastStyleBlock = element.closest<HTMLElement>(PARAGRAPH_STYLE_BLOCK_SELECTOR);
+  }
+
+  private rememberStyleBlockFromEvent(event: Event): void {
+    const target = event.target as HTMLElement | null;
+    const block = target?.closest<HTMLElement>(PARAGRAPH_STYLE_BLOCK_SELECTOR);
+    if (block && this.root.contains(block)) this.lastStyleBlock = block;
+  }
+
+  private restoreTextSelection(): void {
+    if (!this.lastTextSelection) return;
+
+    const selection = window.getSelection();
+    selection?.removeAllRanges();
+    selection?.addRange(this.lastTextSelection);
+  }
+
   private onPageKeyDown(event: KeyboardEvent): void {
     if (event.ctrlKey && event.key.toLowerCase() === "s") {
       event.preventDefault();
@@ -379,7 +689,12 @@ export class EditorComponent {
   private handleBackspaceAtPageStart(event: KeyboardEvent): boolean {
     const inner = event.currentTarget as HTMLElement;
     const page = inner.closest<HTMLElement>(".hwe-page");
-    if (!page || !this.isCaretAtStartOfEditable(inner)) return false;
+    if (!page) return false;
+
+    const caretAtPageStart = this.isCaretAtStartOfEditable(inner);
+    const caretAtTableContinuationStart =
+      !caretAtPageStart && this.isCaretAtStartOfFirstTableFragment(inner);
+    if (!caretAtPageStart && !caretAtTableContinuationStart) return false;
 
     const pageIndex = this.pages.indexOf(page);
     if (pageIndex <= 0) return false;
@@ -389,12 +704,81 @@ export class EditorComponent {
     if (!previousInner) return false;
 
     event.preventDefault();
-    this.deleteLastContent(previousInner);
+    if (caretAtTableContinuationStart) {
+      this.removeTrailingPaginationBlanks(previousInner);
+    } else {
+      this.deleteLastContent(previousInner);
+    }
     this.placeCaretAtEnd(previousInner);
     this.isDirty = true;
     this.toolbar.updateActiveStates();
     this.scheduleRebalance(previousPage, true);
     return true;
+  }
+
+  private isCaretAtStartOfFirstTableFragment(inner: HTMLElement): boolean {
+    const selection = window.getSelection();
+    if (!selection || selection.rangeCount === 0 || !selection.isCollapsed) return false;
+
+    const range = selection.getRangeAt(0);
+    if (!inner.contains(range.startContainer)) return false;
+
+    const first = getMeaningfulChildren(inner)[0];
+    if (!first || first.nodeType !== Node.ELEMENT_NODE) return false;
+
+    const firstElement = first as HTMLElement;
+    if (firstElement.tagName !== "TABLE" || !firstElement.contains(range.startContainer)) {
+      return false;
+    }
+
+    const beforeRange = document.createRange();
+    beforeRange.selectNodeContents(firstElement);
+    beforeRange.setEnd(range.startContainer, range.startOffset);
+
+    return !this.fragmentHasTextOrMediaContent(beforeRange.cloneContents());
+  }
+
+  private fragmentHasTextOrMediaContent(fragment: DocumentFragment): boolean {
+    return Array.from(fragment.childNodes).some((node) => {
+      if (node.nodeType === Node.TEXT_NODE) {
+        return (node.textContent ?? "").replace(/\u00a0/g, " ").trim().length > 0;
+      }
+
+      if (node.nodeType !== Node.ELEMENT_NODE) return false;
+
+      const element = node as HTMLElement;
+      if (element.tagName === "BR") return false;
+      if (element.querySelector("img, video, canvas, svg")) return true;
+      return (element.textContent ?? "").replace(/\u00a0/g, " ").trim().length > 0;
+    });
+  }
+
+  private removeTrailingPaginationBlanks(container: HTMLElement): boolean {
+    let removedAny = false;
+    let child = container.lastChild;
+
+    while (child) {
+      const previous = child.previousSibling;
+      if (!this.isRemovablePaginationBlank(child)) break;
+
+      child.remove();
+      removedAny = true;
+      child = previous;
+    }
+
+    return removedAny;
+  }
+
+  private isRemovablePaginationBlank(node: ChildNode): boolean {
+    if (node.nodeType === Node.TEXT_NODE) {
+      return (node.textContent ?? "").replace(/\u00a0/g, " ").trim() === "";
+    }
+
+    if (node.nodeType !== Node.ELEMENT_NODE) return false;
+
+    const element = node as HTMLElement;
+    if (element.hasAttribute("data-hwe-user-blank")) return false;
+    return isEmptyNode(element, false) || isEditableBlankBlock(element);
   }
 
   private isCaretAtStartOfEditable(inner: HTMLElement): boolean {
@@ -484,6 +868,67 @@ export class EditorComponent {
     return ["IMG", "TABLE", "VIDEO", "CANVAS", "SVG"].includes(element.tagName);
   }
 
+  private insertTable(): void {
+    const editable = this.getActiveEditable() ?? this.getEditableForPageIndex(0);
+    if (!editable) return;
+
+    editable.focus({ preventScroll: true });
+    document.execCommand(
+      "insertHTML",
+      false,
+      '<table class="hwe-word-table" data-hwe-source="manual" data-hwe-table="word" style="border-collapse:collapse;width:100%"><tbody><tr><td style="border:solid windowtext 1.0pt;padding:2.85pt 4.25pt"><p><br></p></td><td style="border:solid windowtext 1.0pt;padding:2.85pt 4.25pt"><p><br></p></td></tr><tr><td style="border:solid windowtext 1.0pt;padding:2.85pt 4.25pt"><p><br></p></td><td style="border:solid windowtext 1.0pt;padding:2.85pt 4.25pt"><p><br></p></td></tr></tbody></table><p><br></p>'
+    );
+    this.markEditedAndRebalance(editable);
+  }
+
+  private insertTableRowAfter(): void {
+    const selectionElement = this.getSelectionElement();
+    const row = selectionElement?.closest("tr") ?? this.lastSelectedTableRow;
+    if (!row || !this.root.contains(row)) {
+      this.insertTable();
+      return;
+    }
+
+    const newRow = row.cloneNode(true) as HTMLTableRowElement;
+    Array.from(newRow.cells).forEach((cell) => {
+      cell.innerHTML = "<p><br></p>";
+    });
+    row.parentNode?.insertBefore(newRow, row.nextSibling);
+    this.lastSelectedTableRow = newRow;
+    this.placeCaretInElement(newRow.cells[0] as HTMLElement);
+    this.markEditedAndRebalance(row);
+  }
+
+  private rememberSelectedTableRow(): void {
+    const row = this.getSelectionElement()?.closest("tr");
+    if (row && this.root.contains(row)) this.lastSelectedTableRow = row;
+  }
+
+  private rememberTableRowFromEvent(event: Event): void {
+    const target = event.target;
+    if (!(target instanceof Element)) return;
+
+    const row = target.closest("tr");
+    if (row && this.root.contains(row)) this.lastSelectedTableRow = row as HTMLTableRowElement;
+  }
+
+  private getSelectionElement(): HTMLElement | null {
+    const selection = window.getSelection();
+    const node = selection?.anchorNode;
+    if (!node) return null;
+    return node.nodeType === Node.ELEMENT_NODE
+      ? (node as HTMLElement)
+      : node.parentElement;
+  }
+
+  private markEditedAndRebalance(element: HTMLElement): void {
+    const page = element.closest<HTMLElement>(".hwe-page");
+    if (!page) return;
+    this.isDirty = true;
+    this.toolbar.updateActiveStates();
+    this.scheduleRebalance(page, true);
+  }
+
   private placeCaretAtEnd(inner: HTMLElement): void {
     inner.focus({ preventScroll: true });
 
@@ -495,6 +940,19 @@ export class EditorComponent {
       range.selectNodeContents(inner);
       range.collapse(false);
     }
+
+    const selection = window.getSelection();
+    selection?.removeAllRanges();
+    selection?.addRange(range);
+  }
+
+  private placeCaretInElement(element: HTMLElement): void {
+    const editable = element.closest<HTMLElement>("[contenteditable='true']");
+    editable?.focus({ preventScroll: true });
+
+    const range = document.createRange();
+    range.selectNodeContents(element);
+    range.collapse(false);
 
     const selection = window.getSelection();
     selection?.removeAllRanges();
@@ -542,6 +1000,14 @@ export class EditorComponent {
     this.setStatus("Guardando...", "saving");
 
     try {
+      if (this.activeView === "source" && this.sourceDirty) {
+        await this.renderAndPaginate(this.sourceEditor.value || "<p><br></p>");
+        this.sourceEditor.value = this.collectHtml();
+        this.sourceDirty = false;
+        this.activeView = "source";
+        this.updateViewTabs();
+      }
+
       const html = this.collectHtml();
       if (this.options.saveHtml) {
         await this.options.saveHtml(html);
@@ -563,6 +1029,43 @@ export class EditorComponent {
     } finally {
       saveButton.disabled = false;
     }
+  }
+
+  private exportPdf(): void {
+    if (this.activeView === "source" && this.sourceDirty) {
+      this.setStatus("Vuelve al editor visual o guarda los cambios del HTML antes de exportar.", "error");
+      return;
+    }
+
+    const html = this.documentSerializer.collectPdfHtml(
+      this.root,
+      this.pages,
+      this.pageSetup,
+      this.paragraphStyleElement?.textContent ?? ""
+    );
+    const frame = document.createElement("iframe");
+    frame.title = "Exportar PDF";
+    frame.style.cssText = "position:fixed;right:0;bottom:0;width:0;height:0;border:0;";
+    frame.setAttribute("aria-hidden", "true");
+    this.root.appendChild(frame);
+
+    const doc = frame.contentDocument;
+    if (!doc) {
+      frame.remove();
+      this.setStatus("No se pudo preparar la exportacion a PDF.", "error");
+      return;
+    }
+
+    doc.open();
+    doc.write(html);
+    doc.close();
+
+    window.setTimeout(() => {
+      frame.contentWindow?.focus();
+      frame.contentWindow?.print();
+      window.setTimeout(() => frame.remove(), 1000);
+    }, 250);
+    this.setStatus("Selecciona Guardar como PDF en el dialogo de impresion.", "success");
   }
 
   private collectHtml(): string {
@@ -629,11 +1132,11 @@ export class EditorComponent {
   private getContentLimitBottom(inner: HTMLElement): number {
     const styles = getComputedStyle(inner);
     const paddingBottom = parseFloat(styles.paddingBottom) || 0;
-    return inner.getBoundingClientRect().bottom - paddingBottom;
+    return inner.getBoundingClientRect().bottom - Math.min(paddingBottom, 12);
   }
 
   private getContentBottom(inner: HTMLElement): number | null {
-    const children = getMeaningfulChildren(inner, true);
+    const children = getMeaningfulChildren(inner);
     if (children.length === 0) return null;
 
     return children.reduce<number | null>((bottom, child) => {
@@ -673,11 +1176,19 @@ export class EditorComponent {
 
   async loadHtml(html: string): Promise<void> {
     await this.renderAndPaginate(html || "<p><br></p>");
+    if (this.activeView === "source") {
+      this.sourceEditor.value = this.collectHtml();
+      this.sourceDirty = false;
+    }
     this.isDirty = false;
     this.setStatus("", "");
   }
 
   getHtml(): string {
+    if (this.activeView === "source" && this.sourceDirty) {
+      return this.sourceEditor.value;
+    }
+
     return this.collectHtml();
   }
 
@@ -685,6 +1196,8 @@ export class EditorComponent {
     if (this.rebalanceFrame !== undefined) {
       window.cancelAnimationFrame(this.rebalanceFrame);
     }
+    document.removeEventListener("selectionchange", this.handleSelectionChange);
+    this.toolbar?.destroy();
     this.paginator?.destroy();
     this.container.innerHTML = "";
   }
@@ -694,4 +1207,7 @@ interface IInputs {
   htmlContent: ComponentFramework.PropertyTypes.StringProperty;
   entityName: ComponentFramework.PropertyTypes.StringProperty;
   fieldName: ComponentFramework.PropertyTypes.StringProperty;
+  styleEntitySetName: ComponentFramework.PropertyTypes.StringProperty;
+  styleClassField: ComponentFramework.PropertyTypes.StringProperty;
+  styleCssField: ComponentFramework.PropertyTypes.StringProperty;
 }

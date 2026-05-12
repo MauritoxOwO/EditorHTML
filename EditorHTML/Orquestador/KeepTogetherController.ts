@@ -1,6 +1,4 @@
 export class KeepTogetherController {
-  private readonly maxWholeTableRows = 4;
-
   groupFlowNodes(nodes: ChildNode[]): ChildNode[] {
     const grouped: ChildNode[] = [];
     let index = 0;
@@ -26,7 +24,7 @@ export class KeepTogetherController {
         continue;
       }
 
-      if (this.shouldSoftKeepWithLongTable(current, next)) {
+      if (this.shouldSoftKeepWithTable(current, next)) {
         (current as HTMLElement).setAttribute("data-hwe-keep-with-next", "true");
       }
 
@@ -60,7 +58,7 @@ export class KeepTogetherController {
     return this.isKeepWithNextTrigger(currentElement) && this.isKeepTogetherTarget(nextElement);
   }
 
-  private shouldSoftKeepWithLongTable(
+  private shouldSoftKeepWithTable(
     current: ChildNode | undefined,
     next: ChildNode | undefined
   ): boolean {
@@ -69,7 +67,7 @@ export class KeepTogetherController {
 
     const currentElement = current as HTMLElement;
     const nextElement = next as HTMLElement;
-    return this.isKeepWithNextTrigger(currentElement) && this.isLongTableTarget(nextElement);
+    return this.isKeepWithNextTrigger(currentElement) && this.isTableTarget(nextElement);
   }
 
   private isKeepWithNextTrigger(element: HTMLElement): boolean {
@@ -91,9 +89,6 @@ export class KeepTogetherController {
       return true;
     }
 
-    const table = this.getSingleTableTarget(element);
-    if (table) return this.shouldKeepWholeTable(table);
-
     const meaningfulChildren = Array.from(element.children).filter((child) => {
       const text = (child.textContent ?? "").replace(/\u00a0/g, " ").trim();
       return text || child.querySelector("img, table, figure, video, canvas, svg");
@@ -107,9 +102,8 @@ export class KeepTogetherController {
     );
   }
 
-  private isLongTableTarget(element: HTMLElement): boolean {
-    const table = this.getSingleTableTarget(element);
-    return !!table && !this.shouldKeepWholeTable(table);
+  private isTableTarget(element: HTMLElement): boolean {
+    return !!this.getSingleTableTarget(element);
   }
 
   private getSingleTableTarget(element: HTMLElement): HTMLElement | null {
@@ -124,11 +118,6 @@ export class KeepTogetherController {
 
     const onlyChild = meaningfulChildren[0] as HTMLElement;
     return onlyChild.tagName === "TABLE" ? onlyChild : null;
-  }
-
-  private shouldKeepWholeTable(table: HTMLElement): boolean {
-    const rowCount = table.querySelectorAll("tr").length;
-    return rowCount <= this.maxWholeTableRows;
   }
 
   private isUserBlankBlock(node: ChildNode | undefined): boolean {
