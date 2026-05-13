@@ -1,5 +1,6 @@
 import { WordPasteImporter } from "../import/WordPasteImporter";
 import { PageSetup } from "../Orquestador/PageGeometry";
+import { hweDebugStart } from "../debug/DebugLogger";
 
 export interface PasteResult {
   handled: boolean;
@@ -11,17 +12,31 @@ export class PasteController {
   private readonly wordPasteImporter = new WordPasteImporter();
 
   handlePaste(event: ClipboardEvent, fallbackPage: HTMLElement): PasteResult {
+    const done = hweDebugStart("paste.handlePaste");
     const html = event.clipboardData?.getData("text/html") ?? "";
-    if (!html || !this.wordPasteImporter.isWordHtml(html)) return { handled: false };
+    if (!html || !this.wordPasteImporter.isWordHtml(html)) {
+      done({ handled: false, htmlLength: html.length });
+      return { handled: false };
+    }
 
     event.preventDefault();
 
     const targetEditable = event.currentTarget as HTMLElement;
-    const insertionMarker = this.createPasteInsertionMarker(targetEditable);
     const imported = this.wordPasteImporter.importFromHtml(html);
+    const insertAsBlock = this.shouldInsertAsBlock(imported.html);
+    const insertionMarker = this.createPasteInsertionMarker(targetEditable, insertAsBlock);
     const affectedPage =
       this.insertHtmlAtPasteMarker(imported.html, insertionMarker, targetEditable) ??
       fallbackPage;
+
+    done({
+      affectedPage: !!affectedPage,
+      handled: true,
+      importedLength: imported.html.length,
+      insertAsBlock,
+      rows: this.countMatches(imported.html, /<tr\b/gi),
+      tables: this.countMatches(imported.html, /<table\b/gi),
+    });
 
     return {
       handled: true,
@@ -30,7 +45,10 @@ export class PasteController {
     };
   }
 
-  private createPasteInsertionMarker(targetEditable: HTMLElement): HTMLElement {
+  private createPasteInsertionMarker(
+    targetEditable: HTMLElement,
+    insertAsBlock: boolean
+  ): HTMLElement {
     const marker = document.createElement("span");
     marker.setAttribute("data-hwe-paste-marker", "true");
     marker.style.cssText = "display:inline-block;width:0;height:0;overflow:hidden;line-height:0;";
@@ -50,6 +68,10 @@ export class PasteController {
     }
 
     range.deleteContents();
+    if (insertAsBlock && this.insertMarkerAtBlockBoundary(marker, range, targetEditable)) {
+      return marker;
+    }
+
     range.insertNode(marker);
     return marker;
   }
@@ -82,5 +104,32 @@ export class PasteController {
     }
 
     return targetEditable.closest<HTMLElement>(".hwe-page");
+  }
+
+  private shouldInsertAsBlock(html: string): boolean {
+    return /<(?:table|h[1-6]|p|div|section|article|ul|ol|blockquote)\b/i.test(html);
+  }
+
+  private insertMarkerAtBlockBoundary(
+    marker: HTMLElement,
+    range: Range,
+    targetEditable: HTMLElement
+  ): boolean {
+    const container =
+      range.startContainer.nodeType === Node.ELEMENT_NODE
+        ? (range.startContainer as Element)
+        : range.startContainer.parentElement;
+    const block = container?.closest<HTMLElement>(
+      "p, li, h1, h2, h3, h4, h5, h6, blockquote, pre, div"
+    );
+    if (!block || block === targetEditable || !targetEditable.contains(block)) return false;
+    if (block.closest("td, th")) return false;
+
+    block.parentNode?.insertBefore(marker, block.nextSibling);
+    return !!marker.parentNode;
+  }
+
+  private countMatches(value: string, pattern: RegExp): number {
+    return value.match(pattern)?.length ?? 0;
   }
 }

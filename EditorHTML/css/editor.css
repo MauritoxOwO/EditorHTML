@@ -231,18 +231,14 @@
 }
 
 .hwe-page-inner > table,
-.hwe-page-inner > div:has(> table:only-child),
-.hwe-page-inner > section:has(> table:only-child),
-.hwe-page-inner > article:has(> table:only-child) {
+.hwe-table-flow-wrapper {
   width: 100% !important;
   max-width: 100% !important;
   margin-left: 0;
   margin-right: 0;
 }
 
-.hwe-page-inner > div:has(> table:only-child) > table,
-.hwe-page-inner > section:has(> table:only-child) > table,
-.hwe-page-inner > article:has(> table:only-child) > table {
+.hwe-table-flow-wrapper > table {
   width: 100% !important;
 }
 

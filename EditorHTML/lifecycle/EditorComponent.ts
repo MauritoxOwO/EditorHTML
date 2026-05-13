@@ -26,7 +26,11 @@ import {
   isEditableBlankBlock,
   isEmptyNode,
 } from "../dom/EditableDom";
-import { ImageOcrService } from "../ocr/ImageOcrService";
+import {
+  hweDebugLog,
+  hweDebugStart,
+  installHweDebugGlobals,
+} from "../debug/DebugLogger";
 
 type PcfContext = ComponentFramework.Context<IInputs>;
 type StatusType = "success" | "error" | "saving" | "";
@@ -92,12 +96,12 @@ export class EditorComponent {
   private readonly documentSerializer = new DocumentSerializer();
   private readonly assetLayoutManager = new AssetLayoutManager();
   private readonly pasteController = new PasteController();
-  private readonly imageOcrService = new ImageOcrService({
-    setStatus: (message, type) => this.setStatus(message, type),
-  });
   private pageSetup: PageSetup = DEFAULT_PAGE_SETUP;
   private allocatedWidth?: number;
   private allocatedHeight?: number;
+  private deferredRenderHtml: string | null = null;
+  private deferredRenderFrame: number | undefined;
+  private resizeObserver: ResizeObserver | null = null;
 
   private readonly baseUrl: string;
   private readonly entityName: string;
@@ -169,6 +173,11 @@ export class EditorComponent {
     this.root = document.createElement("div");
     this.root.className = "hwe-root";
     this.applyCurrentPageSetup();
+    installHweDebugGlobals(() => this.root ?? null);
+    hweDebugLog("editor.buildShell", {
+      allocatedHeight: this.allocatedHeight,
+      allocatedWidth: this.allocatedWidth,
+    });
 
     this.editorHeader = document.createElement("div");
     this.editorHeader.className = "hwe-editor-header";
@@ -216,6 +225,11 @@ export class EditorComponent {
 
     this.root.appendChild(statusBar);
     this.container.appendChild(this.root);
+
+    if (typeof ResizeObserver !== "undefined") {
+      this.resizeObserver = new ResizeObserver(() => this.renderDeferredWhenVisible());
+      this.resizeObserver.observe(this.container);
+    }
   }
 
   private buildViewTabs(): void {
@@ -408,16 +422,39 @@ export class EditorComponent {
   }
 
   private async renderAndPaginate(html: string): Promise<void> {
+    const done = hweDebugStart("editor.renderAndPaginate", {
+      htmlLength: html.length,
+    });
     this.workspace.innerHTML = "";
     this.setPageSetup(DEFAULT_PAGE_SETUP);
 
     const normalizedDocument = this.documentSerializer.normalizeHtmlForPagination(html);
+    hweDebugLog("editor.renderAndPaginate.normalized", {
+      htmlLength: normalizedDocument.html.length,
+      pageSetup: normalizedDocument.pageSetup ?? null,
+    });
 
     this.pages = [this.createPageElement(normalizedDocument.html)];
     this.workspace.appendChild(this.pages[0]);
     this.applyOfficialTableWidths(this.workspace);
 
     this.paginator.setPages(this.pages);
+    if (!this.canMeasureLayout()) {
+      this.deferredRenderHtml = html;
+      this.syncWorkspace();
+      this.updatePageCount();
+      hweDebugLog("editor.renderAndPaginate.deferred", {
+        root: this.root.getBoundingClientRect(),
+        workspace: this.workspace.getBoundingClientRect(),
+      });
+      done({
+        deferred: true,
+        pages: this.pages.length,
+      });
+      return;
+    }
+
+    this.deferredRenderHtml = null;
     await this.assetLayoutManager.waitForStableLayout(this.workspace);
 
     this.paginator.repaginateAll();
@@ -425,6 +462,9 @@ export class EditorComponent {
     this.pages.forEach((page) => this.applyOfficialTableWidths(page));
     this.syncWorkspace();
     this.updatePageCount();
+    done({
+      pages: this.pages.length,
+    });
   }
 
   private createPageElement(html?: string): HTMLElement {
@@ -506,6 +546,14 @@ export class EditorComponent {
 
       const pageIndex = this.pages.indexOf(pending.page);
       if (!this.shouldRebalancePage(pending.page, pageIndex, pending.pullFromNextPages)) return;
+      const done = hweDebugStart("editor.scheduleRebalance.flush", {
+        compactPages: pending.compactPages,
+        includePreviousPage: pending.includePreviousPage,
+        overflowOnly: pending.overflowOnly,
+        pageIndex,
+        pages: this.pages.length,
+        pullFromNextPages: pending.pullFromNextPages,
+      });
 
       const startPageIndex = pending.includePreviousPage ? Math.max(0, pageIndex - 1) : pageIndex;
       const startPage = this.pages[startPageIndex] ?? pending.page;
@@ -531,6 +579,9 @@ export class EditorComponent {
       this.restoreCaretViewport(marker, caretViewportTop);
       CaretManager.restoreMarker(marker, fallbackEditable);
       CaretManager.removeMarkers(this.root);
+      done({
+        pages: this.pages.length,
+      });
     });
   }
 
@@ -639,10 +690,17 @@ export class EditorComponent {
       : Array.from(root.querySelectorAll<HTMLElement>(".hwe-page-inner"));
 
     inners.forEach((inner) => {
+      inner.querySelectorAll<HTMLElement>(".hwe-table-flow-wrapper").forEach((wrapper) => {
+        if (!this.getDirectFlowTable(wrapper)) wrapper.classList.remove("hwe-table-flow-wrapper");
+      });
+
       Array.from(inner.children).forEach((child) => {
         const table = this.getDirectFlowTable(child as HTMLElement);
         if (!table) return;
 
+        if ((child as HTMLElement) !== table) {
+          (child as HTMLElement).classList.add("hwe-table-flow-wrapper");
+        }
         table.style.setProperty("width", "100%", "important");
         table.style.setProperty("max-width", "100%", "important");
         table.style.setProperty("margin-left", "0", "important");
@@ -672,11 +730,17 @@ export class EditorComponent {
 
     this.isDirty = true;
     this.toolbar.updateActiveStates();
-    this.scheduleRebalance(affectedPage, true, { includePreviousPage: false });
+    this.scheduleRebalance(affectedPage, false, {
+      compactPages: false,
+      includePreviousPage: false,
+    });
     void this.assetLayoutManager
       .waitForStableLayout(affectedPage)
       .then(() => {
-        this.scheduleRebalance(affectedPage, true, { includePreviousPage: false });
+        this.scheduleRebalance(affectedPage, false, {
+          compactPages: false,
+          includePreviousPage: false,
+        });
       });
   }
 
@@ -1317,6 +1381,7 @@ export class EditorComponent {
     this.allocatedWidth = width;
     this.allocatedHeight = height;
     this.applyAllocatedSize();
+    this.renderDeferredWhenVisible();
   }
 
   getHtml(): string {
@@ -1331,8 +1396,11 @@ export class EditorComponent {
     if (this.rebalanceFrame !== undefined) {
       window.cancelAnimationFrame(this.rebalanceFrame);
     }
+    if (this.deferredRenderFrame !== undefined) {
+      window.cancelAnimationFrame(this.deferredRenderFrame);
+    }
+    this.resizeObserver?.disconnect();
     document.removeEventListener("selectionchange", this.handleSelectionChange);
-    this.imageOcrService.destroy();
     this.toolbar?.destroy();
     this.paginator?.destroy();
     this.container.innerHTML = "";
@@ -1348,6 +1416,30 @@ export class EditorComponent {
     this.container.style.overflow = "hidden";
     this.container.style.display = "flex";
     this.container.style.flexDirection = "column";
+  }
+
+  private renderDeferredWhenVisible(): void {
+    if (!this.deferredRenderHtml || this.deferredRenderFrame !== undefined) return;
+
+    this.deferredRenderFrame = window.requestAnimationFrame(() => {
+      this.deferredRenderFrame = undefined;
+      if (!this.deferredRenderHtml || !this.canMeasureLayout()) return;
+
+      const html = this.deferredRenderHtml;
+      this.deferredRenderHtml = null;
+      hweDebugLog("editor.renderDeferredWhenVisible", {
+        htmlLength: html.length,
+      });
+      void this.renderAndPaginate(html);
+    });
+  }
+
+  private canMeasureLayout(): boolean {
+    if (!this.root?.isConnected || !this.workspace?.isConnected) return false;
+
+    const rootRect = this.root.getBoundingClientRect();
+    const workspaceRect = this.workspace.getBoundingClientRect();
+    return rootRect.width > 20 && rootRect.height > 20 && workspaceRect.height > 20;
   }
 
   private formatAllocatedSize(value: number | undefined): string {

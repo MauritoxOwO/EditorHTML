@@ -3,6 +3,7 @@ import {
   PageSetup,
   sanitizeCssLength,
 } from "../Orquestador/PageGeometry";
+import { hweDebugStart } from "../debug/DebugLogger";
 
 export interface WordPasteResult {
   html: string;
@@ -100,19 +101,28 @@ export class WordPasteImporter {
   }
 
   importFromHtml(html: string): WordPasteResult {
+    const done = hweDebugStart("wordPaste.importFromHtml", {
+      htmlLength: html.length,
+    });
     const isWordHtml = this.isWordHtml(html);
     const doc = new DOMParser().parseFromString(html || "", "text/html");
     const pageSetup = this.extractPageSetup(doc);
     const fragment = this.getClipboardFragment(doc, html);
 
     this.cleanFragment(fragment);
-    this.preserveHeadStyles(doc, fragment);
 
-    return {
+    const result = {
       html: fragment.innerHTML.trim() || "<p><br></p>",
       isWordHtml,
       pageSetup,
     };
+    done({
+      htmlLength: result.html.length,
+      pageSetup: result.pageSetup ?? null,
+      rows: fragment.querySelectorAll("tr").length,
+      tables: fragment.querySelectorAll("table").length,
+    });
+    return result;
   }
 
   private getClipboardFragment(doc: Document, rawHtml: string): HTMLElement {
@@ -335,20 +345,6 @@ export class WordPasteImporter {
     element.removeAttribute("align");
   }
 
-  private preserveHeadStyles(doc: Document, root: HTMLElement): void {
-    const css = Array.from(doc.head?.querySelectorAll("style") ?? [])
-      .map((style) => style.textContent ?? "")
-      .filter(Boolean)
-      .join("\n");
-    const sanitizedCss = this.sanitizeStyleText(css);
-    if (!sanitizedCss) return;
-
-    const style = document.createElement("style");
-    style.setAttribute("data-hwe-preserved-style", "true");
-    style.textContent = sanitizedCss;
-    root.insertBefore(style, root.firstChild);
-  }
-
   private moveLengthAttributeToStyle(element: HTMLElement, attrName: "width" | "height"): void {
     const value = element.getAttribute(attrName);
     if (!value || element.style.getPropertyValue(attrName)) return;
@@ -408,12 +404,5 @@ export class WordPasteImporter {
       .filter((className) => className && !className.startsWith("hwe-"))
       .filter((className) => /^-?[_a-zA-Z]+[_a-zA-Z0-9-]*$/.test(className))
       .join(" ");
-  }
-
-  private sanitizeStyleText(css: string): string {
-    return css
-      .replace(/<\/style/gi, "<\\/style")
-      .replace(/expression\s*\([^)]*\)/gi, "")
-      .replace(/url\s*\(\s*(['"]?)javascript:[^)]*\)/gi, "url()");
   }
 }

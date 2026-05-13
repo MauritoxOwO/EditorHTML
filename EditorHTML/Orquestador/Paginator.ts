@@ -1,5 +1,6 @@
 import { KeepTogetherController } from "./KeepTogetherController";
 import { TablePaginator } from "./TablePaginator";
+import { hweDebugLog, hweDebugStart } from "../debug/DebugLogger";
 
 export type PageFactory = (html?: string) => HTMLElement;
 export type OnPagesChanged = (pages: HTMLElement[]) => void;
@@ -37,12 +38,18 @@ export class Paginator {
   repaginateAll(): void {
     if (this.rebalancing) return;
 
+    const done = hweDebugStart("paginator.repaginateAll", {
+      pages: this.pages.length,
+    });
     this.rebalancing = true;
     try {
       this.repaginateFromIndex(0);
       this.onPagesChanged(this.pages);
     } finally {
       this.rebalancing = false;
+      done({
+        pages: this.pages.length,
+      });
     }
   }
 
@@ -53,6 +60,12 @@ export class Paginator {
     if (index === -1) return;
 
     const includePreviousPage = options.includePreviousPage ?? true;
+    const done = hweDebugStart("paginator.rebalanceFromPage", {
+      compactPages: options.compactPages ?? true,
+      includePreviousPage,
+      index,
+      pages: this.pages.length,
+    });
 
     this.rebalancing = true;
     try {
@@ -60,6 +73,9 @@ export class Paginator {
       this.onPagesChanged(this.pages);
     } finally {
       this.rebalancing = false;
+      done({
+        pages: this.pages.length,
+      });
     }
   }
 
@@ -69,12 +85,22 @@ export class Paginator {
     const index = this.pages.indexOf(page);
     if (index === -1) return;
 
+    const done = hweDebugStart("paginator.pushOverflowForwardFromPage", {
+      index,
+      pageOverflows: this.pageOverflows(page),
+      pages: this.pages.length,
+    });
     this.rebalancing = true;
     try {
-      this.resolveOverflow(index);
+      const moved = this.resolveOverflow(index);
       this.trimLeadingBlankBlocksFromContinuationPages();
       this.removeEmptyPages();
       this.onPagesChanged(this.pages);
+      done({
+        moved,
+        pageStillOverflows: this.pages[index] ? this.pageOverflows(this.pages[index]) : false,
+        pages: this.pages.length,
+      });
     } finally {
       this.rebalancing = false;
     }
@@ -87,6 +113,11 @@ export class Paginator {
   private repaginateFromIndex(startIndex: number, options: RebalanceOptions = {}): void {
     const safeStart = Math.max(0, Math.min(startIndex, this.pages.length - 1));
     const shouldCompactPages = options.compactPages ?? true;
+    const done = hweDebugStart("paginator.repaginateFromIndex", {
+      compactPages: shouldCompactPages,
+      pages: this.pages.length,
+      startIndex: safeStart,
+    });
     const nodes = this.keepTogetherController.groupFlowNodes(
       this.mergeFlowFragments(this.collectNodesFromIndex(safeStart))
     );
@@ -103,6 +134,10 @@ export class Paginator {
     this.stabilizeOverflow();
     this.trimLeadingBlankBlocksFromContinuationPages();
     this.removeEmptyPages();
+    done({
+      nodes: nodes.length,
+      pages: this.pages.length,
+    });
   }
 
   private stabilizeOverflow(): void {
@@ -113,7 +148,13 @@ export class Paginator {
       if (overflowingIndex === -1) break;
 
       const moved = this.resolveOverflow(overflowingIndex);
-      if (!moved) break;
+      if (!moved) {
+        hweDebugLog("paginator.stabilizeOverflow.unresolved", {
+          overflowingIndex,
+          pages: this.pages.length,
+        });
+        break;
+      }
     }
   }
 
@@ -355,6 +396,10 @@ export class Paginator {
     let currentIndex = index;
     let safety = 0;
     let movedAny = false;
+    const done = hweDebugStart("paginator.resolveOverflow", {
+      index,
+      pages: this.pages.length,
+    });
 
     while (currentIndex < this.pages.length && safety++ < 500) {
       const page = this.pages[currentIndex];
@@ -372,10 +417,21 @@ export class Paginator {
       const moved = this.moveOverflowPiece(inner, nextInner, page);
       movedAny = movedAny || moved;
       if (!moved) {
+        hweDebugLog("paginator.resolveOverflow.noMove", {
+          childCount: this.getMeaningfulChildren(inner).length,
+          currentIndex,
+          lastChild: this.describeNode(this.getLastMeaningfulChild(inner)),
+          pageOverflows: this.pageOverflows(page),
+        });
         currentIndex++;
       }
     }
 
+    done({
+      iterations: safety - 1,
+      movedAny,
+      pages: this.pages.length,
+    });
     return movedAny;
   }
 
@@ -802,6 +858,27 @@ export class Paginator {
     range.selectNodeContents(node);
     const rect = range.getBoundingClientRect();
     return rect.width > 0 || rect.height > 0 ? rect.bottom : null;
+  }
+
+  private describeNode(node: ChildNode | null): unknown {
+    if (!node) return null;
+    if (node.nodeType === Node.TEXT_NODE) {
+      return {
+        text: (node.textContent ?? "").replace(/\s+/g, " ").trim().slice(0, 80),
+        type: "text",
+      };
+    }
+    if (node.nodeType !== Node.ELEMENT_NODE) {
+      return { type: `node-${node.nodeType}` };
+    }
+
+    const element = node as HTMLElement;
+    return {
+      blank: element.getAttribute("data-hwe-user-blank") === "true",
+      className: element.getAttribute("class") ?? "",
+      tagName: element.tagName,
+      text: (element.textContent ?? "").replace(/\s+/g, " ").trim().slice(0, 80),
+    };
   }
 
   private getLastMeaningfulChild(container: HTMLElement): ChildNode | null {
