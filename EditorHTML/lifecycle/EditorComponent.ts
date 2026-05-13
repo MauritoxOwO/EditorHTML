@@ -22,7 +22,7 @@ import { PasteController } from "./PasteController";
 import { AssetLayoutManager } from "./AssetLayoutManager";
 import { EditorDiagnosticsController } from "./EditorDiagnosticsController";
 import { EditorLayoutService } from "./EditorLayoutService";
-import { PageBackspaceController } from "./PageBackSpaceController";
+import { PageBackspaceController } from "./PageBackspaceController";
 import { ParagraphStyleManager } from "./ParagraphStyleManager";
 import { StyleSelectionTracker } from "./StyleSelectionTracker";
 import { TableCommandController } from "./TableCommandController";
@@ -154,11 +154,13 @@ export class EditorComponent {
 
   async init(): Promise<void> {
     this.buildShell();
-    void this.loadParagraphStyles();
     this.paginator = new Paginator(
       (html?: string) => this.createPageElement(html),
-      (pages: HTMLElement[]) => this.onPagesChanged(pages)
+      (pages: HTMLElement[]) => this.onPagesChanged(pages),
+      (page: HTMLElement, afterPage: HTMLElement | null) =>
+        this.attachPageForMeasurement(page, afterPage)
     );
+    await this.loadParagraphStyles();
     await this.loadContent();
   }
 
@@ -363,9 +365,9 @@ export class EditorComponent {
       htmlLength: html.length,
     });
     this.workspace.innerHTML = "";
-    this.setPageSetup(DEFAULT_PAGE_SETUP);
 
     const normalizedDocument = this.documentSerializer.normalizeHtmlForPagination(html);
+    this.setPageSetup(normalizedDocument.pageSetup ?? DEFAULT_PAGE_SETUP);
     hweDebugLog("editor.renderAndPaginate.normalized", {
       htmlLength: normalizedDocument.html.length,
       pageSetup: normalizedDocument.pageSetup ?? null,
@@ -584,6 +586,15 @@ export class EditorComponent {
     this.pages.forEach((page) => this.layoutService.applyOfficialTableWidths(page));
     this.syncWorkspace();
     this.updatePageCount();
+  }
+
+  private attachPageForMeasurement(page: HTMLElement, afterPage: HTMLElement | null): void {
+    this.layoutService.applyOfficialTableWidths(page);
+    if (page.parentElement === this.workspace) return;
+
+    const reference =
+      afterPage?.parentElement === this.workspace ? afterPage.nextSibling : null;
+    this.workspace.insertBefore(page, reference);
   }
 
   private syncWorkspace(): void {
