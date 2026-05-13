@@ -20,13 +20,20 @@ export interface NormalizedDocument {
   pageSetup?: PageSetup;
 }
 
+const LARGE_DATA_IMAGE_URL_THRESHOLD = 1_500_000;
+const LARGE_IMAGE_PLACEHOLDER_SRC =
+  "data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%221850%22%20height%3D%222420%22%20viewBox%3D%220%200%201850%202420%22%3E%3Crect%20width%3D%221850%22%20height%3D%222420%22%20fill%3D%22%23f7f7f7%22%2F%3E%3Crect%20x%3D%2250%22%20y%3D%2250%22%20width%3D%221750%22%20height%3D%222320%22%20fill%3D%22none%22%20stroke%3D%22%23bdbdbd%22%20stroke-width%3D%226%22%20stroke-dasharray%3D%2224%2024%22%2F%3E%3Ctext%20x%3D%22925%22%20y%3D%221210%22%20text-anchor%3D%22middle%22%20font-family%3D%22Arial%2C%20sans-serif%22%20font-size%3D%2272%22%20fill%3D%22%23666%22%3EImagen%20grande%20en%20pausa%3C%2Ftext%3E%3C%2Fsvg%3E";
+
 export class DocumentSerializer {
   private readonly wordPasteImporter = new WordPasteImporter();
+  private readonly detachedLargeImages = new Map<string, string>();
+  private largeImageCounter = 0;
 
   normalizeHtmlForPagination(html: string): NormalizedDocument {
-    const doc = new DOMParser().parseFromString(html || "<p><br></p>", "text/html");
+    const safeHtml = this.detachLargeDataImages(html || "<p><br></p>");
+    const doc = new DOMParser().parseFromString(safeHtml, "text/html");
     const temp = document.createElement("div");
-    temp.innerHTML = doc.body?.innerHTML || html || "<p><br></p>";
+    temp.innerHTML = doc.body?.innerHTML || safeHtml || "<p><br></p>";
 
     const savedDocument = this.getSavedDocumentWrapper(temp);
     const pageSetup = savedDocument ? readPageSetupFromElement(savedDocument) ?? undefined : undefined;
@@ -39,8 +46,8 @@ export class DocumentSerializer {
       };
     }
 
-    if (this.wordPasteImporter.isWordHtml(html)) {
-      const imported = this.wordPasteImporter.importFromHtml(html);
+    if (this.wordPasteImporter.isWordHtml(safeHtml)) {
+      const imported = this.wordPasteImporter.importFromHtml(safeHtml);
       return {
         html: imported.html,
         pageSetup: imported.pageSetup,
@@ -186,7 +193,36 @@ ${content}
     const clone = element.cloneNode(true) as HTMLElement;
     unwrapGeneratedKeepTogetherGroups(clone);
     this.removeRuntimeOnlyState(clone);
+    this.restoreDetachedLargeImages(clone);
     return clone.innerHTML;
+  }
+
+  private detachLargeDataImages(html: string): string {
+    return html.replace(
+      /(<img\b[^>]*?)\s+src\s*=\s*(["'])(data:image\/[^"']+)\2/gi,
+      (match, prefix: string, quote: string, src: string) => {
+        if (src.length < LARGE_DATA_IMAGE_URL_THRESHOLD) return match;
+
+        const id = this.rememberDetachedLargeImage(src);
+        return `${prefix} src=${quote}${LARGE_IMAGE_PLACEHOLDER_SRC}${quote} data-hwe-large-image-id=${quote}${id}${quote} data-hwe-large-image-placeholder=${quote}true${quote}`;
+      }
+    );
+  }
+
+  private rememberDetachedLargeImage(src: string): string {
+    const id = `hwe-large-image-${Date.now().toString(36)}-${this.largeImageCounter++}`;
+    this.detachedLargeImages.set(id, src);
+    return id;
+  }
+
+  private restoreDetachedLargeImages(root: HTMLElement): void {
+    root.querySelectorAll<HTMLImageElement>("img[data-hwe-large-image-id]").forEach((image) => {
+      const id = image.getAttribute("data-hwe-large-image-id") ?? "";
+      const src = this.detachedLargeImages.get(id);
+      if (src) image.setAttribute("src", src);
+      image.removeAttribute("data-hwe-large-image-id");
+      image.removeAttribute("data-hwe-large-image-placeholder");
+    });
   }
 
   private applyBodyFormattingWrapper(doc: Document, root: HTMLElement): void {

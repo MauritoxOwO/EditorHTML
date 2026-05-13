@@ -456,6 +456,7 @@ export class EditorComponent {
         this.scheduleRebalance(page, shouldPullFromNextPages, {
           includePreviousPage: shouldPullFromNextPages,
           compactPages: shouldPullFromNextPages || !isEnterInput,
+          overflowOnly: isEnterInput && !shouldPullFromNextPages,
         });
       }
     });
@@ -511,10 +512,14 @@ export class EditorComponent {
       const activeEditable = this.getActiveEditable();
       const marker = CaretManager.createMarker(this.root);
       const caretViewportTop = marker?.getBoundingClientRect().top ?? null;
-      this.paginator.rebalanceFromPage(startPage, {
-        includePreviousPage: false,
-        compactPages: pending.compactPages,
-      });
+      if (pending.overflowOnly) {
+        this.paginator.pushOverflowForwardFromPage(pending.page);
+      } else {
+        this.paginator.rebalanceFromPage(startPage, {
+          includePreviousPage: false,
+          compactPages: pending.compactPages,
+        });
+      }
       this.pages = this.paginator.getPages();
       this.pages.forEach((currentPage) => {
         const inner = currentPage.querySelector<HTMLElement>(".hwe-page-inner");
@@ -539,6 +544,7 @@ export class EditorComponent {
       pullFromNextPages,
       includePreviousPage: options.includePreviousPage ?? pullFromNextPages,
       compactPages: options.compactPages ?? true,
+      overflowOnly: options.overflowOnly ?? false,
     };
 
     if (!this.pendingRebalance) {
@@ -562,6 +568,10 @@ export class EditorComponent {
       compactPages: mergedPullFromNextPages
         ? true
         : this.pendingRebalance.compactPages && nextRebalance.compactPages,
+      overflowOnly:
+        !mergedPullFromNextPages &&
+        this.pendingRebalance.overflowOnly &&
+        nextRebalance.overflowOnly,
     };
   }
 

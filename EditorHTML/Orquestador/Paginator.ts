@@ -7,6 +7,7 @@ export type OnPagesChanged = (pages: HTMLElement[]) => void;
 export interface RebalanceOptions {
   includePreviousPage?: boolean;
   compactPages?: boolean;
+  overflowOnly?: boolean;
 }
 
 export class Paginator {
@@ -62,6 +63,23 @@ export class Paginator {
     }
   }
 
+  pushOverflowForwardFromPage(page: HTMLElement): void {
+    if (this.rebalancing) return;
+
+    const index = this.pages.indexOf(page);
+    if (index === -1) return;
+
+    this.rebalancing = true;
+    try {
+      this.resolveOverflow(index);
+      this.trimLeadingBlankBlocksFromContinuationPages();
+      this.removeEmptyPages();
+      this.onPagesChanged(this.pages);
+    } finally {
+      this.rebalancing = false;
+    }
+  }
+
   destroy(): void {
     this.pages = [];
   }
@@ -94,7 +112,8 @@ export class Paginator {
       const overflowingIndex = this.pages.findIndex((page) => this.pageOverflows(page));
       if (overflowingIndex === -1) break;
 
-      this.resolveOverflow(overflowingIndex);
+      const moved = this.resolveOverflow(overflowingIndex);
+      if (!moved) break;
     }
   }
 
@@ -332,9 +351,10 @@ export class Paginator {
     return element.getBoundingClientRect().height <= availableHeight + 1;
   }
 
-  private resolveOverflow(index: number): void {
+  private resolveOverflow(index: number): boolean {
     let currentIndex = index;
     let safety = 0;
+    let movedAny = false;
 
     while (currentIndex < this.pages.length && safety++ < 500) {
       const page = this.pages[currentIndex];
@@ -350,10 +370,13 @@ export class Paginator {
       if (!nextInner) break;
 
       const moved = this.moveOverflowPiece(inner, nextInner, page);
+      movedAny = movedAny || moved;
       if (!moved) {
         currentIndex++;
       }
     }
+
+    return movedAny;
   }
 
   private moveOverflowPiece(
