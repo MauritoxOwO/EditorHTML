@@ -1,3 +1,6 @@
+const LARGE_DATA_IMAGE_BYTES = 2_500_000;
+const IMAGE_WAIT_TIMEOUT_MS = 1200;
+
 export class AssetLayoutManager {
   async waitForStableLayout(root: HTMLElement): Promise<void> {
     await Promise.all([this.waitForImages(root), this.waitForFonts()]);
@@ -11,16 +14,55 @@ export class AssetLayoutManager {
 
     await Promise.all(
       pending.map((img) => {
-        if (typeof img.decode === "function") {
-          return img.decode().catch(() => undefined);
+        if (this.isLargeDataImage(img)) {
+          return this.waitForImageEvent(img, IMAGE_WAIT_TIMEOUT_MS);
         }
 
-        return new Promise<void>((resolve) => {
-          img.addEventListener("load", () => resolve(), { once: true });
-          img.addEventListener("error", () => resolve(), { once: true });
-        });
+        if (typeof img.decode === "function") {
+          return Promise.race([
+            img.decode().catch(() => undefined),
+            this.waitForTimeout(IMAGE_WAIT_TIMEOUT_MS),
+          ]);
+        }
+
+        return this.waitForImageEvent(img, IMAGE_WAIT_TIMEOUT_MS);
       })
     );
+  }
+
+  private isLargeDataImage(img: HTMLImageElement): boolean {
+    const src = img.getAttribute("src") ?? "";
+    return src.startsWith("data:image/") && this.estimateDataUrlBytes(src) > LARGE_DATA_IMAGE_BYTES;
+  }
+
+  private estimateDataUrlBytes(src: string): number {
+    const commaIndex = src.indexOf(",");
+    const payload = commaIndex >= 0 ? src.slice(commaIndex + 1) : src;
+    if (/^data:[^;,]+;base64,/i.test(src)) {
+      return Math.floor(payload.length * 0.75);
+    }
+
+    return payload.length;
+  }
+
+  private waitForImageEvent(img: HTMLImageElement, timeoutMs: number): Promise<void> {
+    if (img.complete && img.naturalWidth > 0) return Promise.resolve();
+
+    return new Promise<void>((resolve) => {
+      let settled = false;
+      let timeout = 0;
+      const done = () => {
+        if (settled) return;
+        settled = true;
+        window.clearTimeout(timeout);
+        img.removeEventListener("load", done);
+        img.removeEventListener("error", done);
+        resolve();
+      };
+      timeout = window.setTimeout(done, timeoutMs);
+      img.addEventListener("load", done, { once: true });
+      img.addEventListener("error", done, { once: true });
+    });
   }
 
   private async waitForFonts(): Promise<void> {
@@ -46,5 +88,9 @@ export class AssetLayoutManager {
       };
       requestAnimationFrame(tick);
     });
+  }
+
+  private waitForTimeout(timeoutMs: number): Promise<void> {
+    return new Promise((resolve) => window.setTimeout(resolve, timeoutMs));
   }
 }

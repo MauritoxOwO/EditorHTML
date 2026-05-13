@@ -10,6 +10,15 @@ export interface PageSetup {
 export const DEFAULT_PAGE_SETUP: PageSetup = {
   width: "210mm",
   height: "297mm",
+  marginTop: "35mm",
+  marginRight: "12.5mm",
+  marginBottom: "20mm",
+  marginLeft: "12.5mm",
+};
+
+const LEGACY_DEFAULT_PAGE_SETUP: PageSetup = {
+  width: "210mm",
+  height: "297mm",
   marginTop: "12.5mm",
   marginRight: "12.5mm",
   marginBottom: "20mm",
@@ -66,7 +75,12 @@ export function readPageSetupFromElement(element: Element | null): PageSetup | n
     return acc;
   }, {});
 
-  return Object.keys(setup).length > 0 ? normalizePageSetup(setup) : null;
+  if (Object.keys(setup).length === 0) return null;
+
+  const normalized = normalizePageSetup(setup);
+  return isSamePageSetup(normalized, LEGACY_DEFAULT_PAGE_SETUP)
+    ? DEFAULT_PAGE_SETUP
+    : normalized;
 }
 
 export function writePageSetupAttributes(element: HTMLElement, setup: PageSetup): void {
@@ -93,4 +107,10 @@ export function sanitizeCssLength(value: string | null | undefined): string | nu
   if (!CSS_LENGTH_RE.test(normalized)) return null;
 
   return normalized;
+}
+
+function isSamePageSetup(left: PageSetup, right: PageSetup): boolean {
+  return (Object.keys(PAGE_SETUP_ATTRS) as Array<keyof PageSetup>).every(
+    (key) => left[key] === right[key]
+  );
 }

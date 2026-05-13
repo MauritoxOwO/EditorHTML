@@ -4,6 +4,8 @@ export interface ParagraphStyleOption {
   className: string;
 }
 
+export const CLEAR_PARAGRAPH_STYLE_VALUE = "__hwe-clear-paragraph-style";
+
 export interface ToolbarOptions {
   onInsertTable?: () => void;
   onInsertRowAfter?: () => void;
@@ -170,6 +172,13 @@ export class Toolbar {
     placeholder.textContent = styles.length > 0 ? "Estilo" : "Sin estilos";
     placeholder.selected = true;
     this.styleSelect.appendChild(placeholder);
+
+    if (styles.length > 0) {
+      const clearOption = document.createElement("option");
+      clearOption.value = CLEAR_PARAGRAPH_STYLE_VALUE;
+      clearOption.textContent = "Sin estilo";
+      this.styleSelect.appendChild(clearOption);
+    }
 
     styles.forEach((style) => {
       const option = document.createElement("option");

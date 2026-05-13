@@ -4,6 +4,12 @@ import { TablePaginator } from "./TablePaginator";
 export type PageFactory = (html?: string) => HTMLElement;
 export type OnPagesChanged = (pages: HTMLElement[]) => void;
 
+export interface RebalanceOptions {
+  includePreviousPage?: boolean;
+  compactPages?: boolean;
+  overflowOnly?: boolean;
+}
+
 export class Paginator {
   private static textFlowCounter = 0;
 
@@ -40,7 +46,24 @@ export class Paginator {
     }
   }
 
-  rebalanceFromPage(page: HTMLElement): void {
+  rebalanceFromPage(page: HTMLElement, options: RebalanceOptions = {}): void {
+    if (this.rebalancing) return;
+
+    const index = this.pages.indexOf(page);
+    if (index === -1) return;
+
+    const includePreviousPage = options.includePreviousPage ?? true;
+
+    this.rebalancing = true;
+    try {
+      this.repaginateFromIndex(includePreviousPage ? Math.max(0, index - 1) : index, options);
+      this.onPagesChanged(this.pages);
+    } finally {
+      this.rebalancing = false;
+    }
+  }
+
+  pushOverflowForwardFromPage(page: HTMLElement): void {
     if (this.rebalancing) return;
 
     const index = this.pages.indexOf(page);
@@ -48,7 +71,9 @@ export class Paginator {
 
     this.rebalancing = true;
     try {
-      this.repaginateFromIndex(Math.max(0, index - 1));
+      this.resolveOverflow(index);
+      this.trimLeadingBlankBlocksFromContinuationPages();
+      this.removeEmptyPages();
       this.onPagesChanged(this.pages);
     } finally {
       this.rebalancing = false;
@@ -59,8 +84,9 @@ export class Paginator {
     this.pages = [];
   }
 
-  private repaginateFromIndex(startIndex: number): void {
+  private repaginateFromIndex(startIndex: number, options: RebalanceOptions = {}): void {
     const safeStart = Math.max(0, Math.min(startIndex, this.pages.length - 1));
+    const shouldCompactPages = options.compactPages ?? true;
     const nodes = this.keepTogetherController.groupFlowNodes(
       this.mergeFlowFragments(this.collectNodesFromIndex(safeStart))
     );
@@ -73,7 +99,7 @@ export class Paginator {
     }
 
     this.stabilizeOverflow();
-    this.compactPages();
+    if (shouldCompactPages) this.compactPages();
     this.stabilizeOverflow();
     this.trimLeadingBlankBlocksFromContinuationPages();
     this.removeEmptyPages();
@@ -86,7 +112,8 @@ export class Paginator {
       const overflowingIndex = this.pages.findIndex((page) => this.pageOverflows(page));
       if (overflowingIndex === -1) break;
 
-      this.resolveOverflow(overflowingIndex);
+      const moved = this.resolveOverflow(overflowingIndex);
+      if (!moved) break;
     }
   }
 
@@ -237,7 +264,11 @@ export class Paginator {
       return currentIndex;
     }
 
-    if (node.nodeType === Node.ELEMENT_NODE && this.fitImagesToAvailableSpace(currentPage)) {
+    if (
+      !pageHadContent &&
+      node.nodeType === Node.ELEMENT_NODE &&
+      this.fitImagesToAvailableSpace(currentPage)
+    ) {
       if (!this.pageOverflows(currentPage)) return currentIndex;
     }
 
@@ -320,9 +351,10 @@ export class Paginator {
     return element.getBoundingClientRect().height <= availableHeight + 1;
   }
 
-  private resolveOverflow(index: number): void {
+  private resolveOverflow(index: number): boolean {
     let currentIndex = index;
     let safety = 0;
+    let movedAny = false;
 
     while (currentIndex < this.pages.length && safety++ < 500) {
       const page = this.pages[currentIndex];
@@ -338,10 +370,13 @@ export class Paginator {
       if (!nextInner) break;
 
       const moved = this.moveOverflowPiece(inner, nextInner, page);
+      movedAny = movedAny || moved;
       if (!moved) {
         currentIndex++;
       }
     }
+
+    return movedAny;
   }
 
   private moveOverflowPiece(
@@ -437,6 +472,9 @@ export class Paginator {
       while (safety++ < 100) {
         const candidates = this.takeCompactCandidates(nextInner);
         if (candidates.length === 0) break;
+        if (this.shouldRespectUserBlankBarrier(currentInner, candidates)) {
+          break;
+        }
 
         const nextReference = candidates[candidates.length - 1].nextSibling;
         candidates.forEach((candidate) => currentInner.appendChild(candidate));
@@ -465,6 +503,22 @@ export class Paginator {
     }
 
     this.removeEmptyPages();
+  }
+
+  private endsWithUserBlankBlock(container: HTMLElement): boolean {
+    const children = this.getMeaningfulChildren(container);
+    const lastChild = children[children.length - 1];
+    if (!lastChild || lastChild.nodeType !== Node.ELEMENT_NODE) return false;
+
+    const element = lastChild as HTMLElement;
+    return (
+      element.getAttribute("data-hwe-user-blank") === "true" &&
+      this.isEditableBlankBlock(element)
+    );
+  }
+
+  private shouldRespectUserBlankBarrier(container: HTMLElement, candidates: ChildNode[]): boolean {
+    return this.endsWithUserBlankBlock(container);
   }
 
   private takeCompactCandidates(nextInner: HTMLElement): ChildNode[] {
@@ -645,13 +699,13 @@ export class Paginator {
     const child = source.lastChild;
     if (!child) return false;
 
+    if (child.nodeType === Node.TEXT_NODE) {
+      return this.moveLastWordFromTextNode(child as Text, target);
+    }
+
     if (this.isEmptyNode(child)) {
       child.remove();
       return true;
-    }
-
-    if (child.nodeType === Node.TEXT_NODE) {
-      return this.moveLastWordFromTextNode(child as Text, target);
     }
 
     if (child.nodeType !== Node.ELEMENT_NODE) {

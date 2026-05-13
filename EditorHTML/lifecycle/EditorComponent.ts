@@ -1,6 +1,10 @@
-import { Paginator } from "../Orquestador/Paginator";
+import { Paginator, RebalanceOptions } from "../Orquestador/Paginator";
 import { CaretManager } from "../Orquestador/CaretManager";
-import { ParagraphStyleOption, Toolbar } from "../Resize/Toolbar";
+import {
+  CLEAR_PARAGRAPH_STYLE_VALUE,
+  ParagraphStyleOption,
+  Toolbar,
+} from "../Resize/Toolbar";
 import { fetchHtmlFromFileField, saveHtmlToFileField } from "../execCommand/fileApi";
 import {
   fetchParagraphStyles,
@@ -22,10 +26,15 @@ import {
   isEditableBlankBlock,
   isEmptyNode,
 } from "../dom/EditableDom";
+import { ImageOcrService } from "../ocr/ImageOcrService";
 
 type PcfContext = ComponentFramework.Context<IInputs>;
 type StatusType = "success" | "error" | "saving" | "";
 type EditorView = "visual" | "source";
+type QueuedRebalance = Required<RebalanceOptions> & {
+  page: HTMLElement;
+  pullFromNextPages: boolean;
+};
 
 const PARAGRAPH_STYLE_BLOCK_SELECTOR = "p, li, h1, h2, h3, h4, h5, h6, blockquote, pre";
 const DEFAULT_STYLE_TABLE_CONFIG: ParagraphStyleTableConfig = {
@@ -67,6 +76,7 @@ export class EditorComponent {
   private readonly options: EditorComponentOptions;
 
   private root!: HTMLElement;
+  private editorHeader!: HTMLElement;
   private workspace!: HTMLElement;
   private viewTabs!: HTMLElement;
   private visualTabBtn!: HTMLButtonElement;
@@ -82,16 +92,22 @@ export class EditorComponent {
   private readonly documentSerializer = new DocumentSerializer();
   private readonly assetLayoutManager = new AssetLayoutManager();
   private readonly pasteController = new PasteController();
+  private readonly imageOcrService = new ImageOcrService({
+    setStatus: (message, type) => this.setStatus(message, type),
+  });
   private pageSetup: PageSetup = DEFAULT_PAGE_SETUP;
+  private allocatedWidth?: number;
+  private allocatedHeight?: number;
 
   private readonly baseUrl: string;
   private readonly entityName: string;
   private readonly entityId: string;
   private readonly fieldName: string;
   private readonly styleTableConfig: ParagraphStyleTableConfig;
+  private currentFileName = "content.html";
 
   private rebalanceFrame: number | undefined;
-  private pendingRebalance: { page: HTMLElement; pullFromNextPages: boolean } | null = null;
+  private pendingRebalance: QueuedRebalance | null = null;
   private readonly pagesNeedingPull = new WeakSet<HTMLElement>();
   private readonly pendingInputTypes = new WeakMap<HTMLElement, string>();
   private readonly paragraphStyleClasses = new Set<string>();
@@ -147,24 +163,29 @@ export class EditorComponent {
   private buildShell(): void {
     this.container.innerHTML = "";
     this.container.style.cssText =
-      "width:100%;height:100%;overflow:hidden;display:flex;flex-direction:column;";
+      "width:100%;height:100%;min-height:0;overflow:hidden;display:flex;flex-direction:column;";
+    this.applyAllocatedSize();
 
     this.root = document.createElement("div");
     this.root.className = "hwe-root";
     this.applyCurrentPageSetup();
 
+    this.editorHeader = document.createElement("div");
+    this.editorHeader.className = "hwe-editor-header";
+    this.root.appendChild(this.editorHeader);
+
     this.toolbar = new Toolbar({
       onInsertTable: () => this.insertTable(),
       onInsertRowAfter: () => this.insertTableRowAfter(),
       onApplyParagraphStyle: (className) => this.applyParagraphStyle(className),
-      onExportPdf: () => this.exportPdf(),
+      onExportPdf: () => {
+        void this.exportPdf();
+      },
     });
     const toolbarEl = this.toolbar.build();
     this.toolbar.getSaveButton().addEventListener("click", () => void this.save());
-    this.root.appendChild(toolbarEl);
+    this.editorHeader.appendChild(toolbarEl);
     document.addEventListener("selectionchange", this.handleSelectionChange);
-
-    this.buildViewTabs();
 
     this.buildViewTabs();
 
@@ -206,7 +227,7 @@ export class EditorComponent {
 
     this.viewTabs.appendChild(this.visualTabBtn);
     this.viewTabs.appendChild(this.sourceTabBtn);
-    this.root.appendChild(this.viewTabs);
+    this.editorHeader.appendChild(this.viewTabs);
     this.updateViewTabs();
   }
 
@@ -329,8 +350,24 @@ export class EditorComponent {
   }
 
   private formatParagraphStyleCss(style: ParagraphStyleDefinition): string {
-    if (style.cssText.includes("{")) return style.cssText;
-    return `.${style.className} { ${style.cssText} }`;
+    const declarations = this.extractCssDeclarations(style.cssText);
+    return declarations ? `.hwe-page-inner .${style.className} { ${declarations} }` : "";
+  }
+
+  private extractCssDeclarations(cssText: string): string {
+    const css = cssText.trim();
+    if (!css) return "";
+
+    if (css.startsWith("{") && css.endsWith("}")) {
+      return css.slice(1, -1).trim();
+    }
+
+    if (css.includes("{")) {
+      const ruleMatch = /[^{]+\{([\s\S]*?)\}/.exec(css);
+      return ruleMatch?.[1]?.trim() ?? "";
+    }
+
+    return css;
   }
 
   private isValidCssClassName(className: string): boolean {
@@ -354,14 +391,15 @@ export class EditorComponent {
       if (!this.baseUrl) throw new Error("No se pudo obtener la URL de Dataverse.");
       if (!this.entityId) throw new Error("No se pudo obtener el Id del registro actual.");
 
-      const html = await fetchHtmlFromFileField(
+      const fileContent = await fetchHtmlFromFileField(
         this.baseUrl,
         this.entityName,
         this.entityId,
         this.fieldName
       );
+      this.currentFileName = fileContent.fileName || this.currentFileName;
 
-      await this.renderAndPaginate(html || "<p><br></p>");
+      await this.renderAndPaginate(fileContent.html || "<p><br></p>");
       this.setStatus("", "");
     } catch (err) {
       this.setStatus(`Error al cargar: ${(err as Error).message}`, "error");
@@ -374,16 +412,17 @@ export class EditorComponent {
     this.setPageSetup(DEFAULT_PAGE_SETUP);
 
     const normalizedDocument = this.documentSerializer.normalizeHtmlForPagination(html);
-    if (normalizedDocument.pageSetup) this.setPageSetup(normalizedDocument.pageSetup);
 
     this.pages = [this.createPageElement(normalizedDocument.html)];
     this.workspace.appendChild(this.pages[0]);
+    this.applyOfficialTableWidths(this.workspace);
 
     this.paginator.setPages(this.pages);
     await this.assetLayoutManager.waitForStableLayout(this.workspace);
 
     this.paginator.repaginateAll();
     this.pages = this.paginator.getPages();
+    this.pages.forEach((page) => this.applyOfficialTableWidths(page));
     this.syncWorkspace();
     this.updatePageCount();
   }
@@ -397,6 +436,7 @@ export class EditorComponent {
     inner.setAttribute("contenteditable", "true");
     inner.setAttribute("spellcheck", "false");
     inner.innerHTML = html ?? "<p><br></p>";
+    this.applyOfficialTableWidths(inner);
 
     inner.addEventListener("beforeinput", (event: InputEvent) => {
       this.pendingInputTypes.set(page, event.inputType);
@@ -408,11 +448,16 @@ export class EditorComponent {
       if (!this.isComposing) {
         const inputType = this.pendingInputTypes.get(page) ?? "";
         this.pendingInputTypes.delete(page);
-        this.blankLineController.syncEditableBlankBlocks(inner, this.isEnterInput(inputType));
+        const isEnterInput = this.isEnterInput(inputType);
         const shouldPullFromNextPages =
           this.isDeleteInput(inputType) || this.pagesNeedingPull.has(page);
+        this.blankLineController.syncEditableBlankBlocks(inner, isEnterInput);
         this.pagesNeedingPull.delete(page);
-        this.scheduleRebalance(page, shouldPullFromNextPages);
+        this.scheduleRebalance(page, shouldPullFromNextPages, {
+          includePreviousPage: shouldPullFromNextPages,
+          compactPages: shouldPullFromNextPages || !isEnterInput,
+          overflowOnly: isEnterInput && !shouldPullFromNextPages,
+        });
       }
     });
     inner.addEventListener("compositionstart", () => {
@@ -421,7 +466,7 @@ export class EditorComponent {
     inner.addEventListener("compositionend", () => {
       this.isComposing = false;
       this.blankLineController.syncEditableBlankBlocks(inner, false);
-      this.scheduleRebalance(page);
+      this.scheduleRebalance(page, false, { includePreviousPage: false });
     });
     inner.addEventListener("paste", (event: ClipboardEvent) => this.onPaste(event, page));
     inner.addEventListener("keydown", (event: KeyboardEvent) => this.onPageKeyDown(event));
@@ -444,8 +489,12 @@ export class EditorComponent {
     return page;
   }
 
-  private scheduleRebalance(page: HTMLElement, pullFromNextPages = false): void {
-    this.queueRebalance(page, pullFromNextPages);
+  private scheduleRebalance(
+    page: HTMLElement,
+    pullFromNextPages = false,
+    options: RebalanceOptions = {}
+  ): void {
+    this.queueRebalance(page, pullFromNextPages, options);
     if (this.rebalanceFrame !== undefined) return;
 
     this.rebalanceFrame = window.requestAnimationFrame(() => {
@@ -458,11 +507,19 @@ export class EditorComponent {
       const pageIndex = this.pages.indexOf(pending.page);
       if (!this.shouldRebalancePage(pending.page, pageIndex, pending.pullFromNextPages)) return;
 
-      const startPage = this.pages[Math.max(0, pageIndex - 1)] ?? pending.page;
+      const startPageIndex = pending.includePreviousPage ? Math.max(0, pageIndex - 1) : pageIndex;
+      const startPage = this.pages[startPageIndex] ?? pending.page;
       const activeEditable = this.getActiveEditable();
       const marker = CaretManager.createMarker(this.root);
       const caretViewportTop = marker?.getBoundingClientRect().top ?? null;
-      this.paginator.rebalanceFromPage(startPage);
+      if (pending.overflowOnly) {
+        this.paginator.pushOverflowForwardFromPage(pending.page);
+      } else {
+        this.paginator.rebalanceFromPage(startPage, {
+          includePreviousPage: false,
+          compactPages: pending.compactPages,
+        });
+      }
       this.pages = this.paginator.getPages();
       this.pages.forEach((currentPage) => {
         const inner = currentPage.querySelector<HTMLElement>(".hwe-page-inner");
@@ -477,9 +534,21 @@ export class EditorComponent {
     });
   }
 
-  private queueRebalance(page: HTMLElement, pullFromNextPages: boolean): void {
+  private queueRebalance(
+    page: HTMLElement,
+    pullFromNextPages: boolean,
+    options: RebalanceOptions
+  ): void {
+    const nextRebalance: QueuedRebalance = {
+      page,
+      pullFromNextPages,
+      includePreviousPage: options.includePreviousPage ?? pullFromNextPages,
+      compactPages: options.compactPages ?? true,
+      overflowOnly: options.overflowOnly ?? false,
+    };
+
     if (!this.pendingRebalance) {
-      this.pendingRebalance = { page, pullFromNextPages };
+      this.pendingRebalance = nextRebalance;
       return;
     }
 
@@ -488,14 +557,27 @@ export class EditorComponent {
     const shouldUseNextPage =
       currentIndex === -1 || (nextIndex !== -1 && nextIndex < currentIndex);
 
+    const mergedPullFromNextPages =
+      this.pendingRebalance.pullFromNextPages || nextRebalance.pullFromNextPages;
+
     this.pendingRebalance = {
       page: shouldUseNextPage ? page : this.pendingRebalance.page,
-      pullFromNextPages: this.pendingRebalance.pullFromNextPages || pullFromNextPages,
+      pullFromNextPages: mergedPullFromNextPages,
+      includePreviousPage:
+        this.pendingRebalance.includePreviousPage || nextRebalance.includePreviousPage,
+      compactPages: mergedPullFromNextPages
+        ? true
+        : this.pendingRebalance.compactPages && nextRebalance.compactPages,
+      overflowOnly:
+        !mergedPullFromNextPages &&
+        this.pendingRebalance.overflowOnly &&
+        nextRebalance.overflowOnly,
     };
   }
 
   private onPagesChanged(pages: HTMLElement[]): void {
     this.pages = pages;
+    this.pages.forEach((page) => this.applyOfficialTableWidths(page));
     this.syncWorkspace();
     this.updatePageCount();
   }
@@ -551,25 +633,56 @@ export class EditorComponent {
     return divider;
   }
 
+  private applyOfficialTableWidths(root: HTMLElement): void {
+    const inners = root.classList.contains("hwe-page-inner")
+      ? [root]
+      : Array.from(root.querySelectorAll<HTMLElement>(".hwe-page-inner"));
+
+    inners.forEach((inner) => {
+      Array.from(inner.children).forEach((child) => {
+        const table = this.getDirectFlowTable(child as HTMLElement);
+        if (!table) return;
+
+        table.style.setProperty("width", "100%", "important");
+        table.style.setProperty("max-width", "100%", "important");
+        table.style.setProperty("margin-left", "0", "important");
+        table.style.setProperty("margin-right", "0", "important");
+      });
+    });
+  }
+
+  private getDirectFlowTable(element: HTMLElement): HTMLTableElement | null {
+    if (element.tagName === "TABLE") return element as HTMLTableElement;
+
+    const children = getMeaningfulChildren(element, true);
+    if (children.length !== 1 || children[0].nodeType !== Node.ELEMENT_NODE) return null;
+
+    const onlyChild = children[0] as HTMLElement;
+    return onlyChild.tagName === "TABLE" ? (onlyChild as HTMLTableElement) : null;
+  }
+
   private onPaste(event: ClipboardEvent, page: HTMLElement): void {
     const result = this.pasteController.handlePaste(event, page);
     if (!result.handled) return;
-    if (result.pageSetup) this.setPageSetup(result.pageSetup);
 
     const affectedPage = result.affectedPage ?? page;
     const inner = affectedPage.querySelector<HTMLElement>(".hwe-page-inner");
     if (inner) this.blankLineController.syncEditableBlankBlocks(inner, false);
+    this.applyOfficialTableWidths(affectedPage);
 
     this.isDirty = true;
     this.toolbar.updateActiveStates();
-    this.scheduleRebalance(affectedPage, true);
+    this.scheduleRebalance(affectedPage, true, { includePreviousPage: false });
     void this.assetLayoutManager
       .waitForStableLayout(affectedPage)
-      .then(() => this.scheduleRebalance(affectedPage, true));
+      .then(() => {
+        this.scheduleRebalance(affectedPage, true, { includePreviousPage: false });
+      });
   }
 
   private applyParagraphStyle(className: string): void {
-    if (!this.paragraphStyleClasses.has(className)) return;
+    const shouldClearStyle = className === CLEAR_PARAGRAPH_STYLE_VALUE;
+    if (!shouldClearStyle && !this.paragraphStyleClasses.has(className)) return;
     if (this.activeView !== "visual") {
       this.setStatus("Vuelve al editor visual para aplicar estilos.", "error");
       return;
@@ -584,11 +697,26 @@ export class EditorComponent {
 
     blocks.forEach((block) => {
       this.paragraphStyleClasses.forEach((styleClass) => block.classList.remove(styleClass));
-      block.classList.add(className);
+      if (!shouldClearStyle) block.classList.add(className);
     });
 
     this.rememberTextSelection();
-    this.markEditedAndRebalance(blocks[0]);
+    this.markEditedAfterStyleChange(blocks[0]);
+  }
+
+  private markEditedAfterStyleChange(element: HTMLElement): void {
+    const page = element.closest<HTMLElement>(".hwe-page");
+    if (!page) return;
+
+    this.isDirty = true;
+    this.toolbar.updateActiveStates();
+
+    if (this.pageOverflows(page)) {
+      this.scheduleRebalance(page, false, {
+        includePreviousPage: false,
+        compactPages: false,
+      });
+    }
   }
 
   private getSelectedStyleBlocks(): HTMLElement[] {
@@ -712,7 +840,7 @@ export class EditorComponent {
     this.placeCaretAtEnd(previousInner);
     this.isDirty = true;
     this.toolbar.updateActiveStates();
-    this.scheduleRebalance(previousPage, true);
+    this.scheduleRebalance(previousPage, true, { includePreviousPage: true });
     return true;
   }
 
@@ -926,7 +1054,7 @@ export class EditorComponent {
     if (!page) return;
     this.isDirty = true;
     this.toolbar.updateActiveStates();
-    this.scheduleRebalance(page, true);
+    this.scheduleRebalance(page, true, { includePreviousPage: false });
   }
 
   private placeCaretAtEnd(inner: HTMLElement): void {
@@ -1017,7 +1145,8 @@ export class EditorComponent {
           this.entityName,
           this.entityId,
           this.fieldName,
-          html
+          html,
+          this.currentFileName
         );
       }
 
@@ -1031,7 +1160,7 @@ export class EditorComponent {
     }
   }
 
-  private exportPdf(): void {
+  private async exportPdf(): Promise<void> {
     if (this.activeView === "source" && this.sourceDirty) {
       this.setStatus("Vuelve al editor visual o guarda los cambios del HTML antes de exportar.", "error");
       return;
@@ -1184,6 +1313,12 @@ export class EditorComponent {
     this.setStatus("", "");
   }
 
+  resize(width?: number, height?: number): void {
+    this.allocatedWidth = width;
+    this.allocatedHeight = height;
+    this.applyAllocatedSize();
+  }
+
   getHtml(): string {
     if (this.activeView === "source" && this.sourceDirty) {
       return this.sourceEditor.value;
@@ -1197,9 +1332,28 @@ export class EditorComponent {
       window.cancelAnimationFrame(this.rebalanceFrame);
     }
     document.removeEventListener("selectionchange", this.handleSelectionChange);
+    this.imageOcrService.destroy();
     this.toolbar?.destroy();
     this.paginator?.destroy();
     this.container.innerHTML = "";
+  }
+
+  private applyAllocatedSize(): void {
+    const width = this.formatAllocatedSize(this.allocatedWidth);
+    const height = this.formatAllocatedSize(this.allocatedHeight);
+
+    this.container.style.width = width;
+    this.container.style.height = height;
+    this.container.style.minHeight = "0";
+    this.container.style.overflow = "hidden";
+    this.container.style.display = "flex";
+    this.container.style.flexDirection = "column";
+  }
+
+  private formatAllocatedSize(value: number | undefined): string {
+    return typeof value === "number" && Number.isFinite(value) && value > 0
+      ? `${value}px`
+      : "100%";
   }
 }
 
