@@ -21,7 +21,7 @@ export interface NormalizedDocument {
   pageSetup?: PageSetup;
 }
 
-const LARGE_DATA_IMAGE_URL_THRESHOLD = 300_000;
+const LARGE_DATA_IMAGE_URL_THRESHOLD = 80_000;
 const LARGE_DATA_IMAGE_PIXEL_THRESHOLD = 1_500_000;
 const LARGE_IMAGE_PLACEHOLDER_SRC =
   "data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%221850%22%20height%3D%222420%22%20viewBox%3D%220%200%201850%202420%22%3E%3Crect%20width%3D%221850%22%20height%3D%222420%22%20fill%3D%22%23f7f7f7%22%2F%3E%3Crect%20x%3D%2250%22%20y%3D%2250%22%20width%3D%221750%22%20height%3D%222320%22%20fill%3D%22none%22%20stroke%3D%22%23bdbdbd%22%20stroke-width%3D%226%22%20stroke-dasharray%3D%2224%2024%22%2F%3E%3Ctext%20x%3D%22925%22%20y%3D%221210%22%20text-anchor%3D%22middle%22%20font-family%3D%22Arial%2C%20sans-serif%22%20font-size%3D%2272%22%20fill%3D%22%23666%22%3EImagen%20grande%20en%20pausa%3C%2Ftext%3E%3C%2Fsvg%3E";
@@ -221,20 +221,25 @@ ${content}
   }
 
   private detachLargeDataImages(html: string): string {
+    const dataImages = this.countDataImageSources(html);
     let detached = 0;
     const reasons: Record<string, number> = {};
     const result = html.replace(
-      /<img\b[^>]*\bsrc\s*=\s*(["'])(data:image\/[^"']+)\1[^>]*>/gi,
-      (tag: string, quote: string, src: string) => {
+      /<img\b[^>]*\bsrc\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))[^>]*>/gi,
+      (tag: string, doubleQuotedSrc: string, singleQuotedSrc: string, unquotedSrc: string) => {
+        const src = doubleQuotedSrc ?? singleQuotedSrc ?? unquotedSrc ?? "";
+        if (!/^data:image\//i.test(src)) return tag;
+
         const reason = this.getLargeDataImageReason(tag, src);
         if (!reason) return tag;
 
         detached++;
         reasons[reason] = (reasons[reason] ?? 0) + 1;
         const id = this.rememberDetachedLargeImage(src);
+        const quote = singleQuotedSrc !== undefined ? "'" : "\"";
         return tag
           .replace(
-            /\s+src\s*=\s*(["'])data:image\/[^"']+\1/i,
+            /\s+src\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+)/i,
             ` src=${quote}${LARGE_IMAGE_PLACEHOLDER_SRC}${quote}`
           )
           .replace(
@@ -246,13 +251,23 @@ ${content}
 
     if (detached > 0) {
       hweDebugLog("serializer.detachLargeDataImages", {
+        dataImages,
         detached,
         htmlLength: html.length,
         reasons,
       });
+    } else if (dataImages > 0) {
+      hweDebugLog("serializer.detachLargeDataImages.none", {
+        dataImages,
+        htmlLength: html.length,
+      });
     }
 
     return result;
+  }
+
+  private countDataImageSources(html: string): number {
+    return html.match(/\bsrc\s*=\s*(?:"data:image\/|'data:image\/|data:image\/)/gi)?.length ?? 0;
   }
 
   private getLargeDataImageReason(tag: string, src: string): string | null {

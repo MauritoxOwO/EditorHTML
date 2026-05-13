@@ -27,9 +27,12 @@ import {
   isEmptyNode,
 } from "../dom/EditableDom";
 import {
+  getHweDebugReport,
   hweDebugLog,
   hweDebugStart,
   installHweDebugGlobals,
+  saveHweDebugReport,
+  startHweDebugHeartbeat,
 } from "../debug/DebugLogger";
 
 type PcfContext = ComponentFramework.Context<IInputs>;
@@ -88,6 +91,7 @@ export class EditorComponent {
   private sourceEditor!: HTMLTextAreaElement;
   private statusMsg!: HTMLElement;
   private pageCountEl!: HTMLElement;
+  private diagnosticButton!: HTMLButtonElement;
 
   private pages: HTMLElement[] = [];
   private paginator!: Paginator;
@@ -102,6 +106,7 @@ export class EditorComponent {
   private deferredRenderHtml: string | null = null;
   private deferredRenderFrame: number | undefined;
   private resizeObserver: ResizeObserver | null = null;
+  private stopDebugHeartbeat: (() => void) | null = null;
 
   private readonly baseUrl: string;
   private readonly entityName: string;
@@ -120,6 +125,9 @@ export class EditorComponent {
   private lastStyleBlock: HTMLElement | null = null;
   private paragraphStyleElement: HTMLStyleElement | null = null;
   private readonly handleSelectionChange = (): void => this.rememberTextSelection();
+  private readonly handleBeforeUnload = (): void => {
+    if (this.root) saveHweDebugReport(this.root);
+  };
   private isComposing = false;
   private isDirty = false;
   private activeView: EditorView = "visual";
@@ -223,8 +231,19 @@ export class EditorComponent {
     this.statusMsg.className = "hwe-status-msg";
     statusBar.appendChild(this.statusMsg);
 
+    this.diagnosticButton = document.createElement("button");
+    this.diagnosticButton.type = "button";
+    this.diagnosticButton.className = "hwe-diagnostics-btn";
+    this.diagnosticButton.textContent = "Copiar diagnostico";
+    this.diagnosticButton.addEventListener("click", () => {
+      void this.copyDiagnostics();
+    });
+    statusBar.appendChild(this.diagnosticButton);
+
     this.root.appendChild(statusBar);
     this.container.appendChild(this.root);
+    this.stopDebugHeartbeat = startHweDebugHeartbeat(() => this.root ?? null);
+    window.addEventListener("beforeunload", this.handleBeforeUnload);
 
     if (typeof ResizeObserver !== "undefined") {
       this.resizeObserver = new ResizeObserver(() => this.renderDeferredWhenVisible());
@@ -561,7 +580,23 @@ export class EditorComponent {
       const marker = CaretManager.createMarker(this.root);
       const caretViewportTop = marker?.getBoundingClientRect().top ?? null;
       if (pending.overflowOnly) {
-        this.paginator.pushOverflowForwardFromPage(pending.page);
+        const resolved = this.paginator.pushOverflowForwardFromPage(pending.page);
+        this.pages = this.paginator.getPages();
+        const fallbackPageIndex = Math.max(0, Math.min(pageIndex, this.pages.length - 1));
+        const fallbackPage = this.pages[fallbackPageIndex];
+        if (!resolved && fallbackPage && this.pageOverflows(fallbackPage)) {
+          hweDebugLog("editor.scheduleRebalance.overflowFallback", {
+            fallbackPageIndex,
+            pages: this.pages.length,
+          });
+          window.requestAnimationFrame(() => {
+            if (!this.pages.includes(fallbackPage) || !this.pageOverflows(fallbackPage)) return;
+            this.scheduleRebalance(fallbackPage, false, {
+              compactPages: false,
+              includePreviousPage: false,
+            });
+          });
+        }
       } else {
         this.paginator.rebalanceFromPage(startPage, {
           includePreviousPage: false,
@@ -1278,6 +1313,34 @@ export class EditorComponent {
     this.statusMsg.className = "hwe-status-msg" + (type ? ` ${type}` : "");
   }
 
+  private async copyDiagnostics(): Promise<void> {
+    const report = getHweDebugReport(this.root ?? null);
+    saveHweDebugReport(this.root ?? null);
+    const text = JSON.stringify(report, null, 2);
+
+    try {
+      await navigator.clipboard.writeText(text);
+      this.setStatus("Diagnostico copiado.", "success");
+    } catch {
+      this.copyTextFallback(text);
+      this.setStatus("Diagnostico copiado.", "success");
+    }
+
+    window.setTimeout(() => this.setStatus("", ""), 2500);
+  }
+
+  private copyTextFallback(text: string): void {
+    const textarea = document.createElement("textarea");
+    textarea.value = text;
+    textarea.setAttribute("readonly", "true");
+    textarea.style.cssText =
+      "position:fixed;left:-9999px;top:0;width:1px;height:1px;opacity:0;";
+    document.body.appendChild(textarea);
+    textarea.select();
+    document.execCommand("copy");
+    textarea.remove();
+  }
+
   private getActiveEditable(): HTMLElement | null {
     const active = document.activeElement as HTMLElement | null;
     if (active?.matches("[contenteditable='true']") && this.root.contains(active)) {
@@ -1316,10 +1379,11 @@ export class EditorComponent {
     const inner = page.querySelector<HTMLElement>(".hwe-page-inner");
     if (!inner) return false;
 
+    const scrollOverflows = inner.scrollHeight > inner.clientHeight + 1;
     const contentBottom = this.getContentBottom(inner);
-    if (contentBottom === null) return false;
+    if (contentBottom === null) return scrollOverflows;
 
-    return contentBottom > this.getContentLimitBottom(inner) + 1;
+    return contentBottom > this.getContentLimitBottom(inner) + 1 || scrollOverflows;
   }
 
   private getContentLimitBottom(inner: HTMLElement): number {
@@ -1393,6 +1457,7 @@ export class EditorComponent {
   }
 
   destroy(): void {
+    if (this.root) saveHweDebugReport(this.root);
     if (this.rebalanceFrame !== undefined) {
       window.cancelAnimationFrame(this.rebalanceFrame);
     }
@@ -1400,6 +1465,9 @@ export class EditorComponent {
       window.cancelAnimationFrame(this.deferredRenderFrame);
     }
     this.resizeObserver?.disconnect();
+    this.stopDebugHeartbeat?.();
+    this.stopDebugHeartbeat = null;
+    window.removeEventListener("beforeunload", this.handleBeforeUnload);
     document.removeEventListener("selectionchange", this.handleSelectionChange);
     this.toolbar?.destroy();
     this.paginator?.destroy();

@@ -426,6 +426,24 @@
   margin-left: auto;
 }
 
+.hwe-diagnostics-btn {
+  height: 18px;
+  padding: 0 8px;
+  border: 1px solid #b8b8b8;
+  border-radius: 3px;
+  background: #fff;
+  color: #333;
+  cursor: pointer;
+  font-size: 11px;
+  line-height: 16px;
+  white-space: nowrap;
+}
+
+.hwe-diagnostics-btn:hover {
+  border-color: #0078d4;
+  background: #eef6fc;
+}
+
 .hwe-statusbar .hwe-status-msg.success {
   color: #107c10;
   font-weight: 600;

@@ -6,7 +6,10 @@ export type HweDebugEvent = {
 };
 
 const DEBUG_STORAGE_KEY = "hwe.debug";
+const LAST_REPORT_STORAGE_KEY = "hwe.debug.lastReport";
 const MAX_EVENTS = 500;
+const HEARTBEAT_INTERVAL_MS = 1000;
+const MAIN_THREAD_STALL_MS = 3000;
 
 const events: HweDebugEvent[] = [];
 let installed = false;
@@ -17,6 +20,7 @@ type HweDebugWindow = Window & {
     clear: () => void;
     enabled: boolean;
     events: HweDebugEvent[];
+    lastReport: () => unknown;
     report: () => unknown;
   };
 };
@@ -38,8 +42,6 @@ export function isHweDebugEnabled(): boolean {
 }
 
 export function hweDebugLog(name: string, data?: unknown): void {
-  if (!isHweDebugEnabled()) return;
-
   const event: HweDebugEvent = {
     name,
     time: Math.round(performance.now() * 100) / 100,
@@ -47,12 +49,10 @@ export function hweDebugLog(name: string, data?: unknown): void {
   if (data !== undefined) event.data = data;
   events.push(event);
   if (events.length > MAX_EVENTS) events.splice(0, events.length - MAX_EVENTS);
-  console.debug("[HtmlWordEditor]", name, data ?? "");
+  if (isHweDebugEnabled()) console.debug("[HtmlWordEditor]", name, data ?? "");
 }
 
 export function hweDebugStart(name: string, data?: unknown): (endData?: unknown) => void {
-  if (!isHweDebugEnabled()) return () => undefined;
-
   const start = performance.now();
   hweDebugLog(`${name}:start`, data);
   return (endData?: unknown) => {
@@ -74,14 +74,48 @@ export function installHweDebugGlobals(rootProvider: () => HTMLElement | null): 
       return isHweDebugEnabled();
     },
     events,
-    report: () => buildReport(rootProvider()),
+    lastReport: () => readLastReport(),
+    report: () => saveHweDebugReport(rootProvider()),
   };
+}
+
+export function getHweDebugReport(root: HTMLElement | null): unknown {
+  return buildReport(root);
+}
+
+export function saveHweDebugReport(root: HTMLElement | null): unknown {
+  const report = buildReport(root);
+  try {
+    window.localStorage.setItem(LAST_REPORT_STORAGE_KEY, JSON.stringify(report));
+  } catch {
+    // Ignore storage quota or privacy-mode failures; the visible copy button still works.
+  }
+  return report;
+}
+
+export function startHweDebugHeartbeat(rootProvider: () => HTMLElement | null): () => void {
+  let lastBeat = performance.now();
+  const intervalId = window.setInterval(() => {
+    const now = performance.now();
+    const drift = now - lastBeat - HEARTBEAT_INTERVAL_MS;
+    lastBeat = now;
+    if (drift <= MAIN_THREAD_STALL_MS) return;
+
+    hweDebugLog("mainThreadStall", {
+      driftMs: Math.round(drift * 100) / 100,
+      thresholdMs: MAIN_THREAD_STALL_MS,
+    });
+    saveHweDebugReport(rootProvider());
+  }, HEARTBEAT_INTERVAL_MS);
+
+  return () => window.clearInterval(intervalId);
 }
 
 function buildReport(root: HTMLElement | null): unknown {
   const scope = root ?? document.body;
   const pages = Array.from(scope.querySelectorAll<HTMLElement>(".hwe-page"));
   const images = Array.from(scope.querySelectorAll<HTMLImageElement>("img"));
+  const tables = Array.from(scope.querySelectorAll<HTMLTableElement>("table"));
 
   return {
     enabled: isHweDebugEnabled(),
@@ -98,6 +132,7 @@ function buildReport(root: HTMLElement | null): unknown {
     ocrStates: countBy(
       images.map((image) => image.getAttribute("data-hwe-ocr-state") ?? "none")
     ),
+    tables: tables.map((table, index) => getTableReport(table, index)),
     recentEvents: events.slice(-150),
   };
 }
@@ -110,6 +145,7 @@ function getPageReport(page: HTMLElement, index: number): unknown {
     return bottom === null ? rect.bottom : Math.max(bottom, rect.bottom);
   }, null);
   const limitBottom = inner ? getContentLimitBottom(inner) : null;
+  const scrollOverflows = inner ? inner.scrollHeight > inner.clientHeight + 1 : false;
 
   return {
     index,
@@ -119,8 +155,16 @@ function getPageReport(page: HTMLElement, index: number): unknown {
     inner: getRect(inner),
     lastChild: describeElement(children[children.length - 1]),
     limitBottom,
+    scroll: inner
+      ? {
+          clientHeight: inner.clientHeight,
+          scrollHeight: inner.scrollHeight,
+        }
+      : null,
     overflows:
-      contentBottom !== null && limitBottom !== null ? contentBottom > limitBottom + 1 : false,
+      contentBottom !== null && limitBottom !== null
+        ? contentBottom > limitBottom + 1 || scrollOverflows
+        : scrollOverflows,
     page: getRect(page),
     userBlankCount: inner?.querySelectorAll("[data-hwe-user-blank='true']").length ?? 0,
   };
@@ -142,6 +186,27 @@ function getImageReport(image: HTMLImageElement, index: number): unknown {
     naturalWidth: image.naturalWidth,
     ocrState: image.getAttribute("data-hwe-ocr-state") ?? "",
     rect: getRect(image),
+  };
+}
+
+function getTableReport(table: HTMLTableElement, index: number): unknown {
+  const invalidBlockAncestor = table.closest("p, li, span");
+  const cellAncestor = table.closest("td, th");
+  return {
+    index,
+    className: table.getAttribute("class") ?? "",
+    flowId: table.getAttribute("data-hwe-table-flow-id") ?? "",
+    fragment: table.getAttribute("data-hwe-table-fragment") === "true",
+    invalidBlockAncestor:
+      invalidBlockAncestor && !cellAncestor
+        ? {
+            className: invalidBlockAncestor.getAttribute("class") ?? "",
+            tagName: invalidBlockAncestor.tagName,
+            text: (invalidBlockAncestor.textContent ?? "").replace(/\s+/g, " ").trim().slice(0, 80),
+          }
+        : null,
+    rect: getRect(table),
+    rows: table.querySelectorAll("tr").length,
   };
 }
 
@@ -203,4 +268,13 @@ function asRecord(value: unknown): Record<string, unknown> | null {
   return value && typeof value === "object" && !Array.isArray(value)
     ? (value as Record<string, unknown>)
     : null;
+}
+
+function readLastReport(): unknown {
+  try {
+    const stored = window.localStorage.getItem(LAST_REPORT_STORAGE_KEY);
+    return stored ? JSON.parse(stored) : null;
+  } catch {
+    return null;
+  }
 }

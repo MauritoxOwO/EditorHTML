@@ -12,6 +12,9 @@ export interface RebalanceOptions {
 }
 
 export class Paginator {
+  private static readonly MAX_STABILIZE_MS = 700;
+  private static readonly MAX_RESOLVE_MS = 450;
+  private static readonly MAX_SPLIT_MS = 180;
   private static textFlowCounter = 0;
 
   private pages: HTMLElement[] = [];
@@ -79,11 +82,11 @@ export class Paginator {
     }
   }
 
-  pushOverflowForwardFromPage(page: HTMLElement): void {
-    if (this.rebalancing) return;
+  pushOverflowForwardFromPage(page: HTMLElement): boolean {
+    if (this.rebalancing) return false;
 
     const index = this.pages.indexOf(page);
-    if (index === -1) return;
+    if (index === -1) return false;
 
     const done = hweDebugStart("paginator.pushOverflowForwardFromPage", {
       index,
@@ -96,11 +99,13 @@ export class Paginator {
       this.trimLeadingBlankBlocksFromContinuationPages();
       this.removeEmptyPages();
       this.onPagesChanged(this.pages);
+      const pageStillOverflows = this.pages[index] ? this.pageOverflows(this.pages[index]) : false;
       done({
         moved,
-        pageStillOverflows: this.pages[index] ? this.pageOverflows(this.pages[index]) : false,
+        pageStillOverflows,
         pages: this.pages.length,
       });
+      return moved && !pageStillOverflows;
     } finally {
       this.rebalancing = false;
     }
@@ -142,8 +147,18 @@ export class Paginator {
 
   private stabilizeOverflow(): void {
     let safety = 0;
+    const startedAt = performance.now();
 
     while (safety++ < 200) {
+      if (performance.now() - startedAt > Paginator.MAX_STABILIZE_MS) {
+        hweDebugLog("paginator.stabilizeOverflow.timeBudgetExceeded", {
+          elapsedMs: Math.round((performance.now() - startedAt) * 100) / 100,
+          iterations: safety - 1,
+          pages: this.pages.length,
+        });
+        break;
+      }
+
       const overflowingIndex = this.pages.findIndex((page) => this.pageOverflows(page));
       if (overflowingIndex === -1) break;
 
@@ -396,12 +411,23 @@ export class Paginator {
     let currentIndex = index;
     let safety = 0;
     let movedAny = false;
+    const startedAt = performance.now();
     const done = hweDebugStart("paginator.resolveOverflow", {
       index,
       pages: this.pages.length,
     });
 
     while (currentIndex < this.pages.length && safety++ < 500) {
+      if (performance.now() - startedAt > Paginator.MAX_RESOLVE_MS) {
+        hweDebugLog("paginator.resolveOverflow.timeBudgetExceeded", {
+          currentIndex,
+          elapsedMs: Math.round((performance.now() - startedAt) * 100) / 100,
+          iterations: safety - 1,
+          pages: this.pages.length,
+        });
+        break;
+      }
+
       const page = this.pages[currentIndex];
       const inner = this.getInner(page);
 
@@ -498,6 +524,21 @@ export class Paginator {
 
     if (
       lastChild.nodeType === Node.ELEMENT_NODE &&
+      this.shouldMoveTextBlockWhole(lastChild as HTMLElement, sourceInner, page)
+    ) {
+      const keepWithPrevious = this.detachPreviousKeepWithNext(sourceInner, lastChild);
+      const targetReference = targetInner.firstChild;
+      if (keepWithPrevious) targetInner.insertBefore(keepWithPrevious, targetReference);
+      targetInner.insertBefore(lastChild, targetReference);
+      hweDebugLog("paginator.moveOverflowPiece.textBlockWhole", {
+        childCount: this.getMeaningfulChildren(sourceInner).length,
+        tagName: (lastChild as HTMLElement).tagName,
+      });
+      return true;
+    }
+
+    if (
+      lastChild.nodeType === Node.ELEMENT_NODE &&
       this.splitTextBlock(lastChild as HTMLElement, targetInner, page)
     ) {
       return true;
@@ -509,6 +550,18 @@ export class Paginator {
 
     targetInner.insertBefore(lastChild, targetInner.firstChild);
     return true;
+  }
+
+  private shouldMoveTextBlockWhole(
+    element: HTMLElement,
+    sourceInner: HTMLElement,
+    page: HTMLElement
+  ): boolean {
+    return (
+      this.isSplittableTextBlock(element) &&
+      this.getMeaningfulChildren(sourceInner).length > 1 &&
+      this.elementFitsOnFreshPage(element, page)
+    );
   }
 
   private compactPages(): void {
@@ -665,7 +718,10 @@ export class Paginator {
   }
 
   private removeEmptyPages(): void {
-    if (this.pages.length <= 1) return;
+    if (this.pages.length <= 1) {
+      this.ensureSinglePageHasEditableBlank();
+      return;
+    }
 
     for (let index = this.pages.length - 1; index >= 0; index--) {
       const page = this.pages[index];
@@ -678,6 +734,17 @@ export class Paginator {
     if (this.pages.length === 0) {
       this.pages.push(this.pageFactory("<p><br></p>"));
     }
+
+    this.ensureSinglePageHasEditableBlank();
+  }
+
+  private ensureSinglePageHasEditableBlank(): void {
+    if (this.pages.length !== 1) return;
+
+    const inner = this.getInner(this.pages[0]);
+    if (!inner || inner.childNodes.length > 0) return;
+
+    inner.innerHTML = "<p><br></p>";
   }
 
   private trimLeadingBlankBlocksFromContinuationPages(): void {
@@ -713,6 +780,7 @@ export class Paginator {
   ): boolean {
     if (!this.isSplittableTextBlock(block)) return false;
 
+    const startedAt = performance.now();
     const flowId = this.ensureTextFlowId(block);
     const overflowBlock = block.cloneNode(false) as HTMLElement;
     overflowBlock.setAttribute("data-hwe-text-flow-id", flowId);
@@ -723,6 +791,16 @@ export class Paginator {
     let safety = 0;
 
     while (this.pageOverflows(page) && safety++ < 300) {
+      if (performance.now() - startedAt > Paginator.MAX_SPLIT_MS) {
+        hweDebugLog("paginator.splitTextBlock.timeBudgetExceeded", {
+          elapsedMs: Math.round((performance.now() - startedAt) * 100) / 100,
+          movedAny,
+          tagName: block.tagName,
+          textLength: (block.textContent ?? "").length,
+        });
+        break;
+      }
+
       const moved = this.moveLastInlinePiece(block, overflowBlock);
       if (!moved) break;
       movedAny = true;
@@ -826,10 +904,11 @@ export class Paginator {
     const inner = this.getInner(page);
     if (!inner) return false;
 
+    const scrollOverflows = inner.scrollHeight > inner.clientHeight + 1;
     const contentBottom = this.getContentBottom(inner);
-    if (contentBottom === null) return false;
+    if (contentBottom === null) return scrollOverflows;
 
-    return contentBottom > this.getContentLimitBottom(inner) + 1;
+    return contentBottom > this.getContentLimitBottom(inner) + 1 || scrollOverflows;
   }
 
   private getContentLimitBottom(inner: HTMLElement): number {
@@ -998,6 +1077,7 @@ export class Paginator {
     targetInner: HTMLElement,
     page: HTMLElement
   ): boolean {
+    const startedAt = performance.now();
     const overflowContainer = container.cloneNode(false) as HTMLElement;
     targetInner.insertBefore(overflowContainer, targetInner.firstChild);
 
@@ -1005,6 +1085,15 @@ export class Paginator {
     let safety = 0;
 
     while (this.pageOverflows(page) && safety++ < 300) {
+      if (performance.now() - startedAt > Paginator.MAX_SPLIT_MS) {
+        hweDebugLog("paginator.splitContainerPreservingShell.timeBudgetExceeded", {
+          elapsedMs: Math.round((performance.now() - startedAt) * 100) / 100,
+          movedAny,
+          tagName: container.tagName,
+        });
+        break;
+      }
+
       const child = this.getLastMeaningfulChild(container) ?? container.lastChild;
       if (!child) break;
 

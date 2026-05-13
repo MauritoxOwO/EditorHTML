@@ -1,6 +1,6 @@
 import { WordPasteImporter } from "../import/WordPasteImporter";
 import { PageSetup } from "../Orquestador/PageGeometry";
-import { hweDebugStart } from "../debug/DebugLogger";
+import { hweDebugLog, hweDebugStart } from "../debug/DebugLogger";
 
 export interface PasteResult {
   handled: boolean;
@@ -92,6 +92,8 @@ export class PasteController {
       marker.replaceWith(fragment);
     }
 
+    this.normalizeInvalidTableAncestors(targetEditable);
+
     const selection = window.getSelection();
     const lastInserted = insertedNodes[insertedNodes.length - 1];
     if (selection && lastInserted?.parentNode) {
@@ -104,6 +106,53 @@ export class PasteController {
     }
 
     return targetEditable.closest<HTMLElement>(".hwe-page");
+  }
+
+  private normalizeInvalidTableAncestors(targetEditable: HTMLElement): void {
+    let moved = 0;
+    Array.from(targetEditable.querySelectorAll<HTMLTableElement>("p table, li table, span table"))
+      .forEach((table) => {
+        if (table.closest("td, th")) return;
+
+        const invalidAncestor = this.getOuterInvalidTableAncestor(table, targetEditable);
+        const reference = invalidAncestor?.tagName === "LI"
+          ? invalidAncestor.closest<HTMLElement>("ul, ol") ?? invalidAncestor
+          : invalidAncestor;
+        const parent = reference?.parentNode;
+        if (!invalidAncestor || !reference || !parent || invalidAncestor === targetEditable) {
+          return;
+        }
+        if (!targetEditable.contains(invalidAncestor)) return;
+
+        parent.insertBefore(table, reference.nextSibling);
+        moved++;
+        if (this.isVisuallyEmpty(invalidAncestor)) invalidAncestor.remove();
+      });
+
+    if (moved > 0) {
+      hweDebugLog("paste.normalizeInvalidTableAncestors", { moved });
+    }
+  }
+
+  private getOuterInvalidTableAncestor(
+    table: HTMLTableElement,
+    targetEditable: HTMLElement
+  ): HTMLElement | null {
+    let invalid: HTMLElement | null = null;
+    let current = table.parentElement;
+
+    while (current && current !== targetEditable && targetEditable.contains(current)) {
+      if (current.matches("p, li, span")) invalid = current;
+      current = current.parentElement;
+    }
+
+    return invalid;
+  }
+
+  private isVisuallyEmpty(element: HTMLElement): boolean {
+    const text = (element.textContent ?? "").replace(/\u00a0/g, " ").trim();
+    if (text) return false;
+    return !element.querySelector("img, table, tr, td, th, video, canvas, svg");
   }
 
   private shouldInsertAsBlock(html: string): boolean {
