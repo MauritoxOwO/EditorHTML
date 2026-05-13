@@ -14,13 +14,15 @@ import {
 } from "../dom/EditableDom";
 import { unwrapGeneratedKeepTogetherGroups } from "../Orquestador/KeepTogetherController";
 import { addOcrTextLayers } from "../ocr/PdfOcrLayer";
+import { hweDebugLog, hweDebugStart } from "../debug/DebugLogger";
 
 export interface NormalizedDocument {
   html: string;
   pageSetup?: PageSetup;
 }
 
-const LARGE_DATA_IMAGE_URL_THRESHOLD = 1_500_000;
+const LARGE_DATA_IMAGE_URL_THRESHOLD = 80_000;
+const LARGE_DATA_IMAGE_PIXEL_THRESHOLD = 1_500_000;
 const LARGE_IMAGE_PLACEHOLDER_SRC =
   "data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%221850%22%20height%3D%222420%22%20viewBox%3D%220%200%201850%202420%22%3E%3Crect%20width%3D%221850%22%20height%3D%222420%22%20fill%3D%22%23f7f7f7%22%2F%3E%3Crect%20x%3D%2250%22%20y%3D%2250%22%20width%3D%221750%22%20height%3D%222320%22%20fill%3D%22none%22%20stroke%3D%22%23bdbdbd%22%20stroke-width%3D%226%22%20stroke-dasharray%3D%2224%2024%22%2F%3E%3Ctext%20x%3D%22925%22%20y%3D%221210%22%20text-anchor%3D%22middle%22%20font-family%3D%22Arial%2C%20sans-serif%22%20font-size%3D%2272%22%20fill%3D%22%23666%22%3EImagen%20grande%20en%20pausa%3C%2Ftext%3E%3C%2Fsvg%3E";
 
@@ -30,6 +32,9 @@ export class DocumentSerializer {
   private largeImageCounter = 0;
 
   normalizeHtmlForPagination(html: string): NormalizedDocument {
+    const done = hweDebugStart("serializer.normalizeHtmlForPagination", {
+      htmlLength: html.length,
+    });
     const safeHtml = this.detachLargeDataImages(html || "<p><br></p>");
     const doc = new DOMParser().parseFromString(safeHtml, "text/html");
     const temp = document.createElement("div");
@@ -40,18 +45,30 @@ export class DocumentSerializer {
     if (savedDocument) {
       temp.innerHTML = savedDocument.innerHTML;
       this.removeRuntimeOnlyState(temp);
-      return {
+      const result = {
         html: temp.innerHTML || "<p><br></p>",
         pageSetup,
       };
+      done({
+        normalizedLength: result.html.length,
+        pageSetup: result.pageSetup ?? null,
+        source: "saved-document",
+      });
+      return result;
     }
 
     if (this.wordPasteImporter.isWordHtml(safeHtml)) {
       const imported = this.wordPasteImporter.importFromHtml(safeHtml);
-      return {
+      const result = {
         html: imported.html,
         pageSetup: imported.pageSetup,
       };
+      done({
+        normalizedLength: result.html.length,
+        pageSetup: result.pageSetup ?? null,
+        source: "word-html",
+      });
+      return result;
     }
 
     this.preserveHeadStyles(doc, temp);
@@ -70,10 +87,16 @@ export class DocumentSerializer {
       temp.innerHTML = onlyChild.innerHTML;
     }
 
-    return {
+    const result = {
       html: temp.innerHTML || "<p><br></p>",
       pageSetup,
     };
+    done({
+      normalizedLength: result.html.length,
+      pageSetup: result.pageSetup ?? null,
+      source: "generic-html",
+    });
+    return result;
   }
 
   collectHtml(
@@ -198,15 +221,67 @@ ${content}
   }
 
   private detachLargeDataImages(html: string): string {
-    return html.replace(
-      /(<img\b[^>]*?)\s+src\s*=\s*(["'])(data:image\/[^"']+)\2/gi,
-      (match, prefix: string, quote: string, src: string) => {
-        if (src.length < LARGE_DATA_IMAGE_URL_THRESHOLD) return match;
+    const dataImages = this.countDataImageSources(html);
+    let detached = 0;
+    const reasons: Record<string, number> = {};
+    const result = html.replace(
+      /<img\b[^>]*\bsrc\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))[^>]*>/gi,
+      (tag: string, doubleQuotedSrc: string, singleQuotedSrc: string, unquotedSrc: string) => {
+        const src = doubleQuotedSrc ?? singleQuotedSrc ?? unquotedSrc ?? "";
+        if (!/^data:image\//i.test(src)) return tag;
 
+        const reason = this.getLargeDataImageReason(tag, src);
+        if (!reason) return tag;
+
+        detached++;
+        reasons[reason] = (reasons[reason] ?? 0) + 1;
         const id = this.rememberDetachedLargeImage(src);
-        return `${prefix} src=${quote}${LARGE_IMAGE_PLACEHOLDER_SRC}${quote} data-hwe-large-image-id=${quote}${id}${quote} data-hwe-large-image-placeholder=${quote}true${quote}`;
+        const quote = singleQuotedSrc !== undefined ? "'" : "\"";
+        return tag
+          .replace(
+            /\s+src\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+)/i,
+            ` src=${quote}${LARGE_IMAGE_PLACEHOLDER_SRC}${quote}`
+          )
+          .replace(
+            /<img\b/i,
+            `<img data-hwe-large-image-id=${quote}${id}${quote} data-hwe-large-image-placeholder=${quote}true${quote} data-hwe-large-image-reason=${quote}${reason}${quote}`
+          );
       }
     );
+
+    if (detached > 0) {
+      hweDebugLog("serializer.detachLargeDataImages", {
+        dataImages,
+        detached,
+        htmlLength: html.length,
+        reasons,
+      });
+    } else if (dataImages > 0) {
+      hweDebugLog("serializer.detachLargeDataImages.none", {
+        dataImages,
+        htmlLength: html.length,
+      });
+    }
+
+    return result;
+  }
+
+  private countDataImageSources(html: string): number {
+    return html.match(/\bsrc\s*=\s*(?:"data:image\/|'data:image\/|data:image\/)/gi)?.length ?? 0;
+  }
+
+  private getLargeDataImageReason(tag: string, src: string): string | null {
+    const declaredPixels = this.getDeclaredImagePixels(tag);
+    if (declaredPixels > LARGE_DATA_IMAGE_PIXEL_THRESHOLD) {
+      return "declared-pixels";
+    }
+
+    const bytes = this.estimateDataUrlBytes(src);
+    if (bytes > LARGE_DATA_IMAGE_URL_THRESHOLD) {
+      return "data-url-bytes";
+    }
+
+    return null;
   }
 
   private rememberDetachedLargeImage(src: string): string {
@@ -216,13 +291,40 @@ ${content}
   }
 
   private restoreDetachedLargeImages(root: HTMLElement): void {
+    let restored = 0;
     root.querySelectorAll<HTMLImageElement>("img[data-hwe-large-image-id]").forEach((image) => {
       const id = image.getAttribute("data-hwe-large-image-id") ?? "";
       const src = this.detachedLargeImages.get(id);
-      if (src) image.setAttribute("src", src);
+      if (src) {
+        image.setAttribute("src", src);
+        restored++;
+      }
       image.removeAttribute("data-hwe-large-image-id");
       image.removeAttribute("data-hwe-large-image-placeholder");
+      image.removeAttribute("data-hwe-large-image-reason");
     });
+    if (restored > 0) hweDebugLog("serializer.restoreDetachedLargeImages", { restored });
+  }
+
+  private getDeclaredImagePixels(tag: string): number {
+    const width = this.getNumericAttribute(tag, "width");
+    const height = this.getNumericAttribute(tag, "height");
+    return width > 0 && height > 0 ? width * height : 0;
+  }
+
+  private getNumericAttribute(tag: string, name: string): number {
+    const match = new RegExp(`\\s${name}\\s*=\\s*["']?([0-9.]+)`, "i").exec(tag);
+    return match ? Number.parseFloat(match[1]) || 0 : 0;
+  }
+
+  private estimateDataUrlBytes(src: string): number {
+    const commaIndex = src.indexOf(",");
+    const payload = commaIndex >= 0 ? src.slice(commaIndex + 1) : src;
+    if (/^data:[^;,]+;base64,/i.test(src)) {
+      return Math.floor(payload.length * 0.75);
+    }
+
+    return payload.length;
   }
 
   private applyBodyFormattingWrapper(doc: Document, root: HTMLElement): void {
@@ -435,17 +537,13 @@ table {
   break-inside: auto;
 }
 .hwe-page-inner > table,
-.hwe-page-inner > div:has(> table:only-child),
-.hwe-page-inner > section:has(> table:only-child),
-.hwe-page-inner > article:has(> table:only-child) {
+.hwe-table-flow-wrapper {
   width: 100% !important;
   max-width: 100% !important;
   margin-left: 0;
   margin-right: 0;
 }
-.hwe-page-inner > div:has(> table:only-child) > table,
-.hwe-page-inner > section:has(> table:only-child) > table,
-.hwe-page-inner > article:has(> table:only-child) > table,
+.hwe-table-flow-wrapper > table,
 .hwe-page table.hwe-word-table {
   width: 100% !important;
 }

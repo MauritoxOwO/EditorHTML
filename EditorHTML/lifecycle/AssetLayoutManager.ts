@@ -1,20 +1,40 @@
+import { hweDebugStart } from "../debug/DebugLogger";
+
 const LARGE_DATA_IMAGE_BYTES = 2_500_000;
+const LARGE_IMAGE_PIXELS = 1_500_000;
 const IMAGE_WAIT_TIMEOUT_MS = 1200;
 
 export class AssetLayoutManager {
   async waitForStableLayout(root: HTMLElement): Promise<void> {
+    const done = hweDebugStart("assets.waitForStableLayout", {
+      images: root.querySelectorAll("img").length,
+    });
     await Promise.all([this.waitForImages(root), this.waitForFonts()]);
     await this.waitFrames(2);
+    done({
+      images: root.querySelectorAll("img").length,
+    });
   }
 
   private async waitForImages(root: HTMLElement): Promise<void> {
     const images = Array.from(root.querySelectorAll("img"));
     const pending = images.filter((img) => !img.complete || img.naturalWidth === 0);
-    if (pending.length === 0) return;
+    const done = hweDebugStart("assets.waitForImages", {
+      images: images.length,
+      pending: pending.length,
+      largeDataImages: images.filter((img) => this.isLargeDataImage(img)).length,
+      placeholderImages: images.filter(
+        (img) => img.getAttribute("data-hwe-large-image-placeholder") === "true"
+      ).length,
+    });
+    if (pending.length === 0) {
+      done({ skipped: true });
+      return;
+    }
 
     await Promise.all(
       pending.map((img) => {
-        if (this.isLargeDataImage(img)) {
+        if (this.isDataImage(img)) {
           return this.waitForImageEvent(img, IMAGE_WAIT_TIMEOUT_MS);
         }
 
@@ -28,11 +48,28 @@ export class AssetLayoutManager {
         return this.waitForImageEvent(img, IMAGE_WAIT_TIMEOUT_MS);
       })
     );
+    done({
+      pending: pending.length,
+    });
   }
 
   private isLargeDataImage(img: HTMLImageElement): boolean {
     const src = img.getAttribute("src") ?? "";
-    return src.startsWith("data:image/") && this.estimateDataUrlBytes(src) > LARGE_DATA_IMAGE_BYTES;
+    if (!src.startsWith("data:image/")) return false;
+    if (this.estimateDataUrlBytes(src) > LARGE_DATA_IMAGE_BYTES) return true;
+
+    const width = this.getDeclaredDimension(img, "width") || img.naturalWidth || 0;
+    const height = this.getDeclaredDimension(img, "height") || img.naturalHeight || 0;
+    return width * height > LARGE_IMAGE_PIXELS;
+  }
+
+  private isDataImage(img: HTMLImageElement): boolean {
+    return (img.getAttribute("src") ?? "").startsWith("data:image/");
+  }
+
+  private getDeclaredDimension(img: HTMLImageElement, name: "height" | "width"): number {
+    const raw = img.getAttribute(name);
+    return raw ? Number.parseFloat(raw) || 0 : 0;
   }
 
   private estimateDataUrlBytes(src: string): number {

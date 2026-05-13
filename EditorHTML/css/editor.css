@@ -231,18 +231,14 @@
 }
 
 .hwe-page-inner > table,
-.hwe-page-inner > div:has(> table:only-child),
-.hwe-page-inner > section:has(> table:only-child),
-.hwe-page-inner > article:has(> table:only-child) {
+.hwe-table-flow-wrapper {
   width: 100% !important;
   max-width: 100% !important;
   margin-left: 0;
   margin-right: 0;
 }
 
-.hwe-page-inner > div:has(> table:only-child) > table,
-.hwe-page-inner > section:has(> table:only-child) > table,
-.hwe-page-inner > article:has(> table:only-child) > table {
+.hwe-table-flow-wrapper > table {
   width: 100% !important;
 }
 
@@ -428,6 +424,24 @@
 
 .hwe-statusbar .hwe-status-msg {
   margin-left: auto;
+}
+
+.hwe-diagnostics-btn {
+  height: 18px;
+  padding: 0 8px;
+  border: 1px solid #b8b8b8;
+  border-radius: 3px;
+  background: #fff;
+  color: #333;
+  cursor: pointer;
+  font-size: 11px;
+  line-height: 16px;
+  white-space: nowrap;
+}
+
+.hwe-diagnostics-btn:hover {
+  border-color: #0078d4;
+  background: #eef6fc;
 }
 
 .hwe-statusbar .hwe-status-msg.success {

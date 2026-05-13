@@ -1,3 +1,5 @@
+import { hweDebugLog } from "../debug/DebugLogger";
+
 export interface TablePaginatorContext {
   getContentLimitBottom(inner: HTMLElement): number;
   getInner(page: HTMLElement): HTMLElement | null;
@@ -38,6 +40,12 @@ export class TablePaginator {
     newTable.appendChild(tbody);
 
     targetInner.insertBefore(newTable, targetInner.firstChild);
+    hweDebugLog("tablePaginator.splitTable", {
+      rows: rows.length,
+      rowsForNext: rowsForNext.length,
+      rowsRemaining: rows.length - rowsForNext.length,
+      splitRowIndex,
+    });
 
     const remainingRows = table.querySelectorAll("tbody tr, tfoot tr");
     if (remainingRows.length === 0) table.remove();

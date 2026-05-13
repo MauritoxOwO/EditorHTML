@@ -2,7 +2,6 @@ import { Paginator, RebalanceOptions } from "../Orquestador/Paginator";
 import { CaretManager } from "../Orquestador/CaretManager";
 import {
   CLEAR_PARAGRAPH_STYLE_VALUE,
-  ParagraphStyleOption,
   Toolbar,
 } from "../Resize/Toolbar";
 import { fetchHtmlFromFileField, saveHtmlToFileField } from "../execCommand/fileApi";
@@ -21,22 +20,26 @@ import { BlankLineController } from "./BlankLineController";
 import { DocumentSerializer } from "./DocumentSerializer";
 import { PasteController } from "./PasteController";
 import { AssetLayoutManager } from "./AssetLayoutManager";
+import { EditorDiagnosticsController } from "./EditorDiagnosticsController";
+import { EditorLayoutService } from "./EditorLayoutService";
+import { PageBackspaceController } from "./PageBackSpaceController";
+import { ParagraphStyleManager } from "./ParagraphStyleManager";
+import { StyleSelectionTracker } from "./StyleSelectionTracker";
+import { TableCommandController } from "./TableCommandController";
+import { EditorView, EditorViewController } from "./EditorViewController";
 import {
-  getMeaningfulChildren,
-  isEditableBlankBlock,
-  isEmptyNode,
-} from "../dom/EditableDom";
-import { ImageOcrService } from "../ocr/ImageOcrService";
+  hweDebugLog,
+  hweDebugStart,
+  installHweDebugGlobals,
+} from "../debug/DebugLogger";
 
 type PcfContext = ComponentFramework.Context<IInputs>;
 type StatusType = "success" | "error" | "saving" | "";
-type EditorView = "visual" | "source";
 type QueuedRebalance = Required<RebalanceOptions> & {
   page: HTMLElement;
   pullFromNextPages: boolean;
 };
 
-const PARAGRAPH_STYLE_BLOCK_SELECTOR = "p, li, h1, h2, h3, h4, h5, h6, blockquote, pre";
 const DEFAULT_STYLE_TABLE_CONFIG: ParagraphStyleTableConfig = {
   entitySetName: "mcdev_htmlstyles",
   classField: "mcdev_cssclass",
@@ -78,9 +81,6 @@ export class EditorComponent {
   private root!: HTMLElement;
   private editorHeader!: HTMLElement;
   private workspace!: HTMLElement;
-  private viewTabs!: HTMLElement;
-  private visualTabBtn!: HTMLButtonElement;
-  private sourceTabBtn!: HTMLButtonElement;
   private sourceEditor!: HTMLTextAreaElement;
   private statusMsg!: HTMLElement;
   private pageCountEl!: HTMLElement;
@@ -92,12 +92,19 @@ export class EditorComponent {
   private readonly documentSerializer = new DocumentSerializer();
   private readonly assetLayoutManager = new AssetLayoutManager();
   private readonly pasteController = new PasteController();
-  private readonly imageOcrService = new ImageOcrService({
-    setStatus: (message, type) => this.setStatus(message, type),
-  });
+  private readonly layoutService = new EditorLayoutService();
+  private readonly pageBackspaceController = new PageBackspaceController();
+  private diagnosticsController!: EditorDiagnosticsController;
+  private paragraphStyleManager!: ParagraphStyleManager;
+  private styleSelectionTracker!: StyleSelectionTracker;
+  private tableCommandController!: TableCommandController;
+  private viewController!: EditorViewController;
   private pageSetup: PageSetup = DEFAULT_PAGE_SETUP;
   private allocatedWidth?: number;
   private allocatedHeight?: number;
+  private deferredRenderHtml: string | null = null;
+  private deferredRenderFrame: number | undefined;
+  private resizeObserver: ResizeObserver | null = null;
 
   private readonly baseUrl: string;
   private readonly entityName: string;
@@ -110,12 +117,7 @@ export class EditorComponent {
   private pendingRebalance: QueuedRebalance | null = null;
   private readonly pagesNeedingPull = new WeakSet<HTMLElement>();
   private readonly pendingInputTypes = new WeakMap<HTMLElement, string>();
-  private readonly paragraphStyleClasses = new Set<string>();
-  private lastSelectedTableRow: HTMLTableRowElement | null = null;
-  private lastTextSelection: Range | null = null;
-  private lastStyleBlock: HTMLElement | null = null;
-  private paragraphStyleElement: HTMLStyleElement | null = null;
-  private readonly handleSelectionChange = (): void => this.rememberTextSelection();
+  private readonly handleSelectionChange = (): void => this.styleSelectionTracker.rememberTextSelection();
   private isComposing = false;
   private isDirty = false;
   private activeView: EditorView = "visual";
@@ -169,14 +171,28 @@ export class EditorComponent {
     this.root = document.createElement("div");
     this.root.className = "hwe-root";
     this.applyCurrentPageSetup();
+    installHweDebugGlobals(() => this.root ?? null);
+    hweDebugLog("editor.buildShell", {
+      allocatedHeight: this.allocatedHeight,
+      allocatedWidth: this.allocatedWidth,
+    });
 
     this.editorHeader = document.createElement("div");
     this.editorHeader.className = "hwe-editor-header";
     this.root.appendChild(this.editorHeader);
+    this.tableCommandController = new TableCommandController({
+      rootProvider: () => this.root,
+      getActiveEditable: () => this.getActiveEditable(),
+      getEditableForPageIndex: (pageIndex) => this.getEditableForPageIndex(pageIndex),
+      markEdited: (element) => this.markEditedAndRebalance(element),
+    });
+    this.viewController = new EditorViewController(this.editorHeader, (view) => {
+      void this.switchView(view);
+    });
 
     this.toolbar = new Toolbar({
-      onInsertTable: () => this.insertTable(),
-      onInsertRowAfter: () => this.insertTableRowAfter(),
+      onInsertTable: () => this.tableCommandController.insertTable(),
+      onInsertRowAfter: () => this.tableCommandController.insertTableRowAfter(),
       onApplyParagraphStyle: (className) => this.applyParagraphStyle(className),
       onExportPdf: () => {
         void this.exportPdf();
@@ -185,9 +201,18 @@ export class EditorComponent {
     const toolbarEl = this.toolbar.build();
     this.toolbar.getSaveButton().addEventListener("click", () => void this.save());
     this.editorHeader.appendChild(toolbarEl);
+    this.paragraphStyleManager = new ParagraphStyleManager(() => this.root, this.toolbar);
+    this.styleSelectionTracker = new StyleSelectionTracker(
+      () => this.root,
+      () => this.getActiveEditable()
+    );
+    this.diagnosticsController = new EditorDiagnosticsController(
+      () => this.root ?? null,
+      (message, type) => this.setStatus(message, type)
+    );
     document.addEventListener("selectionchange", this.handleSelectionChange);
 
-    this.buildViewTabs();
+    this.viewController.build();
 
     this.workspace = document.createElement("div");
     this.workspace.className = "hwe-workspace";
@@ -214,31 +239,16 @@ export class EditorComponent {
     this.statusMsg.className = "hwe-status-msg";
     statusBar.appendChild(this.statusMsg);
 
+    statusBar.appendChild(this.diagnosticsController.makeButton());
+
     this.root.appendChild(statusBar);
     this.container.appendChild(this.root);
-  }
+    this.diagnosticsController.start();
 
-  private buildViewTabs(): void {
-    this.viewTabs = document.createElement("div");
-    this.viewTabs.className = "hwe-view-tabs";
-
-    this.visualTabBtn = this.makeViewTabButton("Editor", "visual");
-    this.sourceTabBtn = this.makeViewTabButton("HTML", "source");
-
-    this.viewTabs.appendChild(this.visualTabBtn);
-    this.viewTabs.appendChild(this.sourceTabBtn);
-    this.editorHeader.appendChild(this.viewTabs);
-    this.updateViewTabs();
-  }
-
-  private makeViewTabButton(label: string, view: EditorView): HTMLButtonElement {
-    const button = document.createElement("button");
-    button.type = "button";
-    button.textContent = label;
-    button.addEventListener("click", () => {
-      void this.switchView(view);
-    });
-    return button;
+    if (typeof ResizeObserver !== "undefined") {
+      this.resizeObserver = new ResizeObserver(() => this.renderDeferredWhenVisible());
+      this.resizeObserver.observe(this.container);
+    }
   }
 
   private async switchView(view: EditorView): Promise<void> {
@@ -263,15 +273,7 @@ export class EditorComponent {
   }
 
   private updateViewTabs(): void {
-    this.visualTabBtn.classList.toggle("hwe-active", this.activeView === "visual");
-    this.sourceTabBtn.classList.toggle("hwe-active", this.activeView === "source");
-
-    if (this.workspace) {
-      this.workspace.hidden = this.activeView !== "visual";
-    }
-    if (this.sourceEditor) {
-      this.sourceEditor.hidden = this.activeView !== "source";
-    }
+    this.viewController.update(this.activeView, this.workspace, this.sourceEditor);
   }
 
   private setPageSetup(setup: Partial<PageSetup> | PageSetup): void {
@@ -316,62 +318,11 @@ export class EditorComponent {
           ? await fetchParagraphStyles(this.baseUrl, this.styleTableConfig)
           : LOCAL_PARAGRAPH_STYLES;
 
-      this.setParagraphStyles(styles.length > 0 ? styles : LOCAL_PARAGRAPH_STYLES);
+      this.paragraphStyleManager.setStyles(styles.length > 0 ? styles : LOCAL_PARAGRAPH_STYLES);
     } catch (error) {
       console.warn("[HtmlWordEditor] paragraph styles fallback:", error);
-      this.setParagraphStyles(LOCAL_PARAGRAPH_STYLES);
+      this.paragraphStyleManager.setStyles(LOCAL_PARAGRAPH_STYLES);
     }
-  }
-
-  private setParagraphStyles(styles: ParagraphStyleDefinition[]): void {
-    const validStyles = styles.filter((style) => this.isValidCssClassName(style.className));
-
-    this.paragraphStyleClasses.clear();
-    validStyles.forEach((style) => this.paragraphStyleClasses.add(style.className));
-    this.toolbar.setParagraphStyles(
-      validStyles.map<ParagraphStyleOption>((style) => ({
-        label: style.label,
-        className: style.className,
-      }))
-    );
-    this.injectParagraphStyleCss(validStyles);
-  }
-
-  private injectParagraphStyleCss(styles: ParagraphStyleDefinition[]): void {
-    if (!this.paragraphStyleElement) {
-      this.paragraphStyleElement = document.createElement("style");
-      this.paragraphStyleElement.setAttribute("data-hwe-style-catalog", "true");
-      this.root.insertBefore(this.paragraphStyleElement, this.root.firstChild);
-    }
-
-    this.paragraphStyleElement.textContent = styles
-      .map((style) => this.formatParagraphStyleCss(style))
-      .join("\n\n");
-  }
-
-  private formatParagraphStyleCss(style: ParagraphStyleDefinition): string {
-    const declarations = this.extractCssDeclarations(style.cssText);
-    return declarations ? `.hwe-page-inner .${style.className} { ${declarations} }` : "";
-  }
-
-  private extractCssDeclarations(cssText: string): string {
-    const css = cssText.trim();
-    if (!css) return "";
-
-    if (css.startsWith("{") && css.endsWith("}")) {
-      return css.slice(1, -1).trim();
-    }
-
-    if (css.includes("{")) {
-      const ruleMatch = /[^{]+\{([\s\S]*?)\}/.exec(css);
-      return ruleMatch?.[1]?.trim() ?? "";
-    }
-
-    return css;
-  }
-
-  private isValidCssClassName(className: string): boolean {
-    return /^-?[_a-zA-Z]+[_a-zA-Z0-9-]*$/.test(className);
   }
 
   private async loadContent(): Promise<void> {
@@ -408,23 +359,49 @@ export class EditorComponent {
   }
 
   private async renderAndPaginate(html: string): Promise<void> {
+    const done = hweDebugStart("editor.renderAndPaginate", {
+      htmlLength: html.length,
+    });
     this.workspace.innerHTML = "";
     this.setPageSetup(DEFAULT_PAGE_SETUP);
 
     const normalizedDocument = this.documentSerializer.normalizeHtmlForPagination(html);
+    hweDebugLog("editor.renderAndPaginate.normalized", {
+      htmlLength: normalizedDocument.html.length,
+      pageSetup: normalizedDocument.pageSetup ?? null,
+    });
 
     this.pages = [this.createPageElement(normalizedDocument.html)];
     this.workspace.appendChild(this.pages[0]);
-    this.applyOfficialTableWidths(this.workspace);
+    this.layoutService.applyOfficialTableWidths(this.workspace);
 
     this.paginator.setPages(this.pages);
+    if (!this.canMeasureLayout()) {
+      this.deferredRenderHtml = html;
+      this.syncWorkspace();
+      this.updatePageCount();
+      hweDebugLog("editor.renderAndPaginate.deferred", {
+        root: this.root.getBoundingClientRect(),
+        workspace: this.workspace.getBoundingClientRect(),
+      });
+      done({
+        deferred: true,
+        pages: this.pages.length,
+      });
+      return;
+    }
+
+    this.deferredRenderHtml = null;
     await this.assetLayoutManager.waitForStableLayout(this.workspace);
 
     this.paginator.repaginateAll();
     this.pages = this.paginator.getPages();
-    this.pages.forEach((page) => this.applyOfficialTableWidths(page));
+    this.pages.forEach((page) => this.layoutService.applyOfficialTableWidths(page));
     this.syncWorkspace();
     this.updatePageCount();
+    done({
+      pages: this.pages.length,
+    });
   }
 
   private createPageElement(html?: string): HTMLElement {
@@ -436,7 +413,7 @@ export class EditorComponent {
     inner.setAttribute("contenteditable", "true");
     inner.setAttribute("spellcheck", "false");
     inner.innerHTML = html ?? "<p><br></p>";
-    this.applyOfficialTableWidths(inner);
+    this.layoutService.applyOfficialTableWidths(inner);
 
     inner.addEventListener("beforeinput", (event: InputEvent) => {
       this.pendingInputTypes.set(page, event.inputType);
@@ -471,17 +448,17 @@ export class EditorComponent {
     inner.addEventListener("paste", (event: ClipboardEvent) => this.onPaste(event, page));
     inner.addEventListener("keydown", (event: KeyboardEvent) => this.onPageKeyDown(event));
     inner.addEventListener("keyup", () => {
-      this.rememberTextSelection();
-      this.rememberSelectedTableRow();
+      this.styleSelectionTracker.rememberTextSelection();
+      this.tableCommandController.rememberSelectedTableRow();
     });
     inner.addEventListener("click", (event) => {
-      this.rememberTableRowFromEvent(event);
-      this.rememberStyleBlockFromEvent(event);
+      this.tableCommandController.rememberTableRowFromEvent(event);
+      this.styleSelectionTracker.rememberStyleBlockFromEvent(event);
     });
     inner.addEventListener("mouseup", (event) => {
-      this.rememberStyleBlockFromEvent(event);
-      this.rememberTextSelection();
-      this.rememberSelectedTableRow();
+      this.styleSelectionTracker.rememberStyleBlockFromEvent(event);
+      this.styleSelectionTracker.rememberTextSelection();
+      this.tableCommandController.rememberSelectedTableRow();
       this.toolbar.updateActiveStates();
     });
 
@@ -506,6 +483,14 @@ export class EditorComponent {
 
       const pageIndex = this.pages.indexOf(pending.page);
       if (!this.shouldRebalancePage(pending.page, pageIndex, pending.pullFromNextPages)) return;
+      const done = hweDebugStart("editor.scheduleRebalance.flush", {
+        compactPages: pending.compactPages,
+        includePreviousPage: pending.includePreviousPage,
+        overflowOnly: pending.overflowOnly,
+        pageIndex,
+        pages: this.pages.length,
+        pullFromNextPages: pending.pullFromNextPages,
+      });
 
       const startPageIndex = pending.includePreviousPage ? Math.max(0, pageIndex - 1) : pageIndex;
       const startPage = this.pages[startPageIndex] ?? pending.page;
@@ -513,7 +498,23 @@ export class EditorComponent {
       const marker = CaretManager.createMarker(this.root);
       const caretViewportTop = marker?.getBoundingClientRect().top ?? null;
       if (pending.overflowOnly) {
-        this.paginator.pushOverflowForwardFromPage(pending.page);
+        const resolved = this.paginator.pushOverflowForwardFromPage(pending.page);
+        this.pages = this.paginator.getPages();
+        const fallbackPageIndex = Math.max(0, Math.min(pageIndex, this.pages.length - 1));
+        const fallbackPage = this.pages[fallbackPageIndex];
+        if (!resolved && fallbackPage && this.layoutService.pageOverflows(fallbackPage)) {
+          hweDebugLog("editor.scheduleRebalance.overflowFallback", {
+            fallbackPageIndex,
+            pages: this.pages.length,
+          });
+          window.requestAnimationFrame(() => {
+            if (!this.pages.includes(fallbackPage) || !this.layoutService.pageOverflows(fallbackPage)) return;
+            this.scheduleRebalance(fallbackPage, false, {
+              compactPages: false,
+              includePreviousPage: false,
+            });
+          });
+        }
       } else {
         this.paginator.rebalanceFromPage(startPage, {
           includePreviousPage: false,
@@ -531,6 +532,9 @@ export class EditorComponent {
       this.restoreCaretViewport(marker, caretViewportTop);
       CaretManager.restoreMarker(marker, fallbackEditable);
       CaretManager.removeMarkers(this.root);
+      done({
+        pages: this.pages.length,
+      });
     });
   }
 
@@ -577,7 +581,7 @@ export class EditorComponent {
 
   private onPagesChanged(pages: HTMLElement[]): void {
     this.pages = pages;
-    this.pages.forEach((page) => this.applyOfficialTableWidths(page));
+    this.pages.forEach((page) => this.layoutService.applyOfficialTableWidths(page));
     this.syncWorkspace();
     this.updatePageCount();
   }
@@ -633,34 +637,6 @@ export class EditorComponent {
     return divider;
   }
 
-  private applyOfficialTableWidths(root: HTMLElement): void {
-    const inners = root.classList.contains("hwe-page-inner")
-      ? [root]
-      : Array.from(root.querySelectorAll<HTMLElement>(".hwe-page-inner"));
-
-    inners.forEach((inner) => {
-      Array.from(inner.children).forEach((child) => {
-        const table = this.getDirectFlowTable(child as HTMLElement);
-        if (!table) return;
-
-        table.style.setProperty("width", "100%", "important");
-        table.style.setProperty("max-width", "100%", "important");
-        table.style.setProperty("margin-left", "0", "important");
-        table.style.setProperty("margin-right", "0", "important");
-      });
-    });
-  }
-
-  private getDirectFlowTable(element: HTMLElement): HTMLTableElement | null {
-    if (element.tagName === "TABLE") return element as HTMLTableElement;
-
-    const children = getMeaningfulChildren(element, true);
-    if (children.length !== 1 || children[0].nodeType !== Node.ELEMENT_NODE) return null;
-
-    const onlyChild = children[0] as HTMLElement;
-    return onlyChild.tagName === "TABLE" ? (onlyChild as HTMLTableElement) : null;
-  }
-
   private onPaste(event: ClipboardEvent, page: HTMLElement): void {
     const result = this.pasteController.handlePaste(event, page);
     if (!result.handled) return;
@@ -668,39 +644,44 @@ export class EditorComponent {
     const affectedPage = result.affectedPage ?? page;
     const inner = affectedPage.querySelector<HTMLElement>(".hwe-page-inner");
     if (inner) this.blankLineController.syncEditableBlankBlocks(inner, false);
-    this.applyOfficialTableWidths(affectedPage);
+    this.layoutService.applyOfficialTableWidths(affectedPage);
 
     this.isDirty = true;
     this.toolbar.updateActiveStates();
-    this.scheduleRebalance(affectedPage, true, { includePreviousPage: false });
+    this.scheduleRebalance(affectedPage, false, {
+      compactPages: false,
+      includePreviousPage: false,
+    });
     void this.assetLayoutManager
       .waitForStableLayout(affectedPage)
       .then(() => {
-        this.scheduleRebalance(affectedPage, true, { includePreviousPage: false });
+        this.scheduleRebalance(affectedPage, false, {
+          compactPages: false,
+          includePreviousPage: false,
+        });
       });
   }
 
   private applyParagraphStyle(className: string): void {
     const shouldClearStyle = className === CLEAR_PARAGRAPH_STYLE_VALUE;
-    if (!shouldClearStyle && !this.paragraphStyleClasses.has(className)) return;
+    if (!shouldClearStyle && !this.paragraphStyleManager.hasClass(className)) return;
     if (this.activeView !== "visual") {
       this.setStatus("Vuelve al editor visual para aplicar estilos.", "error");
       return;
     }
 
-    this.restoreTextSelection();
-    const blocks = this.getSelectedStyleBlocks();
+    this.styleSelectionTracker.restoreTextSelection();
+    const blocks = this.styleSelectionTracker.getSelectedStyleBlocks();
     if (blocks.length === 0) {
       this.setStatus("Selecciona un parrafo para aplicar el estilo.", "error");
       return;
     }
 
     blocks.forEach((block) => {
-      this.paragraphStyleClasses.forEach((styleClass) => block.classList.remove(styleClass));
-      if (!shouldClearStyle) block.classList.add(className);
+      this.paragraphStyleManager.applyToBlock(block, shouldClearStyle ? null : className);
     });
 
-    this.rememberTextSelection();
+    this.styleSelectionTracker.rememberTextSelection();
     this.markEditedAfterStyleChange(blocks[0]);
   }
 
@@ -711,91 +692,12 @@ export class EditorComponent {
     this.isDirty = true;
     this.toolbar.updateActiveStates();
 
-    if (this.pageOverflows(page)) {
+    if (this.layoutService.pageOverflows(page)) {
       this.scheduleRebalance(page, false, {
         includePreviousPage: false,
         compactPages: false,
       });
     }
-  }
-
-  private getSelectedStyleBlocks(): HTMLElement[] {
-    const selection = window.getSelection();
-    const range = selection && selection.rangeCount > 0 ? selection.getRangeAt(0) : null;
-    if (!range || !this.root.contains(range.commonAncestorContainer)) {
-      return this.lastStyleBlock && this.root.contains(this.lastStyleBlock)
-        ? [this.lastStyleBlock]
-        : [];
-    }
-
-    const editable = this.getActiveEditable();
-    const scope = editable ?? this.root;
-    const blocks = Array.from(
-      scope.querySelectorAll<HTMLElement>(PARAGRAPH_STYLE_BLOCK_SELECTOR)
-    ).filter((block) => this.rangeOverlapsBlock(range, block));
-
-    if (blocks.length > 0) {
-      this.lastStyleBlock = blocks[0];
-      return blocks;
-    }
-
-    const element =
-      range.startContainer.nodeType === Node.ELEMENT_NODE
-        ? (range.startContainer as HTMLElement)
-        : range.startContainer.parentElement;
-    const currentBlock = element?.closest<HTMLElement>(PARAGRAPH_STYLE_BLOCK_SELECTOR);
-    if (currentBlock && this.root.contains(currentBlock)) {
-      this.lastStyleBlock = currentBlock;
-      return [currentBlock];
-    }
-
-    return this.lastStyleBlock && this.root.contains(this.lastStyleBlock)
-      ? [this.lastStyleBlock]
-      : [];
-  }
-
-  private rangeOverlapsBlock(range: Range, block: HTMLElement): boolean {
-    if (range.collapsed) return block.contains(range.startContainer);
-
-    const blockRange = document.createRange();
-    blockRange.selectNodeContents(block);
-
-    const startsBeforeBlockEnds =
-      range.compareBoundaryPoints(Range.START_TO_END, blockRange) < 0;
-    const endsAfterBlockStarts =
-      range.compareBoundaryPoints(Range.END_TO_START, blockRange) > 0;
-    return startsBeforeBlockEnds && endsAfterBlockStarts;
-  }
-
-  private rememberTextSelection(): void {
-    const selection = window.getSelection();
-    if (!selection || selection.rangeCount === 0) return;
-
-    const range = selection.getRangeAt(0);
-    if (!this.root?.contains(range.commonAncestorContainer)) return;
-
-    const element =
-      range.commonAncestorContainer.nodeType === Node.ELEMENT_NODE
-        ? (range.commonAncestorContainer as HTMLElement)
-        : range.commonAncestorContainer.parentElement;
-    if (!element?.closest("[contenteditable='true']")) return;
-
-    this.lastTextSelection = range.cloneRange();
-    this.lastStyleBlock = element.closest<HTMLElement>(PARAGRAPH_STYLE_BLOCK_SELECTOR);
-  }
-
-  private rememberStyleBlockFromEvent(event: Event): void {
-    const target = event.target as HTMLElement | null;
-    const block = target?.closest<HTMLElement>(PARAGRAPH_STYLE_BLOCK_SELECTOR);
-    if (block && this.root.contains(block)) this.lastStyleBlock = block;
-  }
-
-  private restoreTextSelection(): void {
-    if (!this.lastTextSelection) return;
-
-    const selection = window.getSelection();
-    selection?.removeAllRanges();
-    selection?.addRange(this.lastTextSelection);
   }
 
   private onPageKeyDown(event: KeyboardEvent): void {
@@ -804,7 +706,17 @@ export class EditorComponent {
       void this.save();
     }
 
-    if (event.key === "Backspace" && this.handleBackspaceAtPageStart(event)) {
+    if (
+      event.key === "Backspace" &&
+      this.pageBackspaceController.handleBackspaceAtPageStart(event, {
+        pages: this.pages,
+        onContentChanged: (previousPage) => {
+          this.isDirty = true;
+          this.toolbar.updateActiveStates();
+          this.scheduleRebalance(previousPage, true, { includePreviousPage: true });
+        },
+      })
+    ) {
       return;
     }
 
@@ -814,304 +726,12 @@ export class EditorComponent {
     }
   }
 
-  private handleBackspaceAtPageStart(event: KeyboardEvent): boolean {
-    const inner = event.currentTarget as HTMLElement;
-    const page = inner.closest<HTMLElement>(".hwe-page");
-    if (!page) return false;
-
-    const caretAtPageStart = this.isCaretAtStartOfEditable(inner);
-    const caretAtTableContinuationStart =
-      !caretAtPageStart && this.isCaretAtStartOfFirstTableFragment(inner);
-    if (!caretAtPageStart && !caretAtTableContinuationStart) return false;
-
-    const pageIndex = this.pages.indexOf(page);
-    if (pageIndex <= 0) return false;
-
-    const previousPage = this.pages[pageIndex - 1];
-    const previousInner = previousPage.querySelector<HTMLElement>(".hwe-page-inner");
-    if (!previousInner) return false;
-
-    event.preventDefault();
-    if (caretAtTableContinuationStart) {
-      this.removeTrailingPaginationBlanks(previousInner);
-    } else {
-      this.deleteLastContent(previousInner);
-    }
-    this.placeCaretAtEnd(previousInner);
-    this.isDirty = true;
-    this.toolbar.updateActiveStates();
-    this.scheduleRebalance(previousPage, true, { includePreviousPage: true });
-    return true;
-  }
-
-  private isCaretAtStartOfFirstTableFragment(inner: HTMLElement): boolean {
-    const selection = window.getSelection();
-    if (!selection || selection.rangeCount === 0 || !selection.isCollapsed) return false;
-
-    const range = selection.getRangeAt(0);
-    if (!inner.contains(range.startContainer)) return false;
-
-    const first = getMeaningfulChildren(inner)[0];
-    if (!first || first.nodeType !== Node.ELEMENT_NODE) return false;
-
-    const firstElement = first as HTMLElement;
-    if (firstElement.tagName !== "TABLE" || !firstElement.contains(range.startContainer)) {
-      return false;
-    }
-
-    const beforeRange = document.createRange();
-    beforeRange.selectNodeContents(firstElement);
-    beforeRange.setEnd(range.startContainer, range.startOffset);
-
-    return !this.fragmentHasTextOrMediaContent(beforeRange.cloneContents());
-  }
-
-  private fragmentHasTextOrMediaContent(fragment: DocumentFragment): boolean {
-    return Array.from(fragment.childNodes).some((node) => {
-      if (node.nodeType === Node.TEXT_NODE) {
-        return (node.textContent ?? "").replace(/\u00a0/g, " ").trim().length > 0;
-      }
-
-      if (node.nodeType !== Node.ELEMENT_NODE) return false;
-
-      const element = node as HTMLElement;
-      if (element.tagName === "BR") return false;
-      if (element.querySelector("img, video, canvas, svg")) return true;
-      return (element.textContent ?? "").replace(/\u00a0/g, " ").trim().length > 0;
-    });
-  }
-
-  private removeTrailingPaginationBlanks(container: HTMLElement): boolean {
-    let removedAny = false;
-    let child = container.lastChild;
-
-    while (child) {
-      const previous = child.previousSibling;
-      if (!this.isRemovablePaginationBlank(child)) break;
-
-      child.remove();
-      removedAny = true;
-      child = previous;
-    }
-
-    return removedAny;
-  }
-
-  private isRemovablePaginationBlank(node: ChildNode): boolean {
-    if (node.nodeType === Node.TEXT_NODE) {
-      return (node.textContent ?? "").replace(/\u00a0/g, " ").trim() === "";
-    }
-
-    if (node.nodeType !== Node.ELEMENT_NODE) return false;
-
-    const element = node as HTMLElement;
-    if (element.hasAttribute("data-hwe-user-blank")) return false;
-    return isEmptyNode(element, false) || isEditableBlankBlock(element);
-  }
-
-  private isCaretAtStartOfEditable(inner: HTMLElement): boolean {
-    const selection = window.getSelection();
-    if (!selection || selection.rangeCount === 0 || !selection.isCollapsed) return false;
-
-    const range = selection.getRangeAt(0);
-    if (!inner.contains(range.startContainer)) return false;
-
-    const beforeRange = document.createRange();
-    beforeRange.selectNodeContents(inner);
-    beforeRange.setEnd(range.startContainer, range.startOffset);
-
-    const fragment = beforeRange.cloneContents();
-    return !this.fragmentHasVisibleContent(fragment);
-  }
-
-  private fragmentHasVisibleContent(fragment: DocumentFragment): boolean {
-    return Array.from(fragment.childNodes).some((node) => {
-      if (node.nodeType === Node.TEXT_NODE) {
-        return (node.textContent ?? "").replace(/\u00a0/g, " ").length > 0;
-      }
-
-      if (node.nodeType !== Node.ELEMENT_NODE) return false;
-
-      const element = node as HTMLElement;
-      if (element.tagName === "BR") return false;
-      if (element.querySelector("img, table, tr, td, th, video, canvas, svg")) return true;
-      return (element.textContent ?? "").replace(/\u00a0/g, " ").length > 0;
-    });
-  }
-
-  private deleteLastContent(container: HTMLElement): void {
-    const removed = this.deleteLastContentFromNode(container);
-    if (!removed && getMeaningfulChildren(container, true).length === 0) {
-      container.innerHTML = "<p><br></p>";
-    }
-  }
-
-  private deleteLastContentFromNode(node: Node): boolean {
-    for (let index = node.childNodes.length - 1; index >= 0; index--) {
-      const child = node.childNodes[index];
-
-      if (child.nodeType === Node.TEXT_NODE) {
-        const text = child.textContent ?? "";
-        if (text.length === 0) {
-          child.remove();
-          continue;
-        }
-
-        child.textContent = text.slice(0, -1);
-        if (child.textContent.length === 0) child.remove();
-        return true;
-      }
-
-      if (child.nodeType !== Node.ELEMENT_NODE) {
-        child.remove();
-        return true;
-      }
-
-      const element = child as HTMLElement;
-      if (element.hasAttribute("data-hwe-caret")) {
-        element.remove();
-        continue;
-      }
-
-      if (element.tagName === "BR" || this.isAtomicEditableElement(element)) {
-        element.remove();
-        return true;
-      }
-
-      if (this.deleteLastContentFromNode(element)) {
-        if (isEmptyNode(element, false)) element.remove();
-        return true;
-      }
-
-      if (isEditableBlankBlock(element)) {
-        element.remove();
-        return true;
-      }
-    }
-
-    return false;
-  }
-
-  private isAtomicEditableElement(element: HTMLElement): boolean {
-    return ["IMG", "TABLE", "VIDEO", "CANVAS", "SVG"].includes(element.tagName);
-  }
-
-  private insertTable(): void {
-    const editable = this.getActiveEditable() ?? this.getEditableForPageIndex(0);
-    if (!editable) return;
-
-    editable.focus({ preventScroll: true });
-    document.execCommand(
-      "insertHTML",
-      false,
-      '<table class="hwe-word-table" data-hwe-source="manual" data-hwe-table="word" style="border-collapse:collapse;width:100%"><tbody><tr><td style="border:solid windowtext 1.0pt;padding:2.85pt 4.25pt"><p><br></p></td><td style="border:solid windowtext 1.0pt;padding:2.85pt 4.25pt"><p><br></p></td></tr><tr><td style="border:solid windowtext 1.0pt;padding:2.85pt 4.25pt"><p><br></p></td><td style="border:solid windowtext 1.0pt;padding:2.85pt 4.25pt"><p><br></p></td></tr></tbody></table><p><br></p>'
-    );
-    this.markEditedAndRebalance(editable);
-  }
-
-  private insertTableRowAfter(): void {
-    const selectionElement = this.getSelectionElement();
-    const row = selectionElement?.closest("tr") ?? this.lastSelectedTableRow;
-    if (!row || !this.root.contains(row)) {
-      this.insertTable();
-      return;
-    }
-
-    const newRow = row.cloneNode(true) as HTMLTableRowElement;
-    Array.from(newRow.cells).forEach((cell) => {
-      cell.innerHTML = "<p><br></p>";
-    });
-    row.parentNode?.insertBefore(newRow, row.nextSibling);
-    this.lastSelectedTableRow = newRow;
-    this.placeCaretInElement(newRow.cells[0] as HTMLElement);
-    this.markEditedAndRebalance(row);
-  }
-
-  private rememberSelectedTableRow(): void {
-    const row = this.getSelectionElement()?.closest("tr");
-    if (row && this.root.contains(row)) this.lastSelectedTableRow = row;
-  }
-
-  private rememberTableRowFromEvent(event: Event): void {
-    const target = event.target;
-    if (!(target instanceof Element)) return;
-
-    const row = target.closest("tr");
-    if (row && this.root.contains(row)) this.lastSelectedTableRow = row as HTMLTableRowElement;
-  }
-
-  private getSelectionElement(): HTMLElement | null {
-    const selection = window.getSelection();
-    const node = selection?.anchorNode;
-    if (!node) return null;
-    return node.nodeType === Node.ELEMENT_NODE
-      ? (node as HTMLElement)
-      : node.parentElement;
-  }
-
   private markEditedAndRebalance(element: HTMLElement): void {
     const page = element.closest<HTMLElement>(".hwe-page");
     if (!page) return;
     this.isDirty = true;
     this.toolbar.updateActiveStates();
     this.scheduleRebalance(page, true, { includePreviousPage: false });
-  }
-
-  private placeCaretAtEnd(inner: HTMLElement): void {
-    inner.focus({ preventScroll: true });
-
-    const range = document.createRange();
-    const endPosition = this.getLastCaretPosition(inner);
-    if (endPosition) {
-      range.setStart(endPosition.node, endPosition.offset);
-    } else {
-      range.selectNodeContents(inner);
-      range.collapse(false);
-    }
-
-    const selection = window.getSelection();
-    selection?.removeAllRanges();
-    selection?.addRange(range);
-  }
-
-  private placeCaretInElement(element: HTMLElement): void {
-    const editable = element.closest<HTMLElement>("[contenteditable='true']");
-    editable?.focus({ preventScroll: true });
-
-    const range = document.createRange();
-    range.selectNodeContents(element);
-    range.collapse(false);
-
-    const selection = window.getSelection();
-    selection?.removeAllRanges();
-    selection?.addRange(range);
-  }
-
-  private getLastCaretPosition(root: Node): { node: Node; offset: number } | null {
-    for (let index = root.childNodes.length - 1; index >= 0; index--) {
-      const child = root.childNodes[index];
-
-      if (child.nodeType === Node.TEXT_NODE) {
-        return { node: child, offset: child.textContent?.length ?? 0 };
-      }
-
-      if (child.nodeType !== Node.ELEMENT_NODE) continue;
-
-      const element = child as HTMLElement;
-      if (element.hasAttribute("data-hwe-caret")) continue;
-      if (element.tagName === "BR") {
-        return { node: root, offset: index };
-      }
-
-      const nested = this.getLastCaretPosition(element);
-      if (nested) return nested;
-
-      if (!isEmptyNode(element, false)) {
-        return { node: root, offset: index + 1 };
-      }
-    }
-
-    return null;
   }
 
   private isDeleteInput(inputType: string): boolean {
@@ -1170,7 +790,7 @@ export class EditorComponent {
       this.root,
       this.pages,
       this.pageSetup,
-      this.paragraphStyleElement?.textContent ?? ""
+      this.paragraphStyleManager.cssText
     );
     const frame = document.createElement("iframe");
     frame.title = "Exportar PDF";
@@ -1244,46 +864,8 @@ export class EditorComponent {
     pageIndex: number,
     pullFromNextPages: boolean
   ): boolean {
-    if (this.pageOverflows(page)) return true;
+    if (this.layoutService.pageOverflows(page)) return true;
     return pullFromNextPages && pageIndex >= 0 && pageIndex < this.pages.length - 1;
-  }
-
-  private pageOverflows(page: HTMLElement): boolean {
-    const inner = page.querySelector<HTMLElement>(".hwe-page-inner");
-    if (!inner) return false;
-
-    const contentBottom = this.getContentBottom(inner);
-    if (contentBottom === null) return false;
-
-    return contentBottom > this.getContentLimitBottom(inner) + 1;
-  }
-
-  private getContentLimitBottom(inner: HTMLElement): number {
-    const styles = getComputedStyle(inner);
-    const paddingBottom = parseFloat(styles.paddingBottom) || 0;
-    return inner.getBoundingClientRect().bottom - Math.min(paddingBottom, 12);
-  }
-
-  private getContentBottom(inner: HTMLElement): number | null {
-    const children = getMeaningfulChildren(inner);
-    if (children.length === 0) return null;
-
-    return children.reduce<number | null>((bottom, child) => {
-      const childBottom = this.getNodeBottom(child);
-      if (childBottom === null) return bottom;
-      return bottom === null ? childBottom : Math.max(bottom, childBottom);
-    }, null);
-  }
-
-  private getNodeBottom(node: ChildNode): number | null {
-    if (node.nodeType === Node.ELEMENT_NODE) {
-      return (node as HTMLElement).getBoundingClientRect().bottom;
-    }
-
-    const range = document.createRange();
-    range.selectNodeContents(node);
-    const rect = range.getBoundingClientRect();
-    return rect.width > 0 || rect.height > 0 ? rect.bottom : null;
   }
 
   private shouldPreserveWorkspaceScroll(): boolean {
@@ -1317,6 +899,7 @@ export class EditorComponent {
     this.allocatedWidth = width;
     this.allocatedHeight = height;
     this.applyAllocatedSize();
+    this.renderDeferredWhenVisible();
   }
 
   getHtml(): string {
@@ -1328,11 +911,15 @@ export class EditorComponent {
   }
 
   destroy(): void {
+    this.diagnosticsController?.destroy();
     if (this.rebalanceFrame !== undefined) {
       window.cancelAnimationFrame(this.rebalanceFrame);
     }
+    if (this.deferredRenderFrame !== undefined) {
+      window.cancelAnimationFrame(this.deferredRenderFrame);
+    }
+    this.resizeObserver?.disconnect();
     document.removeEventListener("selectionchange", this.handleSelectionChange);
-    this.imageOcrService.destroy();
     this.toolbar?.destroy();
     this.paginator?.destroy();
     this.container.innerHTML = "";
@@ -1348,6 +935,30 @@ export class EditorComponent {
     this.container.style.overflow = "hidden";
     this.container.style.display = "flex";
     this.container.style.flexDirection = "column";
+  }
+
+  private renderDeferredWhenVisible(): void {
+    if (!this.deferredRenderHtml || this.deferredRenderFrame !== undefined) return;
+
+    this.deferredRenderFrame = window.requestAnimationFrame(() => {
+      this.deferredRenderFrame = undefined;
+      if (!this.deferredRenderHtml || !this.canMeasureLayout()) return;
+
+      const html = this.deferredRenderHtml;
+      this.deferredRenderHtml = null;
+      hweDebugLog("editor.renderDeferredWhenVisible", {
+        htmlLength: html.length,
+      });
+      void this.renderAndPaginate(html);
+    });
+  }
+
+  private canMeasureLayout(): boolean {
+    if (!this.root?.isConnected || !this.workspace?.isConnected) return false;
+
+    const rootRect = this.root.getBoundingClientRect();
+    const workspaceRect = this.workspace.getBoundingClientRect();
+    return rootRect.width > 20 && rootRect.height > 20 && workspaceRect.height > 20;
   }
 
   private formatAllocatedSize(value: number | undefined): string {
