@@ -19,6 +19,7 @@ import {
 
 export type PageFactory = (html?: string) => HTMLElement;
 export type OnPagesChanged = (pages: HTMLElement[]) => void;
+export type OnPageCreated = (page: HTMLElement, afterPage: HTMLElement | null) => void;
 
 export interface RebalanceOptions {
   includePreviousPage?: boolean;
@@ -34,14 +35,20 @@ export class Paginator {
   private pages: HTMLElement[] = [];
   private readonly pageFactory: PageFactory;
   private readonly onPagesChanged: OnPagesChanged;
+  private readonly onPageCreated?: OnPageCreated;
   private readonly keepTogetherController = new KeepTogetherController();
   private readonly tablePaginator = new TablePaginator();
   private readonly textBlockSplitter = new TextBlockSplitter();
   private rebalancing = false;
 
-  constructor(pageFactory: PageFactory, onPagesChanged: OnPagesChanged) {
+  constructor(
+    pageFactory: PageFactory,
+    onPagesChanged: OnPagesChanged,
+    onPageCreated?: OnPageCreated
+  ) {
     this.pageFactory = pageFactory;
     this.onPagesChanged = onPagesChanged;
+    this.onPageCreated = onPageCreated;
   }
 
   setPages(pages: HTMLElement[]): void {
@@ -699,9 +706,14 @@ export class Paginator {
     const existingPage = this.pages[afterIndex + 1];
     if (existingPage) return existingPage;
 
+    const previousPage = this.pages[afterIndex] ?? null;
     const newPage = this.pageFactory();
     this.pages.splice(afterIndex + 1, 0, newPage);
-    this.onPagesChanged(this.pages);
+    if (this.onPageCreated) {
+      this.onPageCreated(newPage, previousPage);
+    } else {
+      this.onPagesChanged(this.pages);
+    }
     return newPage;
   }
 

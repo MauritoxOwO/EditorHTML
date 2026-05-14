@@ -279,13 +279,20 @@
   margin-bottom: 2pt;
 }
 
-.hwe-page-inner
-  > :where(p, h1, h2, h3, h4, h5, h6, blockquote, pre, ul, ol, li) {
+.hwe-page .hwe-text-flow-block {
   display: block !important;
   width: var(--hwe-text-width, 140mm) !important;
   max-width: 100%;
   margin-left: auto !important;
   margin-right: auto !important;
+}
+
+.hwe-page .hwe-image-flow-block {
+  display: block;
+  max-width: 100% !important;
+  height: auto;
+  margin-left: 0;
+  margin-right: 0;
 }
 
 .hwe-page table {
