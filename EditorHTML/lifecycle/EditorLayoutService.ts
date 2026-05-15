@@ -1,6 +1,8 @@
 import { getMeaningfulChildren } from "../dom/EditableDom";
 
 const TEXT_FLOW_SELECTOR = "p, h1, h2, h3, h4, h5, h6, blockquote, pre, ul, ol, li";
+const LONG_TABLE_MIN_ROWS = 60;
+const LONG_TABLE_MIN_COLUMNS = 6;
 
 export class EditorLayoutService {
   applyOfficialTableWidths(root: HTMLElement): void {
@@ -55,6 +57,7 @@ export class EditorLayoutService {
     table.style.setProperty("margin-left", "0", "important");
     table.style.setProperty("margin-right", "0", "important");
     this.normalizeColumnWidths(table);
+    this.normalizeLongTable(table);
   }
 
   private normalizeColumnWidths(table: HTMLTableElement): void {
@@ -77,6 +80,38 @@ export class EditorLayoutService {
     const styleWidth = column.style.getPropertyValue("width").trim();
     const attrWidth = column.getAttribute("width")?.trim() ?? "";
     return this.parseCssLength(styleWidth) ?? this.parseCssLength(attrWidth);
+  }
+
+  private normalizeLongTable(table: HTMLTableElement): void {
+    const rowCount = table.querySelectorAll("tbody tr, tfoot tr").length;
+    const columnCount = this.getColumnCount(table);
+    const isLongTable = rowCount >= LONG_TABLE_MIN_ROWS || columnCount >= LONG_TABLE_MIN_COLUMNS;
+    table.classList.toggle("hwe-long-word-table", isLongTable);
+    if (!isLongTable) return;
+
+    table
+      .querySelectorAll<HTMLElement>("tr, td, th")
+      .forEach((element) => this.clearFixedHeight(element));
+  }
+
+  private getColumnCount(table: HTMLTableElement): number {
+    const explicitColumns = table.querySelectorAll("col").length;
+    if (explicitColumns > 0) return explicitColumns;
+
+    const firstRow = table.querySelector("tr");
+    if (!firstRow) return 0;
+
+    return Array.from(firstRow.children).reduce((count, cell) => {
+      const span = Number.parseInt(cell.getAttribute("colspan") ?? "1", 10);
+      return count + (Number.isFinite(span) && span > 0 ? span : 1);
+    }, 0);
+  }
+
+  private clearFixedHeight(element: HTMLElement): void {
+    element.removeAttribute("height");
+    element.style.removeProperty("height");
+    element.style.removeProperty("min-height");
+    element.style.removeProperty("max-height");
   }
 
   private parseCssLength(value: string): number | null {

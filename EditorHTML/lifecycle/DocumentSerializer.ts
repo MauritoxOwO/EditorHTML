@@ -600,6 +600,19 @@ table {
   line-height: inherit;
   width: auto !important;
 }
+.hwe-page table.hwe-word-table.hwe-long-word-table {
+  font-size: 9.5pt;
+  line-height: 1.05;
+}
+.hwe-page table.hwe-word-table.hwe-long-word-table td,
+.hwe-page table.hwe-word-table.hwe-long-word-table th {
+  padding: 1.5pt 2.25pt !important;
+}
+.hwe-page table.hwe-word-table.hwe-long-word-table td *,
+.hwe-page table.hwe-word-table.hwe-long-word-table th * {
+  font-size: inherit !important;
+  line-height: inherit !important;
+}
 .hwe-page table.hwe-word-table thead,
 .hwe-page table.hwe-word-table tbody,
 .hwe-page table.hwe-word-table tfoot {
