@@ -5,6 +5,12 @@ export interface ImageResizeControllerOptions {
 
 const MIN_IMAGE_WIDTH_PERCENT = 15;
 const MAX_IMAGE_WIDTH_PERCENT = 100;
+const IMAGE_ALIGNMENT_COMMANDS = new Set([
+  "justifyLeft",
+  "justifyCenter",
+  "justifyRight",
+  "justifyFull",
+]);
 
 export class ImageResizeController {
   private overlay: HTMLElement | null = null;
@@ -38,6 +44,7 @@ export class ImageResizeController {
     if (!root) return;
 
     root.addEventListener("click", this.handleRootClick, true);
+    root.addEventListener("scroll", this.handleScrollOrResize, true);
     document.addEventListener("pointerdown", this.handleDocumentPointerDown, true);
     document.addEventListener("pointermove", this.handleDocumentPointerMove);
     document.addEventListener("pointerup", this.handleDocumentPointerUp);
@@ -49,6 +56,7 @@ export class ImageResizeController {
   destroy(): void {
     const root = this.options.rootProvider();
     root?.removeEventListener("click", this.handleRootClick, true);
+    root?.removeEventListener("scroll", this.handleScrollOrResize, true);
     document.removeEventListener("pointerdown", this.handleDocumentPointerDown, true);
     document.removeEventListener("pointermove", this.handleDocumentPointerMove);
     document.removeEventListener("pointerup", this.handleDocumentPointerUp);
@@ -79,6 +87,15 @@ export class ImageResizeController {
     this.positionControls();
   }
 
+  handleToolbarCommand(command: string): boolean {
+    if (!this.selectedImage || !IMAGE_ALIGNMENT_COMMANDS.has(command)) return false;
+
+    this.applyAlignment(this.selectedImage, command);
+    this.positionControls();
+    this.options.onImageChanged(this.selectedImage);
+    return true;
+  }
+
   private onRootClick(event: MouseEvent): void {
     const target = event.target as Element | null;
     const image = target?.closest?.("img") as HTMLImageElement | null;
@@ -92,7 +109,7 @@ export class ImageResizeController {
     const target = event.target as HTMLElement | null;
     if (!target) return;
 
-    if (target.closest(".hwe-image-resize-panel")) return;
+    if (target.closest(".hwe-image-resize-panel, .hwe-editor-header")) return;
 
     if (target.classList.contains("hwe-image-resize-handle") && this.selectedImage) {
       event.preventDefault();
@@ -150,7 +167,7 @@ export class ImageResizeController {
       handle.className = "hwe-image-resize-handle";
       handle.title = "Redimensionar imagen";
       this.overlay.appendChild(handle);
-      document.body.appendChild(this.overlay);
+      this.getControlsHost().appendChild(this.overlay);
     }
 
     if (!this.panel) {
@@ -183,7 +200,7 @@ export class ImageResizeController {
       this.valueLabel.className = "hwe-image-resize-value";
 
       this.panel.append(shrinkButton, halfButton, fullButton, resetButton, this.slider, this.valueLabel);
-      document.body.appendChild(this.panel);
+      this.getControlsHost().appendChild(this.panel);
     }
   }
 
@@ -229,6 +246,38 @@ export class ImageResizeController {
     this.syncSliderValue(clamped);
   }
 
+  private applyAlignment(image: HTMLImageElement, command: string): void {
+    image.style.display = "block";
+
+    if (command === "justifyCenter") {
+      image.style.marginLeft = "auto";
+      image.style.marginRight = "auto";
+      image.setAttribute("data-hwe-image-align", "center");
+      return;
+    }
+
+    if (command === "justifyRight") {
+      image.style.marginLeft = "auto";
+      image.style.marginRight = "0";
+      image.setAttribute("data-hwe-image-align", "right");
+      return;
+    }
+
+    if (command === "justifyFull") {
+      image.style.width = "100%";
+      image.style.marginLeft = "0";
+      image.style.marginRight = "0";
+      image.setAttribute("data-hwe-image-user-sized", "true");
+      image.setAttribute("data-hwe-image-align", "full");
+      this.syncSliderValue(100);
+      return;
+    }
+
+    image.style.marginLeft = "0";
+    image.style.marginRight = "auto";
+    image.setAttribute("data-hwe-image-align", "left");
+  }
+
   private syncSliderValue(explicitPercent?: number): void {
     if (!this.selectedImage || !this.slider || !this.valueLabel) return;
 
@@ -251,7 +300,8 @@ export class ImageResizeController {
     if (!this.selectedImage || !this.overlay || !this.panel) return;
 
     const rect = this.selectedImage.getBoundingClientRect();
-    if (rect.width <= 0 || rect.height <= 0) {
+    const rootRect = this.options.rootProvider()?.getBoundingClientRect();
+    if (!rootRect || rect.width <= 0 || rect.height <= 0 || !this.intersects(rect, rootRect)) {
       this.clearSelection();
       return;
     }
@@ -261,11 +311,27 @@ export class ImageResizeController {
     this.overlay.style.width = `${rect.width}px`;
     this.overlay.style.height = `${rect.height}px`;
 
-    const panelTop = Math.max(8, rect.top - 38);
-    const panelLeft = Math.max(8, Math.min(rect.left, window.innerWidth - 360));
+    const visibleTop = Math.max(rect.top, rootRect.top);
+    const visibleBottom = Math.min(rect.bottom, rootRect.bottom);
+    const panelTop = this.clamp(visibleTop - 38, rootRect.top + 6, visibleBottom - 32);
+    const panelLeft = this.clamp(rect.left, rootRect.left + 6, rootRect.right - 360);
     this.panel.style.left = `${panelLeft}px`;
     this.panel.style.top = `${panelTop}px`;
     this.syncSliderValue();
+  }
+
+  private intersects(rect: DOMRect, bounds: DOMRect): boolean {
+    return (
+      rect.bottom > bounds.top &&
+      rect.top < bounds.bottom &&
+      rect.right > bounds.left &&
+      rect.left < bounds.right
+    );
+  }
+
+  private clamp(value: number, min: number, max: number): number {
+    if (max < min) return min;
+    return Math.max(min, Math.min(max, value));
   }
 
   private getImageContainer(image: HTMLImageElement): HTMLElement {
@@ -285,5 +351,9 @@ export class ImageResizeController {
       image.closest(".hwe-page-inner") !== null &&
       image.getAttribute("data-hwe-large-image-placeholder") !== "true"
     );
+  }
+
+  private getControlsHost(): HTMLElement {
+    return this.options.rootProvider() ?? document.body;
   }
 }

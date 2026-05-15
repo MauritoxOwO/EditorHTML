@@ -199,6 +199,7 @@ export class EditorComponent {
       onInsertTable: () => this.tableCommandController.insertTable(),
       onInsertRowAfter: () => this.tableCommandController.insertTableRowAfter(),
       onApplyParagraphStyle: (className) => this.applyParagraphStyle(className),
+      onCommand: (command) => this.imageResizeController?.handleToolbarCommand(command) ?? false,
       onExportPdf: () => {
         void this.exportPdf();
       },

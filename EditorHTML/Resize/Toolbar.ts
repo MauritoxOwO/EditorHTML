@@ -10,6 +10,7 @@ export interface ToolbarOptions {
   onInsertTable?: () => void;
   onInsertRowAfter?: () => void;
   onApplyParagraphStyle?: (className: string) => void;
+  onCommand?: (command: string) => boolean;
   onExportPdf?: () => void;
 }
 
@@ -218,6 +219,7 @@ export class Toolbar {
 
     btn.addEventListener("mousedown", (e) => {
       e.preventDefault();
+      if (this.options.onCommand?.(command)) return;
       document.execCommand(command, false);
     });
 
