@@ -162,7 +162,11 @@ export class EditorComponent {
       (pages: HTMLElement[]) => this.onPagesChanged(pages),
       (page: HTMLElement, afterPage: HTMLElement | null) =>
         this.attachPageForMeasurement(page, afterPage)
+      (pages: HTMLElement[]) => this.onPagesChanged(pages),
+      (page: HTMLElement, afterPage: HTMLElement | null) =>
+        this.attachPageForMeasurement(page, afterPage)
     );
+    await this.loadParagraphStyles();
     await this.loadParagraphStyles();
     await this.loadContent();
   }
@@ -378,6 +382,7 @@ export class EditorComponent {
     this.workspace.innerHTML = "";
 
     const normalizedDocument = this.documentSerializer.normalizeHtmlForPagination(html);
+    this.setPageSetup(normalizedDocument.pageSetup ?? DEFAULT_PAGE_SETUP);
     this.setPageSetup(normalizedDocument.pageSetup ?? DEFAULT_PAGE_SETUP);
     hweDebugLog("editor.renderAndPaginate.normalized", {
       htmlLength: normalizedDocument.html.length,
