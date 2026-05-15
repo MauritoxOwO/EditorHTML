@@ -162,9 +162,6 @@ export class EditorComponent {
       (pages: HTMLElement[]) => this.onPagesChanged(pages),
       (page: HTMLElement, afterPage: HTMLElement | null) =>
         this.attachPageForMeasurement(page, afterPage)
-      (pages: HTMLElement[]) => this.onPagesChanged(pages),
-      (page: HTMLElement, afterPage: HTMLElement | null) =>
-        this.attachPageForMeasurement(page, afterPage)
     );
     await this.loadParagraphStyles();
     await this.loadParagraphStyles();
