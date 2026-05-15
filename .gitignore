@@ -8,6 +8,11 @@
 
 # output directory
 /out
+/dist
+/web/dist
+
+# Office temp files
+~$*.docx
 
 # msbuild output directories
 /bin

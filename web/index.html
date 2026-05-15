@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>EditorHTML PCF Local</title>
+  </head>
+  <body>
+    <div class="local-app">
+      <header class="local-topbar">
+        <div class="local-title">
+          <strong>EditorHTML PCF Local</strong>
+          <span id="source-name">Documento de ejemplo</span>
+        </div>
+        <div class="local-actions">
+          <label class="local-file-button">
+            Cargar HTML
+            <input id="html-file" type="file" accept=".html,.htm,text/html" />
+          </label>
+          <button id="sample-button" type="button">Ejemplo</button>
+          <button id="download-button" type="button">Descargar HTML</button>
+        </div>
+      </header>
+      <main id="editor-host" class="local-editor-host"></main>
+    </div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
