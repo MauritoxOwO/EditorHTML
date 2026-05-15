@@ -22,6 +22,7 @@ import { PasteController } from "./PasteController";
 import { AssetLayoutManager } from "./AssetLayoutManager";
 import { EditorDiagnosticsController } from "./EditorDiagnosticsController";
 import { EditorLayoutService } from "./EditorLayoutService";
+import { ImageResizeController } from "./ImageResizeController";
 import { PageBackspaceController } from "./PageBackspaceController";
 import { ParagraphStyleManager } from "./ParagraphStyleManager";
 import { StyleSelectionTracker } from "./StyleSelectionTracker";
@@ -93,6 +94,7 @@ export class EditorComponent {
   private readonly assetLayoutManager = new AssetLayoutManager();
   private readonly pasteController = new PasteController();
   private readonly layoutService = new EditorLayoutService();
+  private imageResizeController!: ImageResizeController;
   private readonly pageBackspaceController = new PageBackspaceController();
   private diagnosticsController!: EditorDiagnosticsController;
   private paragraphStyleManager!: ParagraphStyleManager;
@@ -220,6 +222,11 @@ export class EditorComponent {
     this.workspace = document.createElement("div");
     this.workspace.className = "hwe-workspace";
     this.root.appendChild(this.workspace);
+    this.imageResizeController = new ImageResizeController({
+      rootProvider: () => this.root ?? null,
+      onImageChanged: (image) => this.markImageEdited(image),
+    });
+    this.imageResizeController.start();
 
     this.sourceEditor = document.createElement("textarea");
     this.sourceEditor.className = "hwe-source-editor";
@@ -258,6 +265,7 @@ export class EditorComponent {
     if (view === this.activeView) return;
 
     if (view === "source") {
+      this.imageResizeController.clearSelection();
       this.sourceEditor.value = this.collectHtml();
       this.sourceDirty = false;
       this.activeView = "source";
@@ -403,6 +411,7 @@ export class EditorComponent {
     this.pages.forEach((page) => this.layoutService.applyOfficialTableWidths(page));
     this.syncWorkspace();
     this.updatePageCount();
+    this.imageResizeController.refresh();
     this.startDetachedImageHydration();
     done({
       pages: this.pages.length,
@@ -533,6 +542,7 @@ export class EditorComponent {
       });
       this.syncWorkspace();
       this.updatePageCount();
+      this.imageResizeController.refresh();
       const fallbackEditable = this.getEditableForPageIndex(pageIndex) ?? activeEditable;
       this.restoreCaretViewport(marker, caretViewportTop);
       CaretManager.restoreMarker(marker, fallbackEditable);
@@ -589,6 +599,7 @@ export class EditorComponent {
     this.pages.forEach((page) => this.layoutService.applyOfficialTableWidths(page));
     this.syncWorkspace();
     this.updatePageCount();
+    this.imageResizeController?.refresh();
   }
 
   private attachPageForMeasurement(page: HTMLElement, afterPage: HTMLElement | null): void {
@@ -660,6 +671,7 @@ export class EditorComponent {
     if (shouldRestoreScroll) {
       this.restoreWorkspaceScroll(scrollTop, scrollLeft);
     }
+    this.imageResizeController?.refresh();
   }
 
   private makePageDivider(pageNumber: number): HTMLElement {
@@ -769,6 +781,19 @@ export class EditorComponent {
     this.isDirty = true;
     this.toolbar.updateActiveStates();
     this.scheduleRebalance(page, true, { includePreviousPage: false });
+  }
+
+  private markImageEdited(image: HTMLImageElement): void {
+    const page = image.closest<HTMLElement>(".hwe-page");
+    if (!page) return;
+
+    this.isDirty = true;
+    this.toolbar.updateActiveStates();
+    this.layoutService.applyOfficialTableWidths(page);
+    this.scheduleRebalance(page, false, {
+      compactPages: false,
+      includePreviousPage: false,
+    });
   }
 
   private isDeleteInput(inputType: string): boolean {
@@ -958,6 +983,7 @@ export class EditorComponent {
     }
     this.resizeObserver?.disconnect();
     document.removeEventListener("selectionchange", this.handleSelectionChange);
+    this.imageResizeController?.destroy();
     this.toolbar?.destroy();
     this.paginator?.destroy();
     this.container.innerHTML = "";

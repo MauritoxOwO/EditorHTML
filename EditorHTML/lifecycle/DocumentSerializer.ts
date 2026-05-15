@@ -366,6 +366,9 @@ ${content}
     root.querySelectorAll<HTMLElement>("[data-hwe-large-image-state]").forEach((element) => {
       element.removeAttribute("data-hwe-large-image-state");
     });
+    root.querySelectorAll<HTMLElement>(".hwe-image-selected").forEach((element) => {
+      element.classList.remove("hwe-image-selected");
+    });
   }
 
   private hasFormattingShell(element: HTMLElement): boolean {
@@ -540,6 +543,7 @@ body {
 }
 .hwe-page .hwe-image-flow-block {
   display: block;
+  width: 100%;
   max-width: 100%;
   height: auto;
   margin-left: 0;
@@ -578,7 +582,7 @@ table {
   font-weight: 700;
 }
 .hwe-page table.hwe-word-table {
-  table-layout: auto;
+  table-layout: fixed;
   border-collapse: collapse;
   margin-top: 0;
   margin-bottom: 0;
@@ -587,8 +591,8 @@ table {
 .hwe-page table.hwe-word-table td,
 .hwe-page table.hwe-word-table th {
   vertical-align: top;
-  word-break: normal;
-  overflow-wrap: break-word;
+  word-break: break-word;
+  overflow-wrap: anywhere;
 }
 .hwe-page table.hwe-word-table p {
   min-height: 0;
