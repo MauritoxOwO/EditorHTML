@@ -11,6 +11,18 @@ const SPLITTABLE_CONTAINER_TAGS = new Set([
   "NAV",
 ]);
 
+const TABLE_STRUCTURE_TAGS = new Set([
+  "TABLE",
+  "THEAD",
+  "TBODY",
+  "TFOOT",
+  "TR",
+  "TD",
+  "TH",
+  "COLGROUP",
+  "COL",
+]);
+
 const SPLITTABLE_TEXT_TAGS = new Set([
   "P",
   "LI",
@@ -100,19 +112,16 @@ export function isTableElement(node: ChildNode): boolean {
 }
 
 export function isTableFlowWrapper(element: HTMLElement): boolean {
-  if (!element.querySelector("table")) return false;
+  if (TABLE_STRUCTURE_TAGS.has(element.tagName)) return false;
 
-  return ![
-    "TABLE",
-    "THEAD",
-    "TBODY",
-    "TFOOT",
-    "TR",
-    "TD",
-    "TH",
-    "COLGROUP",
-    "COL",
-  ].includes(element.tagName);
+  const children = getMeaningfulChildren(element);
+  if (children.length !== 1 || children[0].nodeType !== Node.ELEMENT_NODE) return false;
+
+  const onlyChild = children[0] as HTMLElement;
+  if (onlyChild.tagName === "TABLE") return true;
+  if (!SPLITTABLE_CONTAINER_TAGS.has(onlyChild.tagName)) return false;
+
+  return isTableFlowWrapper(onlyChild);
 }
 
 export function isSplittableContainer(
@@ -131,6 +140,7 @@ export function isSplittableContainer(
 
 export function shouldPreserveContainerShell(element: HTMLElement): boolean {
   if (element.getAttribute("data-hwe-page-break") === "before") return false;
+  if (shouldFlattenContainerShell(element)) return false;
 
   return Array.from(element.attributes).some((attr) => {
     const name = attr.name.toLowerCase();
@@ -144,6 +154,39 @@ export function shouldPreserveContainerShell(element: HTMLElement): boolean {
 
     return true;
   });
+}
+
+export function shouldFlattenContainerShell(element: HTMLElement): boolean {
+  if (!SPLITTABLE_CONTAINER_TAGS.has(element.tagName)) return false;
+  if (element.classList.contains("hwe-page") || element.classList.contains("hwe-page-inner")) {
+    return false;
+  }
+  if (isGeneratedOrAtomicShell(element)) return false;
+  if (isTableFlowWrapper(element)) return false;
+
+  const children = getMeaningfulChildren(element);
+  if (children.length === 0) return false;
+  if (children.length > 1) return true;
+
+  const onlyChild = children[0];
+  if (onlyChild.nodeType !== Node.ELEMENT_NODE) return false;
+
+  const onlyElement = onlyChild as HTMLElement;
+  if (isGeneratedOrAtomicShell(onlyElement)) return false;
+  if (isTableFlowWrapper(onlyElement)) return false;
+
+  return (
+    SPLITTABLE_CONTAINER_TAGS.has(onlyElement.tagName) &&
+    getMeaningfulChildren(onlyElement).length > 0
+  );
+}
+
+function isGeneratedOrAtomicShell(element: HTMLElement): boolean {
+  return (
+    element.getAttribute("data-hwe-keep-together") === "true" ||
+    element.classList.contains("hwe-keep-together") ||
+    element.classList.contains("hwe-ocr-wrapper")
+  );
 }
 
 export function isSplittableTextBlock(element: HTMLElement): boolean {

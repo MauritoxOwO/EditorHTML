@@ -19,6 +19,7 @@ import {
 
 export type PageFactory = (html?: string) => HTMLElement;
 export type OnPagesChanged = (pages: HTMLElement[]) => void;
+export type OnPageCreated = (page: HTMLElement, afterPage: HTMLElement | null) => void;
 
 export interface RebalanceOptions {
   includePreviousPage?: boolean;
@@ -34,14 +35,20 @@ export class Paginator {
   private pages: HTMLElement[] = [];
   private readonly pageFactory: PageFactory;
   private readonly onPagesChanged: OnPagesChanged;
+  private readonly onPageCreated?: OnPageCreated;
   private readonly keepTogetherController = new KeepTogetherController();
   private readonly tablePaginator = new TablePaginator();
   private readonly textBlockSplitter = new TextBlockSplitter();
   private rebalancing = false;
 
-  constructor(pageFactory: PageFactory, onPagesChanged: OnPagesChanged) {
+  constructor(
+    pageFactory: PageFactory,
+    onPagesChanged: OnPagesChanged,
+    onPageCreated?: OnPageCreated
+  ) {
     this.pageFactory = pageFactory;
     this.onPagesChanged = onPagesChanged;
+    this.onPageCreated = onPageCreated;
   }
 
   setPages(pages: HTMLElement[]): void {
@@ -324,9 +331,7 @@ export class Paginator {
     let currentInner = getInner(currentPage);
     if (!currentInner) return currentIndex;
 
-    if (node.nodeType === Node.ELEMENT_NODE) {
-      this.constrainAtomicElement(node as HTMLElement, currentPage);
-    }
+    this.prepareNodeForPage(node, currentPage);
 
     const pageHadContent = !!this.getFirstMeaningfulChild(currentInner);
     currentInner.appendChild(node);
@@ -366,10 +371,9 @@ export class Paginator {
       const nextInner = getInner(nextPage);
       if (!nextInner) return currentIndex;
 
-      if (node.nodeType === Node.ELEMENT_NODE) {
-        this.constrainAtomicElement(node as HTMLElement, nextPage);
-      }
+      this.prepareNodeForPage(node, nextPage);
 
+      if (keepWithPrevious) this.prepareNodeForPage(keepWithPrevious, nextPage);
       if (keepWithPrevious) nextInner.appendChild(keepWithPrevious);
       nextInner.appendChild(node);
       if (pageOverflows(nextPage)) {
@@ -388,6 +392,16 @@ export class Paginator {
     if (!nextPage) return currentIndex;
 
     return currentIndex + 1;
+  }
+
+  private prepareNodeForPage(node: ChildNode | null, page: HTMLElement): void {
+    if (!node || node.nodeType !== Node.ELEMENT_NODE) return;
+
+    const element = node as HTMLElement;
+    this.constrainAtomicElement(element, page);
+    element
+      .querySelectorAll<HTMLElement>("img")
+      .forEach((image) => this.constrainAtomicElement(image, page));
   }
 
   private constrainAtomicElement(element: HTMLElement, page: HTMLElement): void {
@@ -445,7 +459,7 @@ export class Paginator {
       const nextInner = getInner(nextPage);
       if (!nextInner) break;
 
-      const moved = this.moveOverflowPiece(inner, nextInner, page);
+      const moved = this.moveOverflowPiece(inner, nextInner, page, nextPage);
       movedAny = movedAny || moved;
       if (!moved) {
         hweDebugLog("paginator.resolveOverflow.noMove", {
@@ -469,7 +483,8 @@ export class Paginator {
   private moveOverflowPiece(
     sourceInner: HTMLElement,
     targetInner: HTMLElement,
-    page: HTMLElement
+    page: HTMLElement,
+    targetPage: HTMLElement
   ): boolean {
     const lastChild = this.getLastMeaningfulChild(sourceInner);
     if (!lastChild) return false;
@@ -502,6 +517,8 @@ export class Paginator {
       if (getMeaningfulChildren(sourceInner).length > 1) {
         const keepWithPrevious = this.detachPreviousKeepWithNext(sourceInner, lastChild);
         const targetReference = targetInner.firstChild;
+        this.prepareNodeForPage(keepWithPrevious, targetPage);
+        this.prepareNodeForPage(lastChild, targetPage);
         if (keepWithPrevious) targetInner.insertBefore(keepWithPrevious, targetReference);
         targetInner.insertBefore(lastChild, targetReference);
         return true;
@@ -519,6 +536,7 @@ export class Paginator {
       }
 
       if (getMeaningfulChildren(sourceInner).length > 1) {
+        this.prepareNodeForPage(lastChild, targetPage);
         targetInner.insertBefore(lastChild, targetInner.firstChild);
         return true;
       }
@@ -533,6 +551,8 @@ export class Paginator {
     ) {
       const keepWithPrevious = this.detachPreviousKeepWithNext(sourceInner, lastChild);
       const targetReference = targetInner.firstChild;
+      this.prepareNodeForPage(keepWithPrevious, targetPage);
+      this.prepareNodeForPage(lastChild, targetPage);
       if (keepWithPrevious) targetInner.insertBefore(keepWithPrevious, targetReference);
       targetInner.insertBefore(lastChild, targetReference);
       hweDebugLog("paginator.moveOverflowPiece.textBlockWhole", {
@@ -553,6 +573,7 @@ export class Paginator {
       return false;
     }
 
+    this.prepareNodeForPage(lastChild, targetPage);
     targetInner.insertBefore(lastChild, targetInner.firstChild);
     return true;
   }
@@ -589,8 +610,12 @@ export class Paginator {
         if (this.shouldRespectUserBlankBarrier(currentInner, candidates)) {
           break;
         }
+        if (this.shouldKeepImageCandidateOnFreshPage(candidates)) {
+          break;
+        }
 
         const nextReference = candidates[candidates.length - 1].nextSibling;
+        candidates.forEach((candidate) => this.prepareNodeForPage(candidate, this.pages[index]));
         candidates.forEach((candidate) => currentInner.appendChild(candidate));
         this.fitImagesToAvailableSpace(this.pages[index]);
 
@@ -606,6 +631,7 @@ export class Paginator {
             continue;
           }
 
+          candidates.forEach((candidate) => this.prepareNodeForPage(candidate, this.pages[index + 1]));
           candidates.forEach((candidate) => nextInner.insertBefore(candidate, nextReference));
           break;
         }
@@ -651,6 +677,18 @@ export class Paginator {
     }
 
     return candidates;
+  }
+
+  private shouldKeepImageCandidateOnFreshPage(candidates: ChildNode[]): boolean {
+    return candidates.some((candidate) => {
+      if (candidate.nodeType !== Node.ELEMENT_NODE) return false;
+
+      const element = candidate as HTMLElement;
+      return (
+        element.tagName === "IMG" ||
+        !!element.querySelector("img, figure, video, canvas, svg")
+      );
+    });
   }
 
   private splitCompactedTableIntoNextPage(
@@ -699,9 +737,14 @@ export class Paginator {
     const existingPage = this.pages[afterIndex + 1];
     if (existingPage) return existingPage;
 
+    const previousPage = this.pages[afterIndex] ?? null;
     const newPage = this.pageFactory();
     this.pages.splice(afterIndex + 1, 0, newPage);
-    this.onPagesChanged(this.pages);
+    if (this.onPageCreated) {
+      this.onPageCreated(newPage, previousPage);
+    } else {
+      this.onPagesChanged(this.pages);
+    }
     return newPage;
   }
 
@@ -873,7 +916,13 @@ export class Paginator {
       if (availableHeight < 120) return;
 
       const currentMaxHeight = parseFloat(image.style.maxHeight || "0");
-      if (currentMaxHeight > 0 && currentMaxHeight <= availableHeight) return;
+      if (
+        Math.abs(currentMaxHeight - availableHeight) < 1 &&
+        image.style.maxWidth === "100%" &&
+        image.style.height === "auto"
+      ) {
+        return;
+      }
 
       image.style.maxWidth = "100%";
       image.style.maxHeight = `${availableHeight}px`;
@@ -948,6 +997,7 @@ export class Paginator {
         continue;
       }
 
+      this.prepareNodeForPage(child, targetInner.closest<HTMLElement>(".hwe-page") ?? page);
       overflowContainer.insertBefore(child, overflowContainer.firstChild);
       movedAny = true;
 

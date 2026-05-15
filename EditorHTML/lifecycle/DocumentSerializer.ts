@@ -220,6 +220,10 @@ ${content}
     return clone.innerHTML;
   }
 
+  getDetachedLargeImageSrc(id: string): string | undefined {
+    return this.detachedLargeImages.get(id);
+  }
+
   private detachLargeDataImages(html: string): string {
     const dataImages = this.countDataImageSources(html);
     let detached = 0;
@@ -302,6 +306,7 @@ ${content}
       image.removeAttribute("data-hwe-large-image-id");
       image.removeAttribute("data-hwe-large-image-placeholder");
       image.removeAttribute("data-hwe-large-image-reason");
+      image.removeAttribute("data-hwe-large-image-state");
     });
     if (restored > 0) hweDebugLog("serializer.restoreDetachedLargeImages", { restored });
   }
@@ -357,6 +362,12 @@ ${content}
     );
     root.querySelectorAll<HTMLElement>("[data-hwe-ocr-state]").forEach((element) => {
       element.removeAttribute("data-hwe-ocr-state");
+    });
+    root.querySelectorAll<HTMLElement>("[data-hwe-large-image-state]").forEach((element) => {
+      element.removeAttribute("data-hwe-large-image-state");
+    });
+    root.querySelectorAll<HTMLElement>(".hwe-image-selected").forEach((element) => {
+      element.classList.remove("hwe-image-selected");
     });
   }
 
@@ -523,13 +534,20 @@ body {
 .hwe-page li {
   margin-bottom: 2pt;
 }
-.hwe-page-inner
-  > :where(p, h1, h2, h3, h4, h5, h6, blockquote, pre, ul, ol, li) {
+.hwe-page .hwe-text-flow-block {
   display: block !important;
   width: 140mm !important;
   max-width: 100%;
   margin-left: auto !important;
   margin-right: auto !important;
+}
+.hwe-page .hwe-image-flow-block {
+  display: block;
+  width: 100%;
+  max-width: 100%;
+  height: auto;
+  margin-left: 0;
+  margin-right: 0;
 }
 table {
   border-collapse: collapse;
@@ -564,7 +582,7 @@ table {
   font-weight: 700;
 }
 .hwe-page table.hwe-word-table {
-  table-layout: auto;
+  table-layout: fixed;
   border-collapse: collapse;
   margin-top: 0;
   margin-bottom: 0;
@@ -573,8 +591,8 @@ table {
 .hwe-page table.hwe-word-table td,
 .hwe-page table.hwe-word-table th {
   vertical-align: top;
-  word-break: normal;
-  overflow-wrap: break-word;
+  word-break: break-word;
+  overflow-wrap: anywhere;
 }
 .hwe-page table.hwe-word-table p {
   min-height: 0;

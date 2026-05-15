@@ -22,7 +22,8 @@ import { PasteController } from "./PasteController";
 import { AssetLayoutManager } from "./AssetLayoutManager";
 import { EditorDiagnosticsController } from "./EditorDiagnosticsController";
 import { EditorLayoutService } from "./EditorLayoutService";
-import { PageBackspaceController } from "./PageBackSpaceController";
+import { ImageResizeController } from "./ImageResizeController";
+import { PageBackspaceController } from "./PageBackspaceController";
 import { ParagraphStyleManager } from "./ParagraphStyleManager";
 import { StyleSelectionTracker } from "./StyleSelectionTracker";
 import { TableCommandController } from "./TableCommandController";
@@ -93,6 +94,7 @@ export class EditorComponent {
   private readonly assetLayoutManager = new AssetLayoutManager();
   private readonly pasteController = new PasteController();
   private readonly layoutService = new EditorLayoutService();
+  private imageResizeController!: ImageResizeController;
   private readonly pageBackspaceController = new PageBackspaceController();
   private diagnosticsController!: EditorDiagnosticsController;
   private paragraphStyleManager!: ParagraphStyleManager;
@@ -105,6 +107,7 @@ export class EditorComponent {
   private deferredRenderHtml: string | null = null;
   private deferredRenderFrame: number | undefined;
   private resizeObserver: ResizeObserver | null = null;
+  private imageHydrationRun = 0;
 
   private readonly baseUrl: string;
   private readonly entityName: string;
@@ -154,11 +157,13 @@ export class EditorComponent {
 
   async init(): Promise<void> {
     this.buildShell();
-    void this.loadParagraphStyles();
     this.paginator = new Paginator(
       (html?: string) => this.createPageElement(html),
-      (pages: HTMLElement[]) => this.onPagesChanged(pages)
+      (pages: HTMLElement[]) => this.onPagesChanged(pages),
+      (page: HTMLElement, afterPage: HTMLElement | null) =>
+        this.attachPageForMeasurement(page, afterPage)
     );
+    await this.loadParagraphStyles();
     await this.loadContent();
   }
 
@@ -194,6 +199,7 @@ export class EditorComponent {
       onInsertTable: () => this.tableCommandController.insertTable(),
       onInsertRowAfter: () => this.tableCommandController.insertTableRowAfter(),
       onApplyParagraphStyle: (className) => this.applyParagraphStyle(className),
+      onCommand: (command) => this.imageResizeController?.handleToolbarCommand(command) ?? false,
       onExportPdf: () => {
         void this.exportPdf();
       },
@@ -217,6 +223,11 @@ export class EditorComponent {
     this.workspace = document.createElement("div");
     this.workspace.className = "hwe-workspace";
     this.root.appendChild(this.workspace);
+    this.imageResizeController = new ImageResizeController({
+      rootProvider: () => this.root ?? null,
+      onImageChanged: (image) => this.markImageEdited(image),
+    });
+    this.imageResizeController.start();
 
     this.sourceEditor = document.createElement("textarea");
     this.sourceEditor.className = "hwe-source-editor";
@@ -255,6 +266,7 @@ export class EditorComponent {
     if (view === this.activeView) return;
 
     if (view === "source") {
+      this.imageResizeController.clearSelection();
       this.sourceEditor.value = this.collectHtml();
       this.sourceDirty = false;
       this.activeView = "source";
@@ -362,10 +374,11 @@ export class EditorComponent {
     const done = hweDebugStart("editor.renderAndPaginate", {
       htmlLength: html.length,
     });
+    this.imageHydrationRun++;
     this.workspace.innerHTML = "";
-    this.setPageSetup(DEFAULT_PAGE_SETUP);
 
     const normalizedDocument = this.documentSerializer.normalizeHtmlForPagination(html);
+    this.setPageSetup(normalizedDocument.pageSetup ?? DEFAULT_PAGE_SETUP);
     hweDebugLog("editor.renderAndPaginate.normalized", {
       htmlLength: normalizedDocument.html.length,
       pageSetup: normalizedDocument.pageSetup ?? null,
@@ -399,6 +412,8 @@ export class EditorComponent {
     this.pages.forEach((page) => this.layoutService.applyOfficialTableWidths(page));
     this.syncWorkspace();
     this.updatePageCount();
+    this.imageResizeController.refresh();
+    this.startDetachedImageHydration();
     done({
       pages: this.pages.length,
     });
@@ -528,6 +543,7 @@ export class EditorComponent {
       });
       this.syncWorkspace();
       this.updatePageCount();
+      this.imageResizeController.refresh();
       const fallbackEditable = this.getEditableForPageIndex(pageIndex) ?? activeEditable;
       this.restoreCaretViewport(marker, caretViewportTop);
       CaretManager.restoreMarker(marker, fallbackEditable);
@@ -584,6 +600,39 @@ export class EditorComponent {
     this.pages.forEach((page) => this.layoutService.applyOfficialTableWidths(page));
     this.syncWorkspace();
     this.updatePageCount();
+    this.imageResizeController?.refresh();
+  }
+
+  private attachPageForMeasurement(page: HTMLElement, afterPage: HTMLElement | null): void {
+    this.layoutService.applyOfficialTableWidths(page);
+    if (page.parentElement === this.workspace) return;
+
+    const reference =
+      afterPage?.parentElement === this.workspace ? afterPage.nextSibling : null;
+    this.workspace.insertBefore(page, reference);
+  }
+
+  private startDetachedImageHydration(): void {
+    const runId = ++this.imageHydrationRun;
+    void this.assetLayoutManager.hydrateDetachedImages(
+      this.workspace,
+      (id) => this.documentSerializer.getDetachedLargeImageSrc(id),
+      async (image) => {
+        if (runId !== this.imageHydrationRun) return;
+
+        const page = image.closest<HTMLElement>(".hwe-page");
+        if (!page || !this.pages.includes(page)) return;
+
+        this.layoutService.applyOfficialTableWidths(page);
+        await this.assetLayoutManager.waitForStableLayout(page);
+        if (runId !== this.imageHydrationRun || !this.pages.includes(page)) return;
+
+        this.scheduleRebalance(page, false, {
+          compactPages: false,
+          includePreviousPage: false,
+        });
+      }
+    );
   }
 
   private syncWorkspace(): void {
@@ -623,6 +672,7 @@ export class EditorComponent {
     if (shouldRestoreScroll) {
       this.restoreWorkspaceScroll(scrollTop, scrollLeft);
     }
+    this.imageResizeController?.refresh();
   }
 
   private makePageDivider(pageNumber: number): HTMLElement {
@@ -732,6 +782,19 @@ export class EditorComponent {
     this.isDirty = true;
     this.toolbar.updateActiveStates();
     this.scheduleRebalance(page, true, { includePreviousPage: false });
+  }
+
+  private markImageEdited(image: HTMLImageElement): void {
+    const page = image.closest<HTMLElement>(".hwe-page");
+    if (!page) return;
+
+    this.isDirty = true;
+    this.toolbar.updateActiveStates();
+    this.layoutService.applyOfficialTableWidths(page);
+    this.scheduleRebalance(page, false, {
+      compactPages: false,
+      includePreviousPage: false,
+    });
   }
 
   private isDeleteInput(inputType: string): boolean {
@@ -911,6 +974,7 @@ export class EditorComponent {
   }
 
   destroy(): void {
+    this.imageHydrationRun++;
     this.diagnosticsController?.destroy();
     if (this.rebalanceFrame !== undefined) {
       window.cancelAnimationFrame(this.rebalanceFrame);
@@ -920,6 +984,7 @@ export class EditorComponent {
     }
     this.resizeObserver?.disconnect();
     document.removeEventListener("selectionchange", this.handleSelectionChange);
+    this.imageResizeController?.destroy();
     this.toolbar?.destroy();
     this.paginator?.destroy();
     this.container.innerHTML = "";

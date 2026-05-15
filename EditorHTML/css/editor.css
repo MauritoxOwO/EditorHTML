@@ -14,6 +14,7 @@
   display: flex;
   flex-direction: column;
   overflow: hidden;
+  position: relative;
   box-sizing: border-box;
   font-family: "Segoe UI", sans-serif;
 }
@@ -279,13 +280,21 @@
   margin-bottom: 2pt;
 }
 
-.hwe-page-inner
-  > :where(p, h1, h2, h3, h4, h5, h6, blockquote, pre, ul, ol, li) {
+.hwe-page .hwe-text-flow-block {
   display: block !important;
   width: var(--hwe-text-width, 140mm) !important;
   max-width: 100%;
   margin-left: auto !important;
   margin-right: auto !important;
+}
+
+.hwe-page .hwe-image-flow-block {
+  display: block;
+  width: 100%;
+  max-width: 100% !important;
+  height: auto;
+  margin-left: 0;
+  margin-right: 0;
 }
 
 .hwe-page table {
@@ -316,7 +325,7 @@
 
 .hwe-page table.hwe-word-table {
   width: 100% !important;
-  table-layout: auto;
+  table-layout: fixed;
   border-collapse: collapse;
   margin-top: 0;
   margin-bottom: 0;
@@ -331,8 +340,8 @@
 .hwe-page table.hwe-word-table td,
 .hwe-page table.hwe-word-table th {
   vertical-align: top;
-  word-break: normal;
-  overflow-wrap: break-word;
+  word-break: break-word;
+  overflow-wrap: anywhere;
 }
 
 .hwe-page table.hwe-word-table p {
@@ -375,6 +384,75 @@
   height: auto;
   break-inside: avoid;
   page-break-inside: avoid;
+}
+
+.hwe-page img.hwe-image-selected {
+  outline: 2px solid #0078d4;
+  outline-offset: 2px;
+}
+
+.hwe-image-resize-overlay {
+  position: fixed;
+  z-index: 100000;
+  border: 2px solid #0078d4;
+  box-sizing: border-box;
+  pointer-events: none;
+}
+
+.hwe-image-resize-handle {
+  position: absolute;
+  right: -6px;
+  bottom: -6px;
+  width: 12px;
+  height: 12px;
+  border: 2px solid #fff;
+  border-radius: 50%;
+  background: #0078d4;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.35);
+  cursor: nwse-resize;
+  pointer-events: auto;
+}
+
+.hwe-image-resize-panel {
+  position: fixed;
+  z-index: 100001;
+  min-height: 30px;
+  padding: 4px 6px;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  border: 1px solid #8f8f8f;
+  border-radius: 4px;
+  background: #fff;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.22);
+  font-family: "Segoe UI", Arial, sans-serif;
+  font-size: 12px;
+}
+
+.hwe-image-resize-panel button {
+  height: 22px;
+  padding: 0 6px;
+  border: 1px solid #b8b8b8;
+  border-radius: 3px;
+  background: #f8f8f8;
+  color: #1f1f1f;
+  cursor: pointer;
+  font-size: 11px;
+}
+
+.hwe-image-resize-panel button:hover {
+  border-color: #0078d4;
+  background: #eef6fc;
+}
+
+.hwe-image-resize-panel input[type="range"] {
+  width: 110px;
+}
+
+.hwe-image-resize-value {
+  width: 34px;
+  color: #333;
+  text-align: right;
 }
 
 /* Separador visual entre paginas */
