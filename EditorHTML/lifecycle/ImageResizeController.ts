@@ -300,21 +300,40 @@ export class ImageResizeController {
     if (!this.selectedImage || !this.overlay || !this.panel) return;
 
     const rect = this.selectedImage.getBoundingClientRect();
-    const rootRect = this.options.rootProvider()?.getBoundingClientRect();
-    if (!rootRect || rect.width <= 0 || rect.height <= 0 || !this.intersects(rect, rootRect)) {
+    const host = this.getControlsHost();
+    const hostRect = host.getBoundingClientRect();
+    if (rect.width <= 0 || rect.height <= 0 || !this.intersects(rect, hostRect)) {
       this.clearSelection();
       return;
     }
 
-    this.overlay.style.left = `${rect.left}px`;
-    this.overlay.style.top = `${rect.top}px`;
+    const toHostX = (value: number) => value - hostRect.left + host.scrollLeft;
+    const toHostY = (value: number) => value - hostRect.top + host.scrollTop;
+    const localLeft = toHostX(rect.left);
+    const localTop = toHostY(rect.top);
+
+    this.overlay.style.left = `${localLeft}px`;
+    this.overlay.style.top = `${localTop}px`;
     this.overlay.style.width = `${rect.width}px`;
     this.overlay.style.height = `${rect.height}px`;
 
-    const visibleTop = Math.max(rect.top, rootRect.top);
-    const visibleBottom = Math.min(rect.bottom, rootRect.bottom);
-    const panelTop = this.clamp(visibleTop - 38, rootRect.top + 6, visibleBottom - 32);
-    const panelLeft = this.clamp(rect.left, rootRect.left + 6, rootRect.right - 360);
+    const visibleTop = Math.max(rect.top, hostRect.top);
+    const visibleBottom = Math.min(rect.bottom, hostRect.bottom);
+    const controlsTop = this.getControlsTopBound(host, hostRect);
+    const panelWidth = Math.max(260, this.panel.offsetWidth || 0);
+    const panelHeight = Math.max(30, this.panel.offsetHeight || 0);
+    const panelViewportTop = this.clamp(
+      visibleTop - panelHeight - 8,
+      controlsTop + 6,
+      visibleBottom - panelHeight
+    );
+    const panelViewportLeft = this.clamp(
+      rect.left,
+      hostRect.left + 6,
+      hostRect.right - panelWidth - 6
+    );
+    const panelTop = toHostY(panelViewportTop);
+    const panelLeft = toHostX(panelViewportLeft);
     this.panel.style.left = `${panelLeft}px`;
     this.panel.style.top = `${panelTop}px`;
     this.syncSliderValue();
@@ -332,6 +351,16 @@ export class ImageResizeController {
   private clamp(value: number, min: number, max: number): number {
     if (max < min) return min;
     return Math.max(min, Math.min(max, value));
+  }
+
+  private getControlsTopBound(host: HTMLElement, hostRect: DOMRect): number {
+    const header = host.querySelector<HTMLElement>(".hwe-editor-header");
+    if (!header) return hostRect.top;
+
+    const headerRect = header.getBoundingClientRect();
+    if (!this.intersects(headerRect, hostRect)) return hostRect.top;
+
+    return Math.min(hostRect.bottom, Math.max(hostRect.top, headerRect.bottom));
   }
 
   private getImageContainer(image: HTMLImageElement): HTMLElement {

@@ -2,10 +2,10 @@
 <manifest>
   <control namespace="EditorHTMLPBOC" 
           constructor="EditorHTML2"
-          version="0.0.3" 
-          display-name-key="EditorHTMLv0.3"
-          description-key="EditorHTML v0.3 for testing" 
-          control-type="standard" 
+          version="0.0.4"
+          display-name-key="EditorHTMLv0.4"
+          description-key="EditorHTML v0.4 for testing"
+          control-type="standard"
   >
 
     <external-service-usage enabled="false">
