@@ -46,6 +46,7 @@ const DEFAULT_STYLE_TABLE_CONFIG: ParagraphStyleTableConfig = {
   classField: "mcdev_cssclass",
   cssField: "mcdev_css",
 };
+const DEFAULT_MODEL_DRIVEN_EDITOR_HEIGHT_PX = 720;
 const LOCAL_PARAGRAPH_STYLES: ParagraphStyleDefinition[] = [
   {
     label: "Texto general",
@@ -78,6 +79,7 @@ export interface EditorComponentOptions {
 export class EditorComponent {
   private readonly container: HTMLElement;
   private readonly options: EditorComponentOptions;
+  private readonly isPcfHost: boolean;
 
   private root!: HTMLElement;
   private editorHeader!: HTMLElement;
@@ -129,6 +131,7 @@ export class EditorComponent {
   constructor(container: HTMLElement, context?: PcfContext, options: EditorComponentOptions = {}) {
     this.container = container;
     this.options = options;
+    this.isPcfHost = context !== undefined;
 
     const runtime = (context ?? {}) as unknown as {
       page?: { getClientUrl?: () => string; entityId?: string };
@@ -991,8 +994,8 @@ export class EditorComponent {
   }
 
   private applyAllocatedSize(): void {
-    const width = this.formatAllocatedSize(this.allocatedWidth);
-    const height = this.formatAllocatedSize(this.allocatedHeight);
+    const width = this.formatAllocatedWidth(this.allocatedWidth);
+    const height = this.formatAllocatedHeight(this.allocatedHeight);
 
     this.container.style.width = width;
     this.container.style.height = height;
@@ -1026,10 +1029,22 @@ export class EditorComponent {
     return rootRect.width > 20 && rootRect.height > 20 && workspaceRect.height > 20;
   }
 
-  private formatAllocatedSize(value: number | undefined): string {
+  private formatAllocatedWidth(value: number | undefined): string {
     return typeof value === "number" && Number.isFinite(value) && value > 0
       ? `${value}px`
       : "100%";
+  }
+
+  private formatAllocatedHeight(value: number | undefined): string {
+    if (typeof value === "number" && Number.isFinite(value) && value > 0) {
+      return `${value}px`;
+    }
+
+    if (this.isPcfHost) {
+      return `${DEFAULT_MODEL_DRIVEN_EDITOR_HEIGHT_PX}px`;
+    }
+
+    return "100%";
   }
 }
 
