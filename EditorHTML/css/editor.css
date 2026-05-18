@@ -379,6 +379,25 @@
   page-break-inside: avoid;
 }
 
+.hwe-root.hwe-table-column-resize-ready,
+.hwe-root.hwe-table-column-resize-ready * {
+  cursor: col-resize !important;
+}
+
+.hwe-root.hwe-table-column-resizing {
+  user-select: none;
+}
+
+.hwe-table-column-resize-guide {
+  position: absolute;
+  width: 2px;
+  min-height: 12px;
+  background: #0078d4;
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.75);
+  pointer-events: none;
+  z-index: 150000;
+}
+
 .hwe-page .hwe-keep-together,
 .hwe-page [data-hwe-keep-together="true"] {
   display: block;

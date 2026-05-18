@@ -26,6 +26,7 @@ import { ImageResizeController } from "./ImageResizeController";
 import { PageBackspaceController } from "./PageBackspaceController";
 import { ParagraphStyleManager } from "./ParagraphStyleManager";
 import { StyleSelectionTracker } from "./StyleSelectionTracker";
+import { TableColumnResizeController } from "./TableColumnResizeController";
 import { TableCommandController } from "./TableCommandController";
 import { EditorView, EditorViewController } from "./EditorViewController";
 import {
@@ -101,6 +102,7 @@ export class EditorComponent {
   private diagnosticsController!: EditorDiagnosticsController;
   private paragraphStyleManager!: ParagraphStyleManager;
   private styleSelectionTracker!: StyleSelectionTracker;
+  private tableColumnResizeController!: TableColumnResizeController;
   private tableCommandController!: TableCommandController;
   private viewController!: EditorViewController;
   private pageSetup: PageSetup = DEFAULT_PAGE_SETUP;
@@ -194,6 +196,10 @@ export class EditorComponent {
       getEditableForPageIndex: (pageIndex) => this.getEditableForPageIndex(pageIndex),
       markEdited: (element) => this.markEditedAndRebalance(element),
     });
+    this.tableColumnResizeController = new TableColumnResizeController({
+      onColumnsChanged: (table) => this.markTableColumnsChanged(table),
+      rootProvider: () => this.root ?? null,
+    });
     this.viewController = new EditorViewController(this.editorHeader, (view) => {
       void this.switchView(view);
     });
@@ -231,6 +237,7 @@ export class EditorComponent {
       onImageChanged: (image) => this.markImageEdited(image),
     });
     this.imageResizeController.start();
+    this.tableColumnResizeController.start();
 
     this.sourceEditor = document.createElement("textarea");
     this.sourceEditor.className = "hwe-source-editor";
@@ -270,6 +277,7 @@ export class EditorComponent {
 
     if (view === "source") {
       this.imageResizeController.clearSelection();
+      this.tableColumnResizeController.clear();
       this.sourceEditor.value = this.collectHtml();
       this.sourceDirty = false;
       this.activeView = "source";
@@ -800,6 +808,32 @@ export class EditorComponent {
     });
   }
 
+  private markTableColumnsChanged(table: HTMLTableElement): void {
+    const page = this.getFirstTableFlowPage(table) ?? table.closest<HTMLElement>(".hwe-page");
+    if (!page) return;
+
+    this.isDirty = true;
+    this.toolbar.updateActiveStates();
+    this.layoutService.applyOfficialTableWidths(page);
+    this.scheduleRebalance(page, true, {
+      compactPages: true,
+      includePreviousPage: false,
+    });
+  }
+
+  private getFirstTableFlowPage(table: HTMLTableElement): HTMLElement | null {
+    const flowId = table.getAttribute("data-hwe-table-flow-id");
+    if (!flowId) return table.closest<HTMLElement>(".hwe-page");
+
+    return (
+      this.pages.find((page) =>
+        Array.from(page.querySelectorAll<HTMLTableElement>(".hwe-page-inner table")).some(
+          (candidate) => candidate.getAttribute("data-hwe-table-flow-id") === flowId
+        )
+      ) ?? null
+    );
+  }
+
   private isDeleteInput(inputType: string): boolean {
     return inputType.startsWith("delete") || inputType === "historyUndo";
   }
@@ -988,6 +1022,7 @@ export class EditorComponent {
     this.resizeObserver?.disconnect();
     document.removeEventListener("selectionchange", this.handleSelectionChange);
     this.imageResizeController?.destroy();
+    this.tableColumnResizeController?.destroy();
     this.toolbar?.destroy();
     this.paginator?.destroy();
     this.container.innerHTML = "";
