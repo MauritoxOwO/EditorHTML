@@ -31,7 +31,7 @@ export class PageBackspaceController {
     if (caretAtTableContinuationStart) {
       this.removeTrailingPaginationBlanks(previousInner);
     } else {
-      this.deleteLastContent(previousInner);
+      this.removeLeadingPaginationBlanks(inner);
     }
     this.placeCaretAtEnd(previousInner);
     context.onContentChanged(previousPage);
@@ -91,6 +91,22 @@ export class PageBackspaceController {
     return removedAny;
   }
 
+  private removeLeadingPaginationBlanks(container: HTMLElement): boolean {
+    let removedAny = false;
+    let child = container.firstChild;
+
+    while (child) {
+      const next = child.nextSibling;
+      if (!this.isRemovablePaginationBlank(child)) break;
+
+      child.remove();
+      removedAny = true;
+      child = next;
+    }
+
+    return removedAny;
+  }
+
   private isRemovablePaginationBlank(node: ChildNode): boolean {
     if (node.nodeType === Node.TEXT_NODE) {
       return (node.textContent ?? "").replace(/\u00a0/g, " ").trim() === "";
@@ -131,63 +147,6 @@ export class PageBackspaceController {
       if (element.querySelector("img, table, tr, td, th, video, canvas, svg")) return true;
       return (element.textContent ?? "").replace(/\u00a0/g, " ").length > 0;
     });
-  }
-
-  private deleteLastContent(container: HTMLElement): void {
-    const removed = this.deleteLastContentFromNode(container);
-    if (!removed && getMeaningfulChildren(container, true).length === 0) {
-      container.innerHTML = "<p><br></p>";
-    }
-  }
-
-  private deleteLastContentFromNode(node: Node): boolean {
-    for (let index = node.childNodes.length - 1; index >= 0; index--) {
-      const child = node.childNodes[index];
-
-      if (child.nodeType === Node.TEXT_NODE) {
-        const text = child.textContent ?? "";
-        if (text.length === 0) {
-          child.remove();
-          continue;
-        }
-
-        child.textContent = text.slice(0, -1);
-        if (child.textContent.length === 0) child.remove();
-        return true;
-      }
-
-      if (child.nodeType !== Node.ELEMENT_NODE) {
-        child.remove();
-        return true;
-      }
-
-      const element = child as HTMLElement;
-      if (element.hasAttribute("data-hwe-caret")) {
-        element.remove();
-        continue;
-      }
-
-      if (element.tagName === "BR" || this.isAtomicEditableElement(element)) {
-        element.remove();
-        return true;
-      }
-
-      if (this.deleteLastContentFromNode(element)) {
-        if (isEmptyNode(element, false)) element.remove();
-        return true;
-      }
-
-      if (isEditableBlankBlock(element)) {
-        element.remove();
-        return true;
-      }
-    }
-
-    return false;
-  }
-
-  private isAtomicEditableElement(element: HTMLElement): boolean {
-    return ["IMG", "TABLE", "VIDEO", "CANVAS", "SVG"].includes(element.tagName);
   }
 
   private placeCaretAtEnd(inner: HTMLElement): void {

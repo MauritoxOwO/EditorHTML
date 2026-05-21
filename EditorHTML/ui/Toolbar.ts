@@ -9,6 +9,7 @@ export const CLEAR_PARAGRAPH_STYLE_VALUE = "__hwe-clear-paragraph-style";
 export interface ToolbarOptions {
   onInsertTable?: () => void;
   onInsertRowAfter?: () => void;
+  onDeleteRow?: () => void;
   onInsertPageBreak?: () => void;
   onApplyParagraphStyle?: (className: string) => void;
   onCommand?: (command: string) => boolean;
@@ -128,6 +129,7 @@ export class Toolbar {
     // Salto de página manual 
     this.addActionButton("Tabla", "Insertar tabla", () => this.options.onInsertTable?.());
     this.addActionButton("+ Fila", "Insertar fila debajo", () => this.options.onInsertRowAfter?.());
+    this.addActionButton("- Fila", "Eliminar fila", () => this.options.onDeleteRow?.());
     this.addSep();
 
     const breakBtn = document.createElement("button");

@@ -1,5 +1,9 @@
 import { ParagraphStyleOption, Toolbar } from "../ui/Toolbar";
-import { ParagraphStyleDefinition } from "./dataverse/styleApi";
+import {
+  ParagraphFontFaceDefinition,
+  ParagraphStyleCatalog,
+  ParagraphStyleDefinition,
+} from "./dataverse/styleApi";
 
 export class ParagraphStyleManager {
   private readonly classNames = new Set<string>();
@@ -19,6 +23,15 @@ export class ParagraphStyleManager {
   }
 
   setStyles(styles: ParagraphStyleDefinition[]): void {
+    this.setCatalog({
+      styles,
+      fonts: [],
+    });
+  }
+
+  setCatalog(catalog: ParagraphStyleCatalog): void {
+    const fonts = this.dedupeFonts(catalog.fonts);
+    const styles = catalog.styles;
     const validStyles = styles.filter((style) => this.isValidCssClassName(style.className));
 
     this.classNames.clear();
@@ -29,7 +42,7 @@ export class ParagraphStyleManager {
         className: style.className,
       }))
     );
-    this.injectParagraphStyleCss(validStyles);
+    this.injectParagraphStyleCss(validStyles, fonts);
   }
 
   applyToBlock(block: HTMLElement, className: string | null): void {
@@ -37,16 +50,26 @@ export class ParagraphStyleManager {
     if (className) block.classList.add(className);
   }
 
-  private injectParagraphStyleCss(styles: ParagraphStyleDefinition[]): void {
+  private injectParagraphStyleCss(
+    styles: ParagraphStyleDefinition[],
+    fonts: ParagraphFontFaceDefinition[]
+  ): void {
     if (!this.styleElement) {
       this.styleElement = document.createElement("style");
       this.styleElement.setAttribute("data-hwe-style-catalog", "true");
       this.rootProvider().insertBefore(this.styleElement, this.rootProvider().firstChild);
     }
 
-    this.styleElement.textContent = styles
-      .map((style) => this.formatParagraphStyleCss(style))
+    const fontCss = fonts
+      .map((font) => font.cssText.trim())
+      .filter(Boolean)
       .join("\n\n");
+    const styleCss = styles
+      .map((style) => this.formatParagraphStyleCss(style))
+      .filter(Boolean)
+      .join("\n\n");
+
+    this.styleElement.textContent = [fontCss, styleCss].filter(Boolean).join("\n\n");
   }
 
   private formatParagraphStyleCss(style: ParagraphStyleDefinition): string {
@@ -72,5 +95,19 @@ export class ParagraphStyleManager {
 
   private isValidCssClassName(className: string): boolean {
     return /^-?[_a-zA-Z]+[_a-zA-Z0-9-]*$/.test(className);
+  }
+
+  private dedupeFonts(fonts: ParagraphFontFaceDefinition[]): ParagraphFontFaceDefinition[] {
+    const seenLabels = new Set<string>();
+    const seenCss = new Set<string>();
+    return fonts.filter((font) => {
+      const cssText = font.cssText.trim();
+      if (!cssText) return false;
+      const label = font.label.trim().toLowerCase();
+      if ((label && seenLabels.has(label)) || seenCss.has(cssText)) return false;
+      if (label) seenLabels.add(label);
+      seenCss.add(cssText);
+      return true;
+    });
   }
 }

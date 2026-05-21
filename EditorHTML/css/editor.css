@@ -7,6 +7,7 @@
   --hwe-margin-bottom: 20mm;
   --hwe-margin-left: 12.5mm;
   --hwe-text-width: 140mm;
+  --hwe-page-view-zoom: 1.18;
   width: 100%;
   height: 100%;
   min-height: 0;
@@ -107,6 +108,39 @@
   cursor: not-allowed !important;
 }
 
+.hwe-table-context-menu {
+  position: fixed;
+  z-index: 250000;
+  min-width: 158px;
+  display: none;
+  padding: 4px;
+  border: 1px solid #9f9f9f;
+  border-radius: 4px;
+  background: #fff;
+  box-shadow: 0 3px 12px rgba(0, 0, 0, 0.22);
+  box-sizing: border-box;
+  font-family: "Segoe UI", Arial, sans-serif;
+  font-size: 12px;
+}
+
+.hwe-table-context-menu button {
+  width: 100%;
+  padding: 6px 10px;
+  border: 0;
+  border-radius: 3px;
+  background: transparent;
+  color: #1f1f1f;
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+}
+
+.hwe-table-context-menu button:hover,
+.hwe-table-context-menu button:focus {
+  outline: none;
+  background: #eaf3ff;
+}
+
 .hwe-view-tabs {
   flex-shrink: 0;
   display: flex;
@@ -140,7 +174,7 @@
   min-height: 0;
   overflow: auto;
   overflow-anchor: none;
-  padding: 32px 20px 48px;
+  padding: 24px 16px 48px;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -171,6 +205,7 @@
 .hwe-page {
   width: var(--hwe-page-width, 210mm);
   height: var(--hwe-page-height, 297mm);
+  zoom: var(--hwe-page-view-zoom, 1);
   flex: 0 0 auto;
   margin: 0;
   padding: 0;
@@ -513,6 +548,7 @@
 .hwe-page-divider {
   width: var(--hwe-page-width, 210mm);
   height: 40px;
+  zoom: var(--hwe-page-view-zoom, 1);
   flex: 0 0 auto;
   margin: 0;
   display: flex;
@@ -611,6 +647,7 @@
   }
 
   .hwe-page {
+    zoom: 1;
     box-shadow: none;
     break-after: page;
     page-break-after: always;

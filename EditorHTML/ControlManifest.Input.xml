@@ -18,22 +18,6 @@
               usage="bound" 
               required="false" 
     />
-    <property name="entityName"
-              display-name-key="HTML Dev Test" 
-              description-key="HTML Dev Test" 
-              of-type="SingleLine.Text" 
-              usage="bound" 
-              required="true"
-    />
-
-    <property name="fieldName"
-              display-name-key="HTML File" 
-              description-key="HTML File" 
-              of-type="SingleLine.Text" 
-              usage="bound" 
-              required="true"
-    />
-
     <property name="styleEntitySetName"
               display-name-key="Paragraph Style Table"
               description-key="Dataverse entity set name that stores paragraph styles"
@@ -53,6 +37,30 @@
     <property name="styleCssField"
               display-name-key="Style CSS Field"
               description-key="Dataverse field that stores the CSS rule or declarations"
+              of-type="SingleLine.Text"
+              usage="input"
+              required="false"
+    />
+
+    <property name="styleTypeField"
+              display-name-key="Style Type Field"
+              description-key="Optional Dataverse choice field that marks rows as paragraph styles or fonts"
+              of-type="SingleLine.Text"
+              usage="input"
+              required="false"
+    />
+
+    <property name="styleTypeStyleValue"
+              display-name-key="Style Type Style Value"
+              description-key="Choice value used for paragraph style rows"
+              of-type="SingleLine.Text"
+              usage="input"
+              required="false"
+    />
+
+    <property name="styleTypeFontValue"
+              display-name-key="Style Type Font Value"
+              description-key="Choice value used for font-face rows"
               of-type="SingleLine.Text"
               usage="input"
               required="false"

@@ -118,6 +118,25 @@ export class DocumentSerializer {
     return makePageSetupWrapper(html, pageSetup);
   }
 
+  collectHistoryHtml(
+    root: HTMLElement,
+    pages: HTMLElement[],
+    pageSetup: PageSetup
+  ): string {
+    CaretManager.removeMarkers(root);
+
+    const html = pages
+      .map((page, index) => {
+        const inner = page.querySelector(".hwe-page-inner") as HTMLElement | null;
+        const content = this.prepareContentForHistory(inner ?? page);
+        if (index === 0) return content;
+        return `<div data-hwe-page-break="before" style="page-break-before:always">${content}</div>`;
+      })
+      .join("\n");
+
+    return makePageSetupWrapper(html, pageSetup);
+  }
+
   collectPdfHtml(
     root: HTMLElement,
     pages: HTMLElement[],
@@ -217,6 +236,13 @@ ${content}
     unwrapGeneratedKeepTogetherGroups(clone);
     this.removeRuntimeOnlyState(clone);
     this.restoreDetachedLargeImages(clone);
+    return clone.innerHTML;
+  }
+
+  private prepareContentForHistory(element: HTMLElement): string {
+    const clone = element.cloneNode(true) as HTMLElement;
+    unwrapGeneratedKeepTogetherGroups(clone);
+    this.removeRuntimeOnlyState(clone);
     return clone.innerHTML;
   }
 

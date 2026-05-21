@@ -7,7 +7,9 @@ import {
 } from "../ui/Toolbar";
 import { fetchHtmlFromFileField, saveHtmlToFileField } from "../services/dataverse/fileApi";
 import {
-  fetchParagraphStyles,
+  fetchParagraphStyleCatalog,
+  ParagraphFontFaceDefinition,
+  ParagraphStyleCatalog,
   ParagraphStyleDefinition,
   ParagraphStyleTableConfig,
 } from "../services/dataverse/styleApi";
@@ -23,6 +25,7 @@ import { PasteController } from "../controllers/PasteController";
 import { AssetLayoutManager } from "../services/AssetLayoutManager";
 import { EditorDiagnosticsController } from "../controllers/EditorDiagnosticsController";
 import { EditorLayoutService } from "../services/EditorLayoutService";
+import { EditorHistoryController } from "../controllers/EditorHistoryController";
 import { ImageResizeController } from "../controllers/ImageResizeController";
 import { PageBackspaceController } from "../controllers/PageBackspaceController";
 import { ParagraphStyleManager } from "../services/ParagraphStyleManager";
@@ -49,7 +52,7 @@ const DEFAULT_STYLE_TABLE_CONFIG: ParagraphStyleTableConfig = {
   classField: "mcdev_cssclass",
   cssField: "mcdev_css",
 };
-const DEFAULT_MODEL_DRIVEN_EDITOR_HEIGHT_PX = 720;
+const DEFAULT_MODEL_DRIVEN_EDITOR_HEIGHT_PX = 900;
 const LOCAL_PARAGRAPH_STYLES: ParagraphStyleDefinition[] = [
   {
     label: "Texto general",
@@ -77,6 +80,8 @@ export interface EditorComponentOptions {
   loadHtml?: () => Promise<string> | string;
   saveHtml?: (html: string) => Promise<void> | void;
   paragraphStyles?: ParagraphStyleDefinition[];
+  paragraphFonts?: ParagraphFontFaceDefinition[];
+  paragraphStyleCatalog?: ParagraphStyleCatalog;
 }
 
 export class EditorComponent {
@@ -99,6 +104,7 @@ export class EditorComponent {
   private readonly assetLayoutManager = new AssetLayoutManager();
   private readonly pasteController = new PasteController();
   private readonly layoutService = new EditorLayoutService();
+  private readonly historyController = new EditorHistoryController(10);
   private readonly tableDomIntegrityController = new TableDomIntegrityController();
   private imageResizeController!: ImageResizeController;
   private readonly pageBackspaceController = new PageBackspaceController();
@@ -113,6 +119,7 @@ export class EditorComponent {
   private allocatedHeight?: number;
   private deferredRenderHtml: string | null = null;
   private deferredRenderFrame: number | undefined;
+  private historySnapshotTimer: number | undefined;
   private resizeObserver: ResizeObserver | null = null;
   private imageHydrationRun = 0;
 
@@ -130,6 +137,7 @@ export class EditorComponent {
   private readonly handleSelectionChange = (): void => this.styleSelectionTracker.rememberTextSelection();
   private isComposing = false;
   private isDirty = false;
+  private isRestoringHistory = false;
   private activeView: EditorView = "visual";
   private sourceDirty = false;
 
@@ -160,6 +168,15 @@ export class EditorComponent {
       cssField:
         this.getParameterValue(runtime.parameters, "styleCssField") ??
         DEFAULT_STYLE_TABLE_CONFIG.cssField,
+      typeField:
+        this.getParameterValue(runtime.parameters, "styleTypeField") ??
+        DEFAULT_STYLE_TABLE_CONFIG.typeField,
+      styleTypeValue:
+        this.getParameterValue(runtime.parameters, "styleTypeStyleValue") ??
+        DEFAULT_STYLE_TABLE_CONFIG.styleTypeValue,
+      fontTypeValue:
+        this.getParameterValue(runtime.parameters, "styleTypeFontValue") ??
+        DEFAULT_STYLE_TABLE_CONFIG.fontTypeValue,
     };
   }
 
@@ -199,6 +216,7 @@ export class EditorComponent {
       getEditableForPageIndex: (pageIndex) => this.getEditableForPageIndex(pageIndex),
       markEdited: (element) => this.markEditedAndRebalance(element),
     });
+    this.tableCommandController.start();
     this.tableColumnResizeController = new TableColumnResizeController({
       onColumnsChanged: (table) => this.markTableColumnsChanged(table),
       rootProvider: () => this.root ?? null,
@@ -210,6 +228,7 @@ export class EditorComponent {
     this.toolbar = new Toolbar({
       onInsertTable: () => this.tableCommandController.insertTable(),
       onInsertRowAfter: () => this.tableCommandController.insertTableRowAfter(),
+      onDeleteRow: () => this.tableCommandController.deleteTableRow(),
       onInsertPageBreak: () => this.insertManualPageBreak(),
       onApplyParagraphStyle: (className) => this.applyParagraphStyle(className),
       onCommand: (command) => this.imageResizeController?.handleToolbarCommand(command) ?? false,
@@ -296,6 +315,7 @@ export class EditorComponent {
     }
 
     this.activeView = "visual";
+    this.recordHistorySnapshotNow();
     this.updateViewTabs();
   }
 
@@ -339,13 +359,28 @@ export class EditorComponent {
 
   private async loadParagraphStyles(): Promise<void> {
     try {
-      const styles = this.options.paragraphStyles
-        ? this.options.paragraphStyles
+      const catalog = this.options.paragraphStyleCatalog
+        ? this.options.paragraphStyleCatalog
+        : this.options.paragraphStyles
+          ? {
+              styles: this.options.paragraphStyles,
+              fonts: this.options.paragraphFonts ?? [],
+            }
         : this.baseUrl
-          ? await fetchParagraphStyles(this.baseUrl, this.styleTableConfig)
-          : LOCAL_PARAGRAPH_STYLES;
+          ? await fetchParagraphStyleCatalog(this.baseUrl, this.styleTableConfig)
+          : {
+              styles: LOCAL_PARAGRAPH_STYLES,
+              fonts: [],
+            };
 
-      this.paragraphStyleManager.setStyles(styles.length > 0 ? styles : LOCAL_PARAGRAPH_STYLES);
+      this.paragraphStyleManager.setCatalog(
+        catalog.styles.length > 0
+          ? catalog
+          : {
+              styles: LOCAL_PARAGRAPH_STYLES,
+              fonts: catalog.fonts,
+            }
+      );
     } catch (error) {
       console.warn("[HtmlWordEditor] paragraph styles fallback:", error);
       this.paragraphStyleManager.setStyles(LOCAL_PARAGRAPH_STYLES);
@@ -362,6 +397,7 @@ export class EditorComponent {
           : this.options.initialHtml ?? "<p><br></p>";
 
         await this.renderAndPaginate(html || "<p><br></p>");
+        this.resetHistorySnapshot();
         this.setStatus("", "");
         return;
       }
@@ -378,10 +414,12 @@ export class EditorComponent {
       this.currentFileName = fileContent.fileName || this.currentFileName;
 
       await this.renderAndPaginate(fileContent.html || "<p><br></p>");
+      this.resetHistorySnapshot();
       this.setStatus("", "");
     } catch (err) {
       this.setStatus(`Error al cargar: ${(err as Error).message}`, "error");
       await this.renderAndPaginate("<p><br></p>");
+      this.resetHistorySnapshot();
     }
   }
 
@@ -473,6 +511,7 @@ export class EditorComponent {
           compactPages: shouldPullFromNextPages || !isEnterInput,
           overflowOnly: isEnterInput && !shouldPullFromNextPages,
         });
+        this.scheduleHistorySnapshot();
       }
     });
     inner.addEventListener("compositionstart", () => {
@@ -482,6 +521,7 @@ export class EditorComponent {
       this.isComposing = false;
       this.blankLineController.syncEditableBlankBlocks(inner, false);
       this.scheduleRebalance(page, false, { includePreviousPage: false });
+      this.scheduleHistorySnapshot();
     });
     inner.addEventListener("paste", (event: ClipboardEvent) => {
       if (this.tableDomIntegrityController.handlePaste(event, inner)) {
@@ -748,6 +788,7 @@ export class EditorComponent {
       compactPages: false,
       includePreviousPage: false,
     });
+    this.recordHistorySnapshotNow();
     void this.assetLayoutManager
       .waitForStableLayout(affectedPage)
       .then(() => {
@@ -769,6 +810,7 @@ export class EditorComponent {
       compactPages: false,
       includePreviousPage: false,
     });
+    this.recordHistorySnapshotNow();
   }
 
   private insertManualPageBreak(): void {
@@ -798,6 +840,7 @@ export class EditorComponent {
       force: true,
       includePreviousPage: false,
     });
+    this.recordHistorySnapshotNow();
   }
 
   private createManualPageBreakMarker(): HTMLElement {
@@ -976,6 +1019,7 @@ export class EditorComponent {
 
     this.styleSelectionTracker.rememberTextSelection();
     this.markEditedAfterStyleChange(blocks[0]);
+    this.recordHistorySnapshotNow();
   }
 
   private markEditedAfterStyleChange(element: HTMLElement): void {
@@ -994,6 +1038,8 @@ export class EditorComponent {
   }
 
   private onPageKeyDown(event: KeyboardEvent): void {
+    if (this.handleHistoryShortcut(event)) return;
+
     if (event.ctrlKey && event.key.toLowerCase() === "s") {
       event.preventDefault();
       void this.save();
@@ -1007,6 +1053,7 @@ export class EditorComponent {
           this.isDirty = true;
           this.toolbar.updateActiveStates();
           this.scheduleRebalance(previousPage, true, { includePreviousPage: true });
+          this.recordHistorySnapshotNow();
         },
       })
     ) {
@@ -1025,6 +1072,7 @@ export class EditorComponent {
     this.isDirty = true;
     this.toolbar.updateActiveStates();
     this.scheduleRebalance(page, true, { includePreviousPage: false });
+    this.recordHistorySnapshotNow();
   }
 
   private markImageEdited(image: HTMLImageElement): void {
@@ -1038,6 +1086,7 @@ export class EditorComponent {
       compactPages: false,
       includePreviousPage: false,
     });
+    this.recordHistorySnapshotNow();
   }
 
   private markTableColumnsChanged(table: HTMLTableElement): void {
@@ -1051,6 +1100,7 @@ export class EditorComponent {
       compactPages: true,
       includePreviousPage: false,
     });
+    this.recordHistorySnapshotNow();
   }
 
   private getFirstTableFlowPage(table: HTMLTableElement): HTMLElement | null {
@@ -1149,6 +1199,80 @@ export class EditorComponent {
     this.setStatus("Selecciona Guardar como PDF en el dialogo de impresion.", "success");
   }
 
+  private handleHistoryShortcut(event: KeyboardEvent): boolean {
+    const isModifierPressed = event.ctrlKey || event.metaKey;
+    if (!isModifierPressed || event.altKey || this.activeView !== "visual") return false;
+
+    const key = event.key.toLowerCase();
+    const isUndo = key === "z" && !event.shiftKey;
+    const isRedo = key === "y" || (key === "z" && event.shiftKey);
+    if (!isUndo && !isRedo) return false;
+
+    event.preventDefault();
+    event.stopPropagation();
+    if (this.isRestoringHistory) return true;
+
+    this.flushPendingHistorySnapshot();
+    const snapshot = isUndo ? this.historyController.undo() : this.historyController.redo();
+    if (snapshot) void this.restoreHistorySnapshot(snapshot);
+    return true;
+  }
+
+  private resetHistorySnapshot(): void {
+    this.clearHistorySnapshotTimer();
+    this.historyController.reset(this.collectHistoryHtml());
+  }
+
+  private scheduleHistorySnapshot(): void {
+    if (this.isRestoringHistory || this.activeView !== "visual") return;
+    this.clearHistorySnapshotTimer();
+    this.historySnapshotTimer = window.setTimeout(() => {
+      this.historySnapshotTimer = undefined;
+      this.recordHistorySnapshotNow();
+    }, 650);
+  }
+
+  private flushPendingHistorySnapshot(): void {
+    if (this.historySnapshotTimer === undefined) return;
+    this.clearHistorySnapshotTimer();
+    this.recordHistorySnapshotNow();
+  }
+
+  private recordHistorySnapshotNow(): void {
+    if (this.isRestoringHistory || this.activeView !== "visual") return;
+    this.clearHistorySnapshotTimer();
+    this.historyController.record(this.collectHistoryHtml());
+  }
+
+  private async restoreHistorySnapshot(snapshot: string): Promise<void> {
+    if (this.isRestoringHistory) return;
+
+    this.clearHistorySnapshotTimer();
+    this.isRestoringHistory = true;
+    try {
+      await this.historyController.runSuspended(() => this.renderAndPaginate(snapshot));
+      this.isDirty = true;
+      this.sourceDirty = false;
+      this.toolbar.updateActiveStates();
+    } finally {
+      this.isRestoringHistory = false;
+    }
+  }
+
+  private clearHistorySnapshotTimer(): void {
+    if (this.historySnapshotTimer === undefined) return;
+    window.clearTimeout(this.historySnapshotTimer);
+    this.historySnapshotTimer = undefined;
+  }
+
+  private collectHistoryHtml(): string {
+    return this.documentSerializer.collectHistoryHtml(
+      this.root,
+      this.pages,
+      this.pageSetup
+    );
+  }
+
   private collectHtml(): string {
     return this.documentSerializer.collectHtml(
       this.root,
@@ -1219,6 +1343,7 @@ export class EditorComponent {
 
   async loadHtml(html: string): Promise<void> {
     await this.renderAndPaginate(html || "<p><br></p>");
+    this.resetHistorySnapshot();
     if (this.activeView === "source") {
       this.sourceEditor.value = this.collectHtml();
       this.sourceDirty = false;
@@ -1251,10 +1376,12 @@ export class EditorComponent {
     if (this.deferredRenderFrame !== undefined) {
       window.cancelAnimationFrame(this.deferredRenderFrame);
     }
+    this.clearHistorySnapshotTimer();
     this.resizeObserver?.disconnect();
     document.removeEventListener("selectionchange", this.handleSelectionChange);
     this.imageResizeController?.destroy();
     this.tableColumnResizeController?.destroy();
+    this.tableCommandController?.destroy();
     this.toolbar?.destroy();
     this.paginator?.destroy();
     this.container.innerHTML = "";
@@ -1317,9 +1444,10 @@ export class EditorComponent {
 
 interface IInputs {
   htmlContent: ComponentFramework.PropertyTypes.StringProperty;
-  entityName: ComponentFramework.PropertyTypes.StringProperty;
-  fieldName: ComponentFramework.PropertyTypes.StringProperty;
   styleEntitySetName: ComponentFramework.PropertyTypes.StringProperty;
   styleClassField: ComponentFramework.PropertyTypes.StringProperty;
   styleCssField: ComponentFramework.PropertyTypes.StringProperty;
+  styleTypeField: ComponentFramework.PropertyTypes.StringProperty;
+  styleTypeStyleValue: ComponentFramework.PropertyTypes.StringProperty;
+  styleTypeFontValue: ComponentFramework.PropertyTypes.StringProperty;
 }
