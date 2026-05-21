@@ -24,7 +24,7 @@ export class TableCommandController {
   start(): void {
     if (this.isStarted) return;
     this.isStarted = true;
-    this.context.rootProvider().addEventListener("contextmenu", this.handleContextMenu);
+    this.context.rootProvider().addEventListener("contextmenu", this.handleContextMenu, true);
     document.addEventListener("pointerdown", this.handleDocumentPointerDown, true);
     document.addEventListener("keydown", this.handleDocumentKeyDown, true);
     window.addEventListener("scroll", this.handleAnyScroll, true);
@@ -33,7 +33,7 @@ export class TableCommandController {
   destroy(): void {
     if (!this.isStarted) return;
     this.isStarted = false;
-    this.context.rootProvider().removeEventListener("contextmenu", this.handleContextMenu);
+    this.context.rootProvider().removeEventListener("contextmenu", this.handleContextMenu, true);
     document.removeEventListener("pointerdown", this.handleDocumentPointerDown, true);
     document.removeEventListener("keydown", this.handleDocumentKeyDown, true);
     window.removeEventListener("scroll", this.handleAnyScroll, true);
