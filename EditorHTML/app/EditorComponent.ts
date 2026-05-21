@@ -1382,6 +1382,7 @@ export class EditorComponent {
     this.imageResizeController?.destroy();
     this.tableColumnResizeController?.destroy();
     this.tableCommandController?.destroy();
+    this.paragraphStyleManager?.destroy();
     this.toolbar?.destroy();
     this.paginator?.destroy();
     this.container.innerHTML = "";
