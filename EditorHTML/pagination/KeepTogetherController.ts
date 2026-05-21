@@ -13,10 +13,6 @@ export class KeepTogetherController {
         group.setAttribute("data-hwe-keep-together", "true");
         group.setAttribute("data-hwe-generated-wrapper", "true");
 
-        while (grouped.length > 0 && this.isUserBlankBlock(grouped[grouped.length - 1])) {
-          group.insertBefore(grouped.pop()!, group.firstChild);
-        }
-
         group.appendChild(current);
         group.appendChild(next);
         grouped.push(group);
@@ -118,13 +114,6 @@ export class KeepTogetherController {
 
     const onlyChild = meaningfulChildren[0] as HTMLElement;
     return onlyChild.tagName === "TABLE" ? onlyChild : null;
-  }
-
-  private isUserBlankBlock(node: ChildNode | undefined): boolean {
-    return (
-      node?.nodeType === Node.ELEMENT_NODE &&
-      (node as HTMLElement).hasAttribute("data-hwe-user-blank")
-    );
   }
 }
 

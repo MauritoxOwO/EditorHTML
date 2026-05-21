@@ -1,5 +1,5 @@
-import { ParagraphStyleOption, Toolbar } from "../Resize/Toolbar";
-import { ParagraphStyleDefinition } from "../execCommand/styleApi";
+import { ParagraphStyleOption, Toolbar } from "../ui/Toolbar";
+import { ParagraphStyleDefinition } from "./dataverse/styleApi";
 
 export class ParagraphStyleManager {
   private readonly classNames = new Set<string>();

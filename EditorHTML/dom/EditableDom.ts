@@ -50,6 +50,7 @@ export function isEmptyNode(
   if (node.nodeType !== Node.ELEMENT_NODE) return false;
 
   const element = node as HTMLElement;
+  if (element.getAttribute("data-hwe-manual-page-break") === "true") return false;
   if (element.hasAttribute("data-hwe-user-blank")) return false;
   if (element.hasAttribute("data-hwe-caret")) return false;
   if (element.tagName === "BR") return true;

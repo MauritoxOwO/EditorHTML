@@ -9,6 +9,7 @@ import {
   getMeaningfulChildren,
   isEditableBlankBlock,
   isEmptyNode,
+  isManualPageBreak,
   isSplittableContainer as isFlowSplittableContainer,
   isSplittableTextBlock,
   isTableElement,
@@ -24,6 +25,7 @@ export type OnPageCreated = (page: HTMLElement, afterPage: HTMLElement | null) =
 export interface RebalanceOptions {
   includePreviousPage?: boolean;
   compactPages?: boolean;
+  force?: boolean;
   overflowOnly?: boolean;
 }
 
@@ -331,6 +333,12 @@ export class Paginator {
     let currentInner = getInner(currentPage);
     if (!currentInner) return currentIndex;
 
+    if (isManualPageBreak(node)) {
+      currentInner.appendChild(node);
+      this.getOrCreateNextPage(currentIndex);
+      return currentIndex + 1;
+    }
+
     this.prepareNodeForPage(node, currentPage);
 
     const pageHadContent = !!this.getFirstMeaningfulChild(currentInner);
@@ -350,18 +358,16 @@ export class Paginator {
 
     if (pageHadContent) {
       if (isTableElement(node)) {
-        if (!this.elementFitsOnFreshPage(node as HTMLElement, currentPage)) {
-          const nextPage = this.getOrCreateNextPage(currentIndex);
-          const nextInner = getInner(nextPage);
-          if (
-            nextInner &&
-            this.tablePaginator.splitTable(node as HTMLElement, nextInner, currentPage, {
-              getContentLimitBottom: (inner) => getContentLimitBottom(inner),
-              getInner: (page) => getInner(page),
-            })
-          ) {
-            return currentIndex + 1;
-          }
+        const nextPage = this.getOrCreateNextPage(currentIndex);
+        const nextInner = getInner(nextPage);
+        if (
+          nextInner &&
+          this.tablePaginator.splitTable(node as HTMLElement, nextInner, currentPage, {
+            getContentLimitBottom: (inner) => getContentLimitBottom(inner),
+            getInner: (page) => getInner(page),
+          })
+        ) {
+          return currentIndex + 1;
         }
       }
 
@@ -505,7 +511,6 @@ export class Paginator {
       (lastChild as HTMLElement).tagName === "TABLE"
     ) {
       if (
-        !this.elementFitsOnFreshPage(lastChild as HTMLElement, page) &&
         this.tablePaginator.splitTable(lastChild as HTMLElement, targetInner, page, {
           getContentLimitBottom: (inner) => getContentLimitBottom(inner),
           getInner: (currentPage) => getInner(currentPage),
@@ -658,12 +663,17 @@ export class Paginator {
   }
 
   private shouldRespectUserBlankBarrier(container: HTMLElement, candidates: ChildNode[]): boolean {
-    return this.endsWithUserBlankBlock(container);
+    return (
+      this.endsWithUserBlankBlock(container) ||
+      this.endsWithManualPageBreak(container) ||
+      candidates.some((node) => this.isUserBlankBlock(node) || isManualPageBreak(node))
+    );
   }
 
   private takeCompactCandidates(nextInner: HTMLElement): ChildNode[] {
     const first = this.getFirstMeaningfulChild(nextInner);
     if (!first) return [];
+    if (this.isUserBlankBlock(first) || isManualPageBreak(first)) return [];
 
     const candidates = [first];
     if (
@@ -700,13 +710,6 @@ export class Paginator {
     if (candidates.length !== 1 || !isTableElement(candidates[0])) return false;
 
     const table = candidates[0] as HTMLElement;
-    if (
-      table.getAttribute("data-hwe-table-fragment") !== "true" &&
-      this.elementFitsOnFreshPage(table, currentPage)
-    ) {
-      return false;
-    }
-
     if (
       !this.tablePaginator.splitTable(table, nextInner, currentPage, {
         getContentLimitBottom: (inner) => getContentLimitBottom(inner),
@@ -816,6 +819,7 @@ export class Paginator {
     if (node.nodeType !== Node.ELEMENT_NODE) return false;
 
     const element = node as HTMLElement;
+    if (isManualPageBreak(element)) return false;
     if (element.hasAttribute("data-hwe-user-blank")) return false;
 
     return isEditableBlankBlock(element);
@@ -836,10 +840,26 @@ export class Paginator {
     const element = node as HTMLElement;
     return {
       blank: element.getAttribute("data-hwe-user-blank") === "true",
+      manualPageBreak: isManualPageBreak(element),
       className: element.getAttribute("class") ?? "",
       tagName: element.tagName,
       text: (element.textContent ?? "").replace(/\s+/g, " ").trim().slice(0, 80),
     };
+  }
+
+  private isUserBlankBlock(node: ChildNode | null | undefined): boolean {
+    return (
+      !!node &&
+      node.nodeType === Node.ELEMENT_NODE &&
+      (node as HTMLElement).getAttribute("data-hwe-user-blank") === "true" &&
+      isEditableBlankBlock(node as HTMLElement)
+    );
+  }
+
+  private endsWithManualPageBreak(container: HTMLElement): boolean {
+    const children = getMeaningfulChildren(container);
+    const lastChild = children[children.length - 1];
+    return isManualPageBreak(lastChild);
   }
 
   private getLastMeaningfulChild(container: HTMLElement): ChildNode | null {

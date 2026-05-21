@@ -1,5 +1,5 @@
 import "../../EditorHTML/css/editor.css";
-import { EditorComponent } from "../../EditorHTML/lifecycle/EditorComponent";
+import { EditorComponent } from "../../EditorHTML/app/EditorComponent";
 import "./styles.css";
 
 const LOCAL_STORAGE_KEY = "editorhtml.local.currentHtml";

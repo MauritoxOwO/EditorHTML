@@ -1,5 +1,5 @@
-import { WordPasteImporter } from "../import/WordPasteImporter";
-import { PageSetup } from "../Orquestador/PageGeometry";
+import { WordPasteImporter } from "../importers/WordPasteImporter";
+import { PageSetup } from "../pagination/PageGeometry";
 import { hweDebugLog, hweDebugStart } from "../debug/DebugLogger";
 
 export interface PasteResult {

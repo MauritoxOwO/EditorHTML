@@ -50,6 +50,8 @@ const BLANK_BLOCK_TAGS = new Set([
   "PRE",
 ]);
 
+export const MANUAL_PAGE_BREAK_ATTR = "data-hwe-manual-page-break";
+
 export function getInner(page: HTMLElement | undefined): HTMLElement | null {
   return page?.querySelector(".hwe-page-inner") ?? null;
 }
@@ -105,6 +107,14 @@ export function getNodeBottom(node: ChildNode): number | null {
 
 export function getMeaningfulChildren(container: HTMLElement): ChildNode[] {
   return Array.from(container.childNodes).filter((node) => !isEmptyNode(node));
+}
+
+export function isManualPageBreak(node: ChildNode | null | undefined): boolean {
+  return (
+    !!node &&
+    node.nodeType === Node.ELEMENT_NODE &&
+    (node as HTMLElement).getAttribute(MANUAL_PAGE_BREAK_ATTR) === "true"
+  );
 }
 
 export function isTableElement(node: ChildNode): boolean {
@@ -211,6 +221,7 @@ export function isEmptyNode(node: ChildNode, preserveEditableBlankBlocks = false
   if (node.nodeType !== Node.ELEMENT_NODE) return false;
 
   const element = node as HTMLElement;
+  if (isManualPageBreak(element)) return false;
   if (element.hasAttribute("data-hwe-user-blank")) return false;
   if (element.hasAttribute("data-hwe-caret")) return false;
   if (element.tagName === "BR") return true;

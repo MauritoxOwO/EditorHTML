@@ -57,6 +57,7 @@ export class EditorLayoutService {
     table.style.setProperty("margin-left", "0", "important");
     table.style.setProperty("margin-right", "0", "important");
     this.normalizeColumnWidths(table);
+    this.clearTableStructureHeights(table);
     this.normalizeLongTable(table);
   }
 
@@ -87,11 +88,6 @@ export class EditorLayoutService {
     const columnCount = this.getColumnCount(table);
     const isLongTable = rowCount >= LONG_TABLE_MIN_ROWS || columnCount >= LONG_TABLE_MIN_COLUMNS;
     table.classList.toggle("hwe-long-word-table", isLongTable);
-    if (!isLongTable) return;
-
-    table
-      .querySelectorAll<HTMLElement>("tr, td, th")
-      .forEach((element) => this.clearFixedHeight(element));
   }
 
   private getColumnCount(table: HTMLTableElement): number {
@@ -112,6 +108,12 @@ export class EditorLayoutService {
     element.style.removeProperty("height");
     element.style.removeProperty("min-height");
     element.style.removeProperty("max-height");
+  }
+
+  private clearTableStructureHeights(table: HTMLTableElement): void {
+    table
+      .querySelectorAll<HTMLElement>("tr, td, th")
+      .forEach((element) => this.clearFixedHeight(element));
   }
 
   private parseCssLength(value: string): number | null {

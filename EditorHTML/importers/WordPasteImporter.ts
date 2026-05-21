@@ -2,7 +2,7 @@ import {
   normalizePageSetup,
   PageSetup,
   sanitizeCssLength,
-} from "../Orquestador/PageGeometry";
+} from "../pagination/PageGeometry";
 import { hweDebugStart } from "../debug/DebugLogger";
 
 export interface WordPasteResult {
@@ -323,7 +323,7 @@ export class WordPasteImporter {
       this.moveLengthAttributeToStyle(element, "width");
     }
 
-    if (["THEAD", "TBODY", "TFOOT"].includes(tagName)) {
+    if (["THEAD", "TBODY", "TFOOT", "TR", "TD", "TH"].includes(tagName)) {
       element.style.removeProperty("height");
       element.style.removeProperty("min-height");
       element.style.removeProperty("max-height");
@@ -332,7 +332,6 @@ export class WordPasteImporter {
 
     if (tagName === "COL" || tagName === "TD" || tagName === "TH") {
       this.moveLengthAttributeToStyle(element, "width");
-      this.moveLengthAttributeToStyle(element, "height");
     }
 
     if (tagName === "P" || tagName === "DIV") {

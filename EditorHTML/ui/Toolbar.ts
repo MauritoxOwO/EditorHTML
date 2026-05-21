@@ -9,6 +9,7 @@ export const CLEAR_PARAGRAPH_STYLE_VALUE = "__hwe-clear-paragraph-style";
 export interface ToolbarOptions {
   onInsertTable?: () => void;
   onInsertRowAfter?: () => void;
+  onInsertPageBreak?: () => void;
   onApplyParagraphStyle?: (className: string) => void;
   onCommand?: (command: string) => boolean;
   onExportPdf?: () => void;
@@ -135,11 +136,7 @@ export class Toolbar {
     breakBtn.addEventListener("mousedown", (e) => {
       e.preventDefault();
 
-      document.execCommand(
-        "insertHTML",
-        false,
-        '<div style="page-break-before:always"><br></div>'
-      );
+      this.options.onInsertPageBreak?.();
     });
     this.toolbar.appendChild(breakBtn);
 

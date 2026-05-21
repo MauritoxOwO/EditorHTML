@@ -1,34 +1,36 @@
-import { Paginator, RebalanceOptions } from "../Orquestador/Paginator";
-import { CaretManager } from "../Orquestador/CaretManager";
+import { Paginator, RebalanceOptions } from "../pagination/Paginator";
+import { CaretManager } from "../pagination/CaretManager";
+import { MANUAL_PAGE_BREAK_ATTR } from "../pagination/PaginatorDom";
 import {
   CLEAR_PARAGRAPH_STYLE_VALUE,
   Toolbar,
-} from "../Resize/Toolbar";
-import { fetchHtmlFromFileField, saveHtmlToFileField } from "../execCommand/fileApi";
+} from "../ui/Toolbar";
+import { fetchHtmlFromFileField, saveHtmlToFileField } from "../services/dataverse/fileApi";
 import {
   fetchParagraphStyles,
   ParagraphStyleDefinition,
   ParagraphStyleTableConfig,
-} from "../execCommand/styleApi";
+} from "../services/dataverse/styleApi";
 import {
   applyPageSetup,
   DEFAULT_PAGE_SETUP,
   normalizePageSetup,
   PageSetup,
-} from "../Orquestador/PageGeometry";
-import { BlankLineController } from "./BlankLineController";
-import { DocumentSerializer } from "./DocumentSerializer";
-import { PasteController } from "./PasteController";
-import { AssetLayoutManager } from "./AssetLayoutManager";
-import { EditorDiagnosticsController } from "./EditorDiagnosticsController";
-import { EditorLayoutService } from "./EditorLayoutService";
-import { ImageResizeController } from "./ImageResizeController";
-import { PageBackspaceController } from "./PageBackspaceController";
-import { ParagraphStyleManager } from "./ParagraphStyleManager";
-import { StyleSelectionTracker } from "./StyleSelectionTracker";
-import { TableColumnResizeController } from "./TableColumnResizeController";
-import { TableCommandController } from "./TableCommandController";
-import { EditorView, EditorViewController } from "./EditorViewController";
+} from "../pagination/PageGeometry";
+import { BlankLineController } from "../controllers/BlankLineController";
+import { DocumentSerializer } from "../services/DocumentSerializer";
+import { PasteController } from "../controllers/PasteController";
+import { AssetLayoutManager } from "../services/AssetLayoutManager";
+import { EditorDiagnosticsController } from "../controllers/EditorDiagnosticsController";
+import { EditorLayoutService } from "../services/EditorLayoutService";
+import { ImageResizeController } from "../controllers/ImageResizeController";
+import { PageBackspaceController } from "../controllers/PageBackspaceController";
+import { ParagraphStyleManager } from "../services/ParagraphStyleManager";
+import { StyleSelectionTracker } from "../controllers/StyleSelectionTracker";
+import { TableDomIntegrityController } from "../controllers/TableDomIntegrityController";
+import { TableColumnResizeController } from "../controllers/TableColumnResizeController";
+import { TableCommandController } from "../controllers/TableCommandController";
+import { EditorView, EditorViewController } from "../ui/EditorViewController";
 import {
   hweDebugLog,
   hweDebugStart,
@@ -97,6 +99,7 @@ export class EditorComponent {
   private readonly assetLayoutManager = new AssetLayoutManager();
   private readonly pasteController = new PasteController();
   private readonly layoutService = new EditorLayoutService();
+  private readonly tableDomIntegrityController = new TableDomIntegrityController();
   private imageResizeController!: ImageResizeController;
   private readonly pageBackspaceController = new PageBackspaceController();
   private diagnosticsController!: EditorDiagnosticsController;
@@ -207,6 +210,7 @@ export class EditorComponent {
     this.toolbar = new Toolbar({
       onInsertTable: () => this.tableCommandController.insertTable(),
       onInsertRowAfter: () => this.tableCommandController.insertTableRowAfter(),
+      onInsertPageBreak: () => this.insertManualPageBreak(),
       onApplyParagraphStyle: (className) => this.applyParagraphStyle(className),
       onCommand: (command) => this.imageResizeController?.handleToolbarCommand(command) ?? false,
       onExportPdf: () => {
@@ -442,6 +446,11 @@ export class EditorComponent {
     this.layoutService.applyOfficialTableWidths(inner);
 
     inner.addEventListener("beforeinput", (event: InputEvent) => {
+      if (this.tableDomIntegrityController.handleBeforeInput(event, inner)) {
+        this.markTableDomIntegrityChanged(page, inner);
+        return;
+      }
+
       this.pendingInputTypes.set(page, event.inputType);
       if (this.isDeleteInput(event.inputType)) this.pagesNeedingPull.add(page);
     });
@@ -455,6 +464,9 @@ export class EditorComponent {
         const shouldPullFromNextPages =
           this.isDeleteInput(inputType) || this.pagesNeedingPull.has(page);
         this.blankLineController.syncEditableBlankBlocks(inner, isEnterInput);
+        if (this.tableDomIntegrityController.normalize(inner)) {
+          this.layoutService.applyOfficialTableWidths(page);
+        }
         this.pagesNeedingPull.delete(page);
         this.scheduleRebalance(page, shouldPullFromNextPages, {
           includePreviousPage: shouldPullFromNextPages,
@@ -471,7 +483,19 @@ export class EditorComponent {
       this.blankLineController.syncEditableBlankBlocks(inner, false);
       this.scheduleRebalance(page, false, { includePreviousPage: false });
     });
-    inner.addEventListener("paste", (event: ClipboardEvent) => this.onPaste(event, page));
+    inner.addEventListener("paste", (event: ClipboardEvent) => {
+      if (this.tableDomIntegrityController.handlePaste(event, inner)) {
+        this.markTableDomIntegrityChanged(page, inner);
+        return;
+      }
+
+      this.onPaste(event, page);
+    });
+    inner.addEventListener("drop", (event: DragEvent) => {
+      if (this.tableDomIntegrityController.handleDrop(event, inner)) {
+        this.markTableDomIntegrityChanged(page, inner);
+      }
+    });
     inner.addEventListener("keydown", (event: KeyboardEvent) => this.onPageKeyDown(event));
     inner.addEventListener("keyup", () => {
       this.styleSelectionTracker.rememberTextSelection();
@@ -508,9 +532,15 @@ export class EditorComponent {
       if (!pending || !this.pages.includes(pending.page)) return;
 
       const pageIndex = this.pages.indexOf(pending.page);
-      if (!this.shouldRebalancePage(pending.page, pageIndex, pending.pullFromNextPages)) return;
+      if (
+        !pending.force &&
+        !this.shouldRebalancePage(pending.page, pageIndex, pending.pullFromNextPages)
+      ) {
+        return;
+      }
       const done = hweDebugStart("editor.scheduleRebalance.flush", {
         compactPages: pending.compactPages,
+        force: pending.force,
         includePreviousPage: pending.includePreviousPage,
         overflowOnly: pending.overflowOnly,
         pageIndex,
@@ -575,6 +605,7 @@ export class EditorComponent {
       pullFromNextPages,
       includePreviousPage: options.includePreviousPage ?? pullFromNextPages,
       compactPages: options.compactPages ?? true,
+      force: options.force ?? false,
       overflowOnly: options.overflowOnly ?? false,
     };
 
@@ -599,6 +630,7 @@ export class EditorComponent {
       compactPages: mergedPullFromNextPages
         ? true
         : this.pendingRebalance.compactPages && nextRebalance.compactPages,
+      force: this.pendingRebalance.force || nextRebalance.force,
       overflowOnly:
         !mergedPullFromNextPages &&
         this.pendingRebalance.overflowOnly &&
@@ -704,7 +736,10 @@ export class EditorComponent {
 
     const affectedPage = result.affectedPage ?? page;
     const inner = affectedPage.querySelector<HTMLElement>(".hwe-page-inner");
-    if (inner) this.blankLineController.syncEditableBlankBlocks(inner, false);
+    if (inner) {
+      this.tableDomIntegrityController.normalize(inner);
+      this.blankLineController.syncEditableBlankBlocks(inner, false);
+    }
     this.layoutService.applyOfficialTableWidths(affectedPage);
 
     this.isDirty = true;
@@ -721,6 +756,203 @@ export class EditorComponent {
           includePreviousPage: false,
         });
       });
+  }
+
+  private markTableDomIntegrityChanged(page: HTMLElement, inner: HTMLElement): void {
+    this.tableDomIntegrityController.normalize(inner);
+    this.blankLineController.syncEditableBlankBlocks(inner, false);
+    this.layoutService.applyOfficialTableWidths(page);
+
+    this.isDirty = true;
+    this.toolbar.updateActiveStates();
+    this.scheduleRebalance(page, false, {
+      compactPages: false,
+      includePreviousPage: false,
+    });
+  }
+
+  private insertManualPageBreak(): void {
+    if (this.activeView !== "visual") {
+      this.setStatus("Vuelve al editor visual para insertar un salto.", "error");
+      return;
+    }
+
+    const editable = this.getActiveEditable();
+    const page = editable?.closest<HTMLElement>(".hwe-page") ?? null;
+    if (!editable || !page) {
+      this.setStatus("Coloca el cursor donde quieres insertar el salto.", "error");
+      return;
+    }
+
+    const marker = this.createManualPageBreakMarker();
+    const caretTarget = this.insertManualPageBreakMarker(marker, editable);
+    this.tableDomIntegrityController.normalize(editable);
+    this.blankLineController.syncEditableBlankBlocks(editable, false);
+    this.layoutService.applyOfficialTableWidths(page);
+    this.placeCaretAtStart(caretTarget ?? marker.nextSibling, editable);
+
+    this.isDirty = true;
+    this.toolbar.updateActiveStates();
+    this.scheduleRebalance(page, false, {
+      compactPages: true,
+      force: true,
+      includePreviousPage: false,
+    });
+  }
+
+  private createManualPageBreakMarker(): HTMLElement {
+    const marker = document.createElement("div");
+    marker.className = "hwe-manual-page-break";
+    marker.setAttribute(MANUAL_PAGE_BREAK_ATTR, "true");
+    marker.setAttribute("aria-hidden", "true");
+    return marker;
+  }
+
+  private insertManualPageBreakMarker(
+    marker: HTMLElement,
+    editable: HTMLElement
+  ): ChildNode | null {
+    const selection = window.getSelection();
+    const range =
+      selection && selection.rangeCount > 0 ? selection.getRangeAt(0) : null;
+
+    if (!range || !editable.contains(range.commonAncestorContainer)) {
+      editable.appendChild(marker);
+      return this.ensureEditableBlockAfter(marker);
+    }
+
+    const startElement = this.nodeToElement(range.startContainer);
+    const table = startElement?.closest<HTMLTableElement>("table");
+    if (table && editable.contains(table)) {
+      const flowRoot = table.closest<HTMLElement>(".hwe-table-flow-wrapper") ?? table;
+      flowRoot.parentNode?.insertBefore(marker, flowRoot.nextSibling);
+      return this.ensureEditableBlockAfter(marker);
+    }
+
+    const textBlock = startElement?.closest<HTMLElement>(
+      "p, h1, h2, h3, h4, h5, h6, blockquote, pre"
+    );
+    if (textBlock && editable.contains(textBlock) && !textBlock.closest("td, th")) {
+      return this.splitTextBlockWithManualBreak(textBlock, range, marker);
+    }
+
+    if (range.startContainer === editable) {
+      const reference = editable.childNodes[range.startOffset] ?? null;
+      editable.insertBefore(marker, reference);
+      return this.ensureEditableBlockAfter(marker);
+    }
+
+    const flowChild = this.getTopLevelFlowChild(range.startContainer, editable);
+    if (flowChild?.parentNode) {
+      flowChild.parentNode.insertBefore(marker, flowChild.nextSibling);
+      return this.ensureEditableBlockAfter(marker);
+    }
+
+    editable.appendChild(marker);
+    return this.ensureEditableBlockAfter(marker);
+  }
+
+  private splitTextBlockWithManualBreak(
+    block: HTMLElement,
+    sourceRange: Range,
+    marker: HTMLElement
+  ): ChildNode | null {
+    const parent = block.parentNode;
+    if (!parent) return null;
+
+    const range = sourceRange.cloneRange();
+    if (!range.collapsed) range.deleteContents();
+
+    const afterRange = range.cloneRange();
+    afterRange.setEnd(block, block.childNodes.length);
+    const afterContent = afterRange.extractContents();
+
+    parent.insertBefore(marker, block.nextSibling);
+    if (this.isVisuallyEmptyBlock(block)) block.innerHTML = "<br>";
+
+    if (this.fragmentHasContent(afterContent)) {
+      const afterBlock = block.cloneNode(false) as HTMLElement;
+      afterBlock.appendChild(afterContent);
+      parent.insertBefore(afterBlock, marker.nextSibling);
+      return afterBlock;
+    }
+
+    return this.ensureEditableBlockAfter(marker);
+  }
+
+  private ensureEditableBlockAfter(marker: HTMLElement): ChildNode | null {
+    let next = marker.nextSibling;
+    while (next && this.isWhitespaceTextNode(next)) next = next.nextSibling;
+    if (next) return next;
+
+    const blank = document.createElement("p");
+    blank.setAttribute("data-hwe-user-blank", "true");
+    blank.appendChild(document.createElement("br"));
+    marker.parentNode?.insertBefore(blank, marker.nextSibling);
+    return blank;
+  }
+
+  private placeCaretAtStart(node: ChildNode | null, fallbackEditable: HTMLElement): void {
+    const selection = window.getSelection();
+    if (!selection) return;
+
+    fallbackEditable.focus({ preventScroll: true });
+    const range = document.createRange();
+    if (!node) {
+      range.selectNodeContents(fallbackEditable);
+      range.collapse(false);
+    } else if (node.nodeType === Node.TEXT_NODE) {
+      range.setStart(node, 0);
+      range.collapse(true);
+    } else {
+      range.selectNodeContents(node);
+      range.collapse(true);
+    }
+
+    selection.removeAllRanges();
+    selection.addRange(range);
+  }
+
+  private getTopLevelFlowChild(node: Node, editable: HTMLElement): ChildNode | null {
+    let current: Node | null =
+      node.nodeType === Node.ELEMENT_NODE ? node : node.parentNode;
+
+    while (current?.parentNode && current.parentNode !== editable) {
+      current = current.parentNode;
+    }
+
+    return current?.parentNode === editable ? (current as ChildNode) : null;
+  }
+
+  private nodeToElement(node: Node): HTMLElement | null {
+    return node.nodeType === Node.ELEMENT_NODE
+      ? (node as HTMLElement)
+      : node.parentElement;
+  }
+
+  private fragmentHasContent(fragment: DocumentFragment): boolean {
+    return Array.from(fragment.childNodes).some((node) => {
+      if (node.nodeType === Node.TEXT_NODE) {
+        return (node.textContent ?? "").replace(/\u00a0/g, " ").trim() !== "";
+      }
+      if (node.nodeType !== Node.ELEMENT_NODE) return false;
+      const element = node as HTMLElement;
+      if (element.tagName === "BR") return false;
+      return true;
+    });
+  }
+
+  private isVisuallyEmptyBlock(block: HTMLElement): boolean {
+    const text = (block.textContent ?? "").replace(/\u00a0/g, " ").trim();
+    if (text) return false;
+    return !block.querySelector("img, table, tr, td, th, video, canvas, svg");
+  }
+
+  private isWhitespaceTextNode(node: ChildNode): boolean {
+    return (
+      node.nodeType === Node.TEXT_NODE &&
+      (node.textContent ?? "").replace(/\u00a0/g, " ").trim() === ""
+    );
   }
 
   private applyParagraphStyle(className: string): void {

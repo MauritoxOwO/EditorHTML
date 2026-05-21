@@ -1,10 +1,10 @@
-import { WordPasteImporter } from "../import/WordPasteImporter";
+import { WordPasteImporter } from "../importers/WordPasteImporter";
 import {
   makePageSetupWrapper,
   PageSetup,
   readPageSetupFromElement,
-} from "../Orquestador/PageGeometry";
-import { CaretManager } from "../Orquestador/CaretManager";
+} from "../pagination/PageGeometry";
+import { CaretManager } from "../pagination/CaretManager";
 import {
   getMeaningfulChildren,
   isEmptyNode,
@@ -12,7 +12,7 @@ import {
   removeComments,
   unwrapElement,
 } from "../dom/EditableDom";
-import { unwrapGeneratedKeepTogetherGroups } from "../Orquestador/KeepTogetherController";
+import { unwrapGeneratedKeepTogetherGroups } from "../pagination/KeepTogetherController";
 import { addOcrTextLayers } from "../ocr/PdfOcrLayer";
 import { hweDebugLog, hweDebugStart } from "../debug/DebugLogger";
 
@@ -549,6 +549,15 @@ body {
   margin-left: 0;
   margin-right: 0;
 }
+.hwe-manual-page-break,
+.hwe-page [data-hwe-manual-page-break="true"] {
+  display: block;
+  height: 0;
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+  border: 0;
+}
 table {
   border-collapse: collapse;
   max-width: 100% !important;
@@ -593,6 +602,13 @@ table {
   vertical-align: top;
   word-break: break-word;
   overflow-wrap: anywhere;
+}
+.hwe-page table.hwe-word-table tr,
+.hwe-page table.hwe-word-table td,
+.hwe-page table.hwe-word-table th {
+  height: auto !important;
+  min-height: 0 !important;
+  max-height: none !important;
 }
 .hwe-page table.hwe-word-table p {
   min-height: 0;

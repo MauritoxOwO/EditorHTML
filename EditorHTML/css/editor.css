@@ -345,6 +345,14 @@
   overflow-wrap: anywhere;
 }
 
+.hwe-page table.hwe-word-table tr,
+.hwe-page table.hwe-word-table td,
+.hwe-page table.hwe-word-table th {
+  height: auto !important;
+  min-height: 0 !important;
+  max-height: none !important;
+}
+
 .hwe-page table.hwe-word-table p {
   min-height: 0;
   margin: 0;
@@ -412,6 +420,16 @@
 
 .hwe-page [data-hwe-user-blank="true"] {
   min-height: 1em;
+}
+
+.hwe-manual-page-break,
+.hwe-page [data-hwe-manual-page-break="true"] {
+  display: block;
+  height: 0;
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+  border: 0;
 }
 
 .hwe-page img {
