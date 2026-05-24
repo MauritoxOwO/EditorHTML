@@ -56,6 +56,7 @@ export async function fetchParagraphStyleCatalog(
       Accept: "application/json",
       "OData-MaxVersion": "4.0",
       "OData-Version": "4.0",
+      Prefer: 'odata.include-annotations="OData.Community.Display.V1.FormattedValue"',
     },
     credentials: "same-origin",
   });
@@ -119,20 +120,49 @@ function getConfiguredStyleCatalogRowKind(
   row: Record<string, unknown>,
   config: ParagraphStyleTableConfig
 ): StyleCatalogRowKind | null {
-  if (!config.typeField || (!config.styleTypeValue && !config.fontTypeValue)) {
+  if (!config.typeField) {
     return null;
   }
 
-  const rawValue = row[config.typeField];
-  const value = rawValue === null || rawValue === undefined ? "" : String(rawValue).trim();
-  if (!value) return null;
+  const values = getChoiceValues(row, config.typeField);
+  if (values.length === 0) return null;
 
-  if (config.fontTypeValue !== undefined && value === String(config.fontTypeValue).trim()) {
+  if (
+    config.fontTypeValue !== undefined &&
+    values.includes(normalizeChoiceValue(config.fontTypeValue))
+  ) {
     return "font";
   }
-  if (config.styleTypeValue !== undefined && value === String(config.styleTypeValue).trim()) {
+  if (
+    config.styleTypeValue !== undefined &&
+    values.includes(normalizeChoiceValue(config.styleTypeValue))
+  ) {
     return "style";
   }
 
+  if (values.some(isFontChoiceLabel)) return "font";
+  if (values.some(isStyleChoiceLabel)) return "style";
+
   return null;
+}
+
+function getChoiceValues(row: Record<string, unknown>, typeField: string): string[] {
+  return [
+    row[typeField],
+    row[`${typeField}@OData.Community.Display.V1.FormattedValue`],
+  ]
+    .map(normalizeChoiceValue)
+    .filter(Boolean);
+}
+
+function normalizeChoiceValue(value: unknown): string {
+  return value === null || value === undefined ? "" : String(value).trim().toLowerCase();
+}
+
+function isFontChoiceLabel(value: string): boolean {
+  return ["font", "fonts", "font-face", "fontface", "fuente", "fuentes"].includes(value);
+}
+
+function isStyleChoiceLabel(value: string): boolean {
+  return ["style", "styles", "css", "estilo", "estilos"].includes(value);
 }
