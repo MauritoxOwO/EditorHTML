@@ -402,6 +402,7 @@ export class EditorComponent {
 
     try {
       const html = await fetchDynamicDocumentHeaderHtml(
+        this.baseUrl,
         this.dynamicHeaderEndpointUrl ?? "",
         this.entityId
       );
@@ -413,7 +414,7 @@ export class EditorComponent {
   }
 
   private shouldLoadDynamicHeader(): boolean {
-    return Boolean(this.entityId && this.dynamicHeaderEndpointUrl);
+    return Boolean(this.baseUrl && this.entityId);
   }
 
   private wrapDynamicHeaderHtml(html: string): string {

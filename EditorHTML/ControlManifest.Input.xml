@@ -68,7 +68,7 @@
 
     <property name="dynamicHeaderEndpointUrl"
               display-name-key="Dynamic Header Endpoint"
-              description-key="Optional endpoint that receives the current row GUID and returns HTML to render at the start of the document"
+              description-key="Optional POST endpoint that receives guidVersionAnuncio and returns HTML to render at the start of the document"
               of-type="SingleLine.Text"
               usage="input"
               required="false"
