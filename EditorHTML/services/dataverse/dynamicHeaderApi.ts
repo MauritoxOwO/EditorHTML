@@ -45,9 +45,30 @@ function extractHtmlFromJson(payload: unknown): string {
   if (!payload || typeof payload !== "object") return "";
 
   const row = payload as Record<string, unknown>;
+  const responseObjectHtml = extractResponseObjectHtml(row.responseObjects);
+  if (responseObjectHtml) return responseObjectHtml;
+
   const direct = row.html ?? row.Html ?? row.HTML ?? row.value ?? row.Value;
   if (direct !== undefined) return String(direct).trim();
 
   const firstStringValue = Object.values(row).find((value) => typeof value === "string");
   return firstStringValue ? String(firstStringValue).trim() : "";
+}
+
+function extractResponseObjectHtml(responseObjects: unknown): string {
+  if (!Array.isArray(responseObjects)) return "";
+
+  const preferred = extractResponseBody(responseObjects[1]);
+  if (preferred) return preferred;
+
+  return responseObjects.map(extractResponseBody).find(Boolean) ?? "";
+}
+
+function extractResponseBody(value: unknown): string {
+  if (typeof value === "string") return value.trim();
+  if (!value || typeof value !== "object") return "";
+
+  const row = value as Record<string, unknown>;
+  const body = row.responseBody ?? row.ResponseBody ?? row.value ?? row.Value;
+  return body === undefined ? "" : String(body).trim();
 }
