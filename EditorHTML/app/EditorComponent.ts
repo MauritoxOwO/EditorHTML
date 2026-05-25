@@ -14,6 +14,11 @@ import {
   ParagraphStyleTableConfig,
 } from "../services/dataverse/styleApi";
 import {
+  DynamicDocumentHeaderConfig,
+  DynamicDocumentHeaderValues,
+  fetchDynamicDocumentHeader,
+} from "../services/dataverse/dynamicHeaderApi";
+import {
   applyPageSetup,
   DEFAULT_PAGE_SETUP,
   normalizePageSetup,
@@ -128,6 +133,8 @@ export class EditorComponent {
   private readonly entityId: string;
   private readonly fieldName: string;
   private readonly styleTableConfig: ParagraphStyleTableConfig;
+  private readonly dynamicHeaderConfig: DynamicDocumentHeaderConfig;
+  private dynamicHeaderHtml = "";
   private currentFileName = "content.html";
 
   private rebalanceFrame: number | undefined;
@@ -178,6 +185,14 @@ export class EditorComponent {
         this.getParameterValue(runtime.parameters, "styleTypeFontValue") ??
         DEFAULT_STYLE_TABLE_CONFIG.fontTypeValue,
     };
+    this.dynamicHeaderConfig = {
+      entitySetName:
+        this.getParameterValue(runtime.parameters, "dynamicHeaderEntitySetName") ??
+        this.entityName,
+      titleField: this.getParameterValue(runtime.parameters, "dynamicHeaderTitleField"),
+      subtitleField: this.getParameterValue(runtime.parameters, "dynamicHeaderSubtitleField"),
+      subtitle2Field: this.getParameterValue(runtime.parameters, "dynamicHeaderSubtitle2Field"),
+    };
   }
 
   async init(): Promise<void> {
@@ -188,7 +203,7 @@ export class EditorComponent {
       (page: HTMLElement, afterPage: HTMLElement | null) =>
         this.attachPageForMeasurement(page, afterPage)
     );
-    await this.loadParagraphStyles();
+    await Promise.all([this.loadParagraphStyles(), this.loadDynamicHeader()]);
     await this.loadContent();
   }
 
@@ -357,6 +372,15 @@ export class EditorComponent {
     return value || undefined;
   }
 
+  private escapeHtml(value: string): string {
+    return value
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;")
+      .replace(/'/g, "&#39;");
+  }
+
   private async loadParagraphStyles(): Promise<void> {
     try {
       const catalog = this.options.paragraphStyleCatalog
@@ -385,6 +409,55 @@ export class EditorComponent {
       console.warn("[HtmlWordEditor] paragraph styles fallback:", error);
       this.paragraphStyleManager.setStyles(LOCAL_PARAGRAPH_STYLES);
     }
+  }
+
+  private async loadDynamicHeader(): Promise<void> {
+    if (!this.shouldLoadDynamicHeader()) {
+      this.dynamicHeaderHtml = "";
+      return;
+    }
+
+    try {
+      const values = await fetchDynamicDocumentHeader(
+        this.baseUrl,
+        this.entityId,
+        this.dynamicHeaderConfig
+      );
+      this.dynamicHeaderHtml = this.makeDynamicHeaderHtml(values);
+    } catch (error) {
+      console.warn("[HtmlWordEditor] dynamic header fallback:", error);
+      this.dynamicHeaderHtml = "";
+    }
+  }
+
+  private shouldLoadDynamicHeader(): boolean {
+    return Boolean(
+      this.baseUrl &&
+        this.entityId &&
+        this.dynamicHeaderConfig.entitySetName &&
+        (this.dynamicHeaderConfig.titleField ||
+          this.dynamicHeaderConfig.subtitleField ||
+          this.dynamicHeaderConfig.subtitle2Field)
+    );
+  }
+
+  private makeDynamicHeaderHtml(values: DynamicDocumentHeaderValues): string {
+    const lines = [
+      { value: values.title, className: "hwe-dynamic-header-title" },
+      { value: values.subtitle, className: "hwe-dynamic-header-subtitle" },
+      { value: values.subtitle2, className: "hwe-dynamic-header-subtitle-2" },
+    ].filter((line) => line.value.trim());
+
+    if (lines.length === 0) return "";
+
+    const paragraphs = lines
+      .map(
+        (line) =>
+          `<p class="${line.className}" style="margin:0 0 4pt;text-align:center;">${this.escapeHtml(line.value)}</p>`
+      )
+      .join("");
+
+    return `<div data-hwe-dynamic-header="true" contenteditable="false" style="margin:0 0 12pt;">${paragraphs}</div>`;
   }
 
   private async loadContent(): Promise<void> {
@@ -437,7 +510,7 @@ export class EditorComponent {
       pageSetup: normalizedDocument.pageSetup ?? null,
     });
 
-    this.pages = [this.createPageElement(normalizedDocument.html)];
+    this.pages = [this.createPageElement(this.withDynamicHeaderHtml(normalizedDocument.html))];
     this.workspace.appendChild(this.pages[0]);
     this.layoutService.applyOfficialTableWidths(this.workspace);
 
@@ -470,6 +543,24 @@ export class EditorComponent {
     done({
       pages: this.pages.length,
     });
+  }
+
+  private withDynamicHeaderHtml(html: string): string {
+    const container = document.createElement("div");
+    container.innerHTML = html || "<p><br></p>";
+    container.querySelectorAll<HTMLElement>("[data-hwe-dynamic-header='true']").forEach(
+      (element) => element.remove()
+    );
+
+    if (this.dynamicHeaderHtml) {
+      const header = document.createElement("div");
+      header.innerHTML = this.dynamicHeaderHtml;
+      Array.from(header.childNodes).forEach((node) => {
+        container.insertBefore(node, container.firstChild);
+      });
+    }
+
+    return container.innerHTML || "<p><br></p>";
   }
 
   private createPageElement(html?: string): HTMLElement {
@@ -1451,4 +1542,8 @@ interface IInputs {
   styleTypeField: ComponentFramework.PropertyTypes.StringProperty;
   styleTypeStyleValue: ComponentFramework.PropertyTypes.StringProperty;
   styleTypeFontValue: ComponentFramework.PropertyTypes.StringProperty;
+  dynamicHeaderEntitySetName: ComponentFramework.PropertyTypes.StringProperty;
+  dynamicHeaderTitleField: ComponentFramework.PropertyTypes.StringProperty;
+  dynamicHeaderSubtitleField: ComponentFramework.PropertyTypes.StringProperty;
+  dynamicHeaderSubtitle2Field: ComponentFramework.PropertyTypes.StringProperty;
 }
