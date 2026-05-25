@@ -66,6 +66,38 @@
               required="false"
     />
 
+    <property name="dynamicHeaderEntitySetName"
+              display-name-key="Dynamic Header Table"
+              description-key="Optional Dataverse entity set name that stores dynamic document header fields"
+              of-type="SingleLine.Text"
+              usage="input"
+              required="false"
+    />
+
+    <property name="dynamicHeaderTitleField"
+              display-name-key="Dynamic Header Title Field"
+              description-key="Optional Dataverse text field used as the dynamic document title"
+              of-type="SingleLine.Text"
+              usage="input"
+              required="false"
+    />
+
+    <property name="dynamicHeaderSubtitleField"
+              display-name-key="Dynamic Header Subtitle Field"
+              description-key="Optional Dataverse text field used as the dynamic document subtitle"
+              of-type="SingleLine.Text"
+              usage="input"
+              required="false"
+    />
+
+    <property name="dynamicHeaderSubtitle2Field"
+              display-name-key="Dynamic Header Subtitle 2 Field"
+              description-key="Optional Dataverse text field used as the second dynamic document subtitle"
+              of-type="SingleLine.Text"
+              usage="input"
+              required="false"
+    />
+
     <resources>
       <code path="index.ts" order="1"/>
       <css path="css/editor.css" order="1"/>

@@ -235,6 +235,7 @@ ${content}
     const clone = element.cloneNode(true) as HTMLElement;
     unwrapGeneratedKeepTogetherGroups(clone);
     this.removeRuntimeOnlyState(clone);
+    this.removeDynamicDocumentHeader(clone);
     this.restoreDetachedLargeImages(clone);
     return clone.innerHTML;
   }
@@ -243,6 +244,7 @@ ${content}
     const clone = element.cloneNode(true) as HTMLElement;
     unwrapGeneratedKeepTogetherGroups(clone);
     this.removeRuntimeOnlyState(clone);
+    this.removeDynamicDocumentHeader(clone);
     return clone.innerHTML;
   }
 
@@ -394,6 +396,12 @@ ${content}
     });
     root.querySelectorAll<HTMLElement>(".hwe-image-selected").forEach((element) => {
       element.classList.remove("hwe-image-selected");
+    });
+  }
+
+  private removeDynamicDocumentHeader(root: HTMLElement): void {
+    root.querySelectorAll<HTMLElement>("[data-hwe-dynamic-header='true']").forEach((element) => {
+      element.remove();
     });
   }
 
