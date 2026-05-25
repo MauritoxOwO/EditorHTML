@@ -1,44 +1,14 @@
-export interface DynamicDocumentHeaderConfig {
-  entitySetName: string;
-  titleField?: string;
-  subtitleField?: string;
-  subtitle2Field?: string;
-}
+export async function fetchDynamicDocumentHeaderHtml(
+  endpointUrl: string,
+  entityId: string
+): Promise<string> {
+  if (!endpointUrl || !entityId) return "";
 
-export interface DynamicDocumentHeaderValues {
-  title: string;
-  subtitle: string;
-  subtitle2: string;
-}
-
-export async function fetchDynamicDocumentHeader(
-  baseUrl: string,
-  entityId: string,
-  config: DynamicDocumentHeaderConfig
-): Promise<DynamicDocumentHeaderValues> {
-  const fieldMap = [
-    { key: "title" as const, field: config.titleField },
-    { key: "subtitle" as const, field: config.subtitleField },
-    { key: "subtitle2" as const, field: config.subtitle2Field },
-  ].filter((entry): entry is { key: keyof DynamicDocumentHeaderValues; field: string } =>
-    Boolean(entry.field)
-  );
-
-  if (!baseUrl || !entityId || !config.entitySetName || fieldMap.length === 0) {
-    return makeEmptyHeaderValues();
-  }
-
-  const select = Array.from(new Set(fieldMap.map((entry) => entry.field))).join(",");
-  const url =
-    `${baseUrl}/api/data/v9.2/${config.entitySetName}(${entityId})` +
-    `?$select=${encodeURIComponent(select)}`;
-
+  const url = buildDynamicHeaderUrl(endpointUrl, entityId);
   const response = await fetch(url, {
     method: "GET",
     headers: {
-      Accept: "application/json",
-      "OData-MaxVersion": "4.0",
-      "OData-Version": "4.0",
+      Accept: "text/html, application/json, */*",
     },
     credentials: "same-origin",
   });
@@ -48,18 +18,21 @@ export async function fetchDynamicDocumentHeader(
     throw new Error(`No se pudo cargar la cabecera dinamica (HTTP ${response.status}). ${body}`);
   }
 
-  const row = (await response.json()) as Record<string, unknown>;
-  const values = makeEmptyHeaderValues();
-  fieldMap.forEach((entry) => {
-    values[entry.key] = String(row[entry.field] ?? "").trim();
-  });
-  return values;
+  const contentType = response.headers.get("content-type") ?? "";
+  if (/application\/json/i.test(contentType)) {
+    const payload = (await response.json()) as { html?: unknown; value?: unknown };
+    return String(payload.html ?? payload.value ?? "").trim();
+  }
+
+  return (await response.text()).trim();
 }
 
-function makeEmptyHeaderValues(): DynamicDocumentHeaderValues {
-  return {
-    title: "",
-    subtitle: "",
-    subtitle2: "",
-  };
+function buildDynamicHeaderUrl(endpointUrl: string, entityId: string): string {
+  const encodedId = encodeURIComponent(entityId);
+  if (endpointUrl.includes("{id}") || endpointUrl.includes("{guid}")) {
+    return endpointUrl.replace(/\{(?:id|guid)\}/g, encodedId);
+  }
+
+  const separator = endpointUrl.includes("?") ? "&" : "?";
+  return `${endpointUrl}${separator}id=${encodedId}`;
 }
