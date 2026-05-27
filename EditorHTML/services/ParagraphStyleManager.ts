@@ -58,6 +58,7 @@ export class ParagraphStyleManager {
     const validStyles = styles.filter(
       (style) => this.isValidCssClassName(style.className) && !this.isFontFaceCss(style.cssText)
     );
+    const dropdownStyles = validStyles.filter((style) => style.showInDropdown !== false);
     const referencedFontFamilies = this.getReferencedFontFamilies(validStyles);
     const fonts = this.dedupeFonts(
       this.filterFontsForStyles(catalog.fonts, referencedFontFamilies)
@@ -65,14 +66,14 @@ export class ParagraphStyleManager {
 
     this.classNames.clear();
     this.fontFamilyClassNames.clear();
-    validStyles.forEach((style) => {
+    dropdownStyles.forEach((style) => {
       this.classNames.add(style.className);
       if (this.styleDefinesFontFamily(style)) {
         this.fontFamilyClassNames.add(style.className);
       }
     });
     this.toolbar.setParagraphStyles(
-      validStyles.map<ParagraphStyleOption>((style) => ({
+      dropdownStyles.map<ParagraphStyleOption>((style) => ({
         label: style.label,
         className: style.className,
       }))

@@ -52,6 +52,8 @@ const DEFAULT_STYLE_TABLE_CONFIG: ParagraphStyleTableConfig = {
   entitySetName: "mcdev_htmlstyles",
   classField: "mcdev_cssclass",
   cssField: "mcdev_css",
+  stateField: "statecode",
+  dropdownField: "mostrarendesplegable",
 };
 const DEFAULT_MODEL_DRIVEN_EDITOR_HEIGHT_PX = 900;
 const LOCAL_PARAGRAPH_STYLES: ParagraphStyleDefinition[] = [
@@ -171,6 +173,12 @@ export class EditorComponent {
       cssField:
         this.getParameterValue(runtime.parameters, "styleCssField") ??
         DEFAULT_STYLE_TABLE_CONFIG.cssField,
+      stateField:
+        this.getParameterValue(runtime.parameters, "styleStateField") ??
+        DEFAULT_STYLE_TABLE_CONFIG.stateField,
+      dropdownField:
+        this.getParameterValue(runtime.parameters, "styleDropdownField") ??
+        DEFAULT_STYLE_TABLE_CONFIG.dropdownField,
       typeField:
         this.getParameterValue(runtime.parameters, "styleTypeField") ??
         DEFAULT_STYLE_TABLE_CONFIG.typeField,
@@ -1501,6 +1509,8 @@ interface IInputs {
   styleEntitySetName: ComponentFramework.PropertyTypes.StringProperty;
   styleClassField: ComponentFramework.PropertyTypes.StringProperty;
   styleCssField: ComponentFramework.PropertyTypes.StringProperty;
+  styleStateField: ComponentFramework.PropertyTypes.StringProperty;
+  styleDropdownField: ComponentFramework.PropertyTypes.StringProperty;
   styleTypeField: ComponentFramework.PropertyTypes.StringProperty;
   styleTypeStyleValue: ComponentFramework.PropertyTypes.StringProperty;
   styleTypeFontValue: ComponentFramework.PropertyTypes.StringProperty;

@@ -42,6 +42,22 @@
               required="false"
     />
 
+    <property name="styleStateField"
+              display-name-key="Style State Field"
+              description-key="Dataverse state field used to load only active style rows"
+              of-type="SingleLine.Text"
+              usage="input"
+              required="false"
+    />
+
+    <property name="styleDropdownField"
+              display-name-key="Style Dropdown Field"
+              description-key="Dataverse boolean field that controls whether a style appears in the dropdown"
+              of-type="SingleLine.Text"
+              usage="input"
+              required="false"
+    />
+
     <property name="styleTypeField"
               display-name-key="Style Type Field"
               description-key="Optional Dataverse choice field that marks rows as paragraph styles or fonts"

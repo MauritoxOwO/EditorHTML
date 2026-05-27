@@ -2,6 +2,7 @@ export interface ParagraphStyleDefinition {
   label: string;
   className: string;
   cssText: string;
+  showInDropdown?: boolean;
 }
 
 export interface ParagraphFontFaceDefinition {
@@ -18,6 +19,8 @@ export interface ParagraphStyleTableConfig {
   entitySetName: string;
   classField: string;
   cssField: string;
+  stateField?: string;
+  dropdownField?: string;
   typeField?: string;
   styleTypeValue?: string;
   fontTypeValue?: string;
@@ -42,12 +45,18 @@ export async function fetchParagraphStyleCatalog(
   config: ParagraphStyleTableConfig
 ): Promise<ParagraphStyleCatalog> {
   const selectFields = [config.classField, config.cssField];
+  if (config.stateField) selectFields.push(config.stateField);
+  if (config.dropdownField) selectFields.push(config.dropdownField);
   if (config.typeField) selectFields.push(config.typeField);
 
   const select = Array.from(new Set(selectFields)).join(",");
+  const filter = config.stateField
+    ? `&$filter=${encodeURIComponent(`${config.stateField} eq 0`)}`
+    : "";
   const url =
     `${baseUrl}/api/data/v9.2/${config.entitySetName}` +
     `?$select=${encodeURIComponent(select)}` +
+    filter +
     `&$orderby=${encodeURIComponent(config.classField)} asc`;
 
   const response = await fetch(url, {
@@ -82,6 +91,8 @@ export function mapRowsToStyleCatalog(
   };
 
   rows.forEach((row) => {
+    if (!isActiveRow(row, config)) return;
+
     const label = String(row[config.classField] ?? "").trim();
     const cssText = String(row[config.cssField] ?? "").trim();
     if (!label || !cssText) return;
@@ -99,6 +110,7 @@ export function mapRowsToStyleCatalog(
       label,
       className: label.replace(/^\./, ""),
       cssText,
+      showInDropdown: shouldShowInDropdown(row, config),
     });
   });
 
@@ -157,6 +169,30 @@ function getChoiceValues(row: Record<string, unknown>, typeField: string): strin
 
 function normalizeChoiceValue(value: unknown): string {
   return value === null || value === undefined ? "" : String(value).trim().toLowerCase();
+}
+
+function isActiveRow(row: Record<string, unknown>, config: ParagraphStyleTableConfig): boolean {
+  if (!config.stateField) return true;
+  const state = row[config.stateField];
+  return state === undefined || normalizeChoiceValue(state) === "0";
+}
+
+function shouldShowInDropdown(
+  row: Record<string, unknown>,
+  config: ParagraphStyleTableConfig
+): boolean {
+  if (!config.dropdownField) return true;
+  return readBoolean(row[config.dropdownField]) ?? true;
+}
+
+function readBoolean(value: unknown): boolean | null {
+  if (typeof value === "boolean") return value;
+  if (value === null || value === undefined) return null;
+
+  const normalized = normalizeChoiceValue(value);
+  if (["true", "1", "yes", "si", "sí"].includes(normalized)) return true;
+  if (["false", "0", "no"].includes(normalized)) return false;
+  return null;
 }
 
 function isFontChoiceLabel(value: string): boolean {
