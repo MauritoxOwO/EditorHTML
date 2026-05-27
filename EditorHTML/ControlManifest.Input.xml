@@ -58,6 +58,22 @@
               required="false"
     />
 
+    <property name="styleDocumentTypeField"
+              display-name-key="Style Document Type Field"
+              description-key="Dataverse choice field used to filter styles shown in the dropdown"
+              of-type="SingleLine.Text"
+              usage="input"
+              required="false"
+    />
+
+    <property name="styleDocumentTypeDropdownValue"
+              display-name-key="Style Document Type Dropdown Value"
+              description-key="Choice value required for styles shown in the dropdown"
+              of-type="SingleLine.Text"
+              usage="input"
+              required="false"
+    />
+
     <property name="styleTypeField"
               display-name-key="Style Type Field"
               description-key="Optional Dataverse choice field that marks rows as paragraph styles or fonts"
