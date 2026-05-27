@@ -13,11 +13,7 @@ import {
   ParagraphStyleDefinition,
   ParagraphStyleTableConfig,
 } from "../services/dataverse/styleApi";
-import {
-  DynamicDocumentHeaderConfig,
-  DynamicDocumentHeaderValues,
-  fetchDynamicDocumentHeader,
-} from "../services/dataverse/dynamicHeaderApi";
+import { fetchDynamicDocumentHeaderHtml } from "../services/dataverse/dynamicHeaderApi";
 import {
   applyPageSetup,
   DEFAULT_PAGE_SETUP,
@@ -56,6 +52,8 @@ const DEFAULT_STYLE_TABLE_CONFIG: ParagraphStyleTableConfig = {
   entitySetName: "mcdev_htmlstyles",
   classField: "mcdev_cssclass",
   cssField: "mcdev_css",
+  stateField: "statecode",
+  dropdownField: "mostrarendesplegable",
 };
 const DEFAULT_MODEL_DRIVEN_EDITOR_HEIGHT_PX = 900;
 const LOCAL_PARAGRAPH_STYLES: ParagraphStyleDefinition[] = [
@@ -133,7 +131,7 @@ export class EditorComponent {
   private readonly entityId: string;
   private readonly fieldName: string;
   private readonly styleTableConfig: ParagraphStyleTableConfig;
-  private readonly dynamicHeaderConfig: DynamicDocumentHeaderConfig;
+  private readonly dynamicHeaderEndpointUrl: string | undefined;
   private dynamicHeaderHtml = "";
   private currentFileName = "content.html";
 
@@ -175,6 +173,12 @@ export class EditorComponent {
       cssField:
         this.getParameterValue(runtime.parameters, "styleCssField") ??
         DEFAULT_STYLE_TABLE_CONFIG.cssField,
+      stateField:
+        this.getParameterValue(runtime.parameters, "styleStateField") ??
+        DEFAULT_STYLE_TABLE_CONFIG.stateField,
+      dropdownField:
+        this.getParameterValue(runtime.parameters, "styleDropdownField") ??
+        DEFAULT_STYLE_TABLE_CONFIG.dropdownField,
       typeField:
         this.getParameterValue(runtime.parameters, "styleTypeField") ??
         DEFAULT_STYLE_TABLE_CONFIG.typeField,
@@ -185,14 +189,10 @@ export class EditorComponent {
         this.getParameterValue(runtime.parameters, "styleTypeFontValue") ??
         DEFAULT_STYLE_TABLE_CONFIG.fontTypeValue,
     };
-    this.dynamicHeaderConfig = {
-      entitySetName:
-        this.getParameterValue(runtime.parameters, "dynamicHeaderEntitySetName") ??
-        this.entityName,
-      titleField: this.getParameterValue(runtime.parameters, "dynamicHeaderTitleField"),
-      subtitleField: this.getParameterValue(runtime.parameters, "dynamicHeaderSubtitleField"),
-      subtitle2Field: this.getParameterValue(runtime.parameters, "dynamicHeaderSubtitle2Field"),
-    };
+    this.dynamicHeaderEndpointUrl = this.getParameterValue(
+      runtime.parameters,
+      "dynamicHeaderEndpointUrl"
+    );
   }
 
   async init(): Promise<void> {
@@ -372,15 +372,6 @@ export class EditorComponent {
     return value || undefined;
   }
 
-  private escapeHtml(value: string): string {
-    return value
-      .replace(/&/g, "&amp;")
-      .replace(/</g, "&lt;")
-      .replace(/>/g, "&gt;")
-      .replace(/"/g, "&quot;")
-      .replace(/'/g, "&#39;");
-  }
-
   private async loadParagraphStyles(): Promise<void> {
     try {
       const catalog = this.options.paragraphStyleCatalog
@@ -418,12 +409,12 @@ export class EditorComponent {
     }
 
     try {
-      const values = await fetchDynamicDocumentHeader(
+      const html = await fetchDynamicDocumentHeaderHtml(
         this.baseUrl,
-        this.entityId,
-        this.dynamicHeaderConfig
+        this.dynamicHeaderEndpointUrl ?? "",
+        this.entityId
       );
-      this.dynamicHeaderHtml = this.makeDynamicHeaderHtml(values);
+      this.dynamicHeaderHtml = this.wrapDynamicHeaderHtml(html);
     } catch (error) {
       console.warn("[HtmlWordEditor] dynamic header fallback:", error);
       this.dynamicHeaderHtml = "";
@@ -431,33 +422,12 @@ export class EditorComponent {
   }
 
   private shouldLoadDynamicHeader(): boolean {
-    return Boolean(
-      this.baseUrl &&
-        this.entityId &&
-        this.dynamicHeaderConfig.entitySetName &&
-        (this.dynamicHeaderConfig.titleField ||
-          this.dynamicHeaderConfig.subtitleField ||
-          this.dynamicHeaderConfig.subtitle2Field)
-    );
+    return Boolean(this.baseUrl && this.entityId);
   }
 
-  private makeDynamicHeaderHtml(values: DynamicDocumentHeaderValues): string {
-    const lines = [
-      { value: values.title, className: "hwe-dynamic-header-title" },
-      { value: values.subtitle, className: "hwe-dynamic-header-subtitle" },
-      { value: values.subtitle2, className: "hwe-dynamic-header-subtitle-2" },
-    ].filter((line) => line.value.trim());
-
-    if (lines.length === 0) return "";
-
-    const paragraphs = lines
-      .map(
-        (line) =>
-          `<p class="${line.className}" style="margin:0 0 4pt;text-align:center;">${this.escapeHtml(line.value)}</p>`
-      )
-      .join("");
-
-    return `<div data-hwe-dynamic-header="true" contenteditable="false" style="margin:0 0 12pt;">${paragraphs}</div>`;
+  private wrapDynamicHeaderHtml(html: string): string {
+    if (!html.trim()) return "";
+    return `<div data-hwe-dynamic-header="true" contenteditable="false">${html}</div>`;
   }
 
   private async loadContent(): Promise<void> {
@@ -1539,11 +1509,10 @@ interface IInputs {
   styleEntitySetName: ComponentFramework.PropertyTypes.StringProperty;
   styleClassField: ComponentFramework.PropertyTypes.StringProperty;
   styleCssField: ComponentFramework.PropertyTypes.StringProperty;
+  styleStateField: ComponentFramework.PropertyTypes.StringProperty;
+  styleDropdownField: ComponentFramework.PropertyTypes.StringProperty;
   styleTypeField: ComponentFramework.PropertyTypes.StringProperty;
   styleTypeStyleValue: ComponentFramework.PropertyTypes.StringProperty;
   styleTypeFontValue: ComponentFramework.PropertyTypes.StringProperty;
-  dynamicHeaderEntitySetName: ComponentFramework.PropertyTypes.StringProperty;
-  dynamicHeaderTitleField: ComponentFramework.PropertyTypes.StringProperty;
-  dynamicHeaderSubtitleField: ComponentFramework.PropertyTypes.StringProperty;
-  dynamicHeaderSubtitle2Field: ComponentFramework.PropertyTypes.StringProperty;
+  dynamicHeaderEndpointUrl: ComponentFramework.PropertyTypes.StringProperty;
 }
