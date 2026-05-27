@@ -131,7 +131,6 @@ export class EditorComponent {
   private readonly entityId: string;
   private readonly fieldName: string;
   private readonly styleTableConfig: ParagraphStyleTableConfig;
-  private readonly dynamicHeaderEndpointUrl: string | undefined;
   private dynamicHeaderHtml = "";
   private currentFileName = "content.html";
 
@@ -189,10 +188,6 @@ export class EditorComponent {
         this.getParameterValue(runtime.parameters, "styleTypeFontValue") ??
         DEFAULT_STYLE_TABLE_CONFIG.fontTypeValue,
     };
-    this.dynamicHeaderEndpointUrl = this.getParameterValue(
-      runtime.parameters,
-      "dynamicHeaderEndpointUrl"
-    );
   }
 
   async init(): Promise<void> {
@@ -411,7 +406,6 @@ export class EditorComponent {
     try {
       const html = await fetchDynamicDocumentHeaderHtml(
         this.baseUrl,
-        this.dynamicHeaderEndpointUrl ?? "",
         this.entityId
       );
       this.dynamicHeaderHtml = this.wrapDynamicHeaderHtml(html);
@@ -1514,5 +1508,4 @@ interface IInputs {
   styleTypeField: ComponentFramework.PropertyTypes.StringProperty;
   styleTypeStyleValue: ComponentFramework.PropertyTypes.StringProperty;
   styleTypeFontValue: ComponentFramework.PropertyTypes.StringProperty;
-  dynamicHeaderEndpointUrl: ComponentFramework.PropertyTypes.StringProperty;
 }

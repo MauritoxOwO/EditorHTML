@@ -82,14 +82,6 @@
               required="false"
     />
 
-    <property name="dynamicHeaderEndpointUrl"
-              display-name-key="Dynamic Header Endpoint"
-              description-key="Optional POST endpoint that receives guidVersionAnuncio and returns HTML to render at the start of the document"
-              of-type="SingleLine.Text"
-              usage="input"
-              required="false"
-    />
-
     <resources>
       <code path="index.ts" order="1"/>
       <css path="css/editor.css" order="1"/>
