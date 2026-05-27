@@ -21,6 +21,8 @@ export interface ParagraphStyleTableConfig {
   cssField: string;
   stateField?: string;
   dropdownField?: string;
+  documentTypeField?: string;
+  documentTypeDropdownValue?: string;
   typeField?: string;
   styleTypeValue?: string;
   fontTypeValue?: string;
@@ -47,6 +49,7 @@ export async function fetchParagraphStyleCatalog(
   const selectFields = [config.classField, config.cssField];
   if (config.stateField) selectFields.push(config.stateField);
   if (config.dropdownField) selectFields.push(config.dropdownField);
+  if (config.documentTypeField) selectFields.push(config.documentTypeField);
   if (config.typeField) selectFields.push(config.typeField);
 
   const select = Array.from(new Set(selectFields)).join(",");
@@ -181,8 +184,18 @@ function shouldShowInDropdown(
   row: Record<string, unknown>,
   config: ParagraphStyleTableConfig
 ): boolean {
-  if (!config.dropdownField) return true;
-  return readBoolean(row[config.dropdownField]) ?? true;
+  const visible = config.dropdownField ? readBoolean(row[config.dropdownField]) ?? true : true;
+  return visible && isDropdownDocumentType(row, config);
+}
+
+function isDropdownDocumentType(
+  row: Record<string, unknown>,
+  config: ParagraphStyleTableConfig
+): boolean {
+  if (!config.documentTypeField || !config.documentTypeDropdownValue) return true;
+  return getChoiceValues(row, config.documentTypeField).includes(
+    normalizeChoiceValue(config.documentTypeDropdownValue)
+  );
 }
 
 function readBoolean(value: unknown): boolean | null {
