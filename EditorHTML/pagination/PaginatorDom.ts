@@ -142,6 +142,7 @@ export function isSplittableContainer(
     return false;
   }
   if (isKeepTogetherGroup(element)) return false;
+  if (isGeneratedOrAtomicShell(element)) return false;
   if (isTableFlowWrapper(element)) return true;
   if (!SPLITTABLE_CONTAINER_TAGS.has(element.tagName)) return false;
 
@@ -193,6 +194,7 @@ export function shouldFlattenContainerShell(element: HTMLElement): boolean {
 
 function isGeneratedOrAtomicShell(element: HTMLElement): boolean {
   return (
+    element.getAttribute("data-hwe-dynamic-header") === "true" ||
     element.getAttribute("data-hwe-keep-together") === "true" ||
     element.classList.contains("hwe-keep-together") ||
     element.classList.contains("hwe-ocr-wrapper")
