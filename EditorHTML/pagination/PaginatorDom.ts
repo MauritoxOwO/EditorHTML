@@ -25,6 +25,7 @@ const TABLE_STRUCTURE_TAGS = new Set([
 
 const SPLITTABLE_TEXT_TAGS = new Set([
   "P",
+  "DIV",
   "LI",
   "H1",
   "H2",
@@ -143,6 +144,7 @@ export function isSplittableContainer(
   }
   if (isKeepTogetherGroup(element)) return false;
   if (isGeneratedOrAtomicShell(element)) return false;
+  if (isSplittableTextBlock(element)) return false;
   if (isTableFlowWrapper(element)) return true;
   if (!SPLITTABLE_CONTAINER_TAGS.has(element.tagName)) return false;
 
@@ -204,7 +206,16 @@ function isGeneratedOrAtomicShell(element: HTMLElement): boolean {
 export function isSplittableTextBlock(element: HTMLElement): boolean {
   if (!SPLITTABLE_TEXT_TAGS.has(element.tagName)) return false;
   if (element.querySelector("table, tr, td, th")) return false;
+  if (element.tagName === "DIV" && hasBlockChild(element)) return false;
   return (element.textContent ?? "").replace(/\u00a0/g, " ").trim().length > 0;
+}
+
+function hasBlockChild(element: HTMLElement): boolean {
+  return Array.from(element.children).some((child) => {
+    if (TABLE_STRUCTURE_TAGS.has(child.tagName)) return true;
+    if (SPLITTABLE_CONTAINER_TAGS.has(child.tagName)) return true;
+    return SPLITTABLE_TEXT_TAGS.has(child.tagName);
+  });
 }
 
 export function isAtomicElement(element: HTMLElement): boolean {

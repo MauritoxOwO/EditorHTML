@@ -520,9 +520,7 @@ export class EditorComponent {
   private withDynamicHeaderHtml(html: string): string {
     const container = document.createElement("div");
     container.innerHTML = html || "<p><br></p>";
-    container.querySelectorAll<HTMLElement>("[data-hwe-dynamic-header='true']").forEach(
-      (element) => element.remove()
-    );
+    this.removeExistingDynamicHeaders(container);
 
     if (this.dynamicHeaderHtml) {
       const header = document.createElement("div");
@@ -533,6 +531,110 @@ export class EditorComponent {
     }
 
     return container.innerHTML || "<p><br></p>";
+  }
+
+  private removeExistingDynamicHeaders(container: HTMLElement): void {
+    container.querySelectorAll<HTMLElement>("[data-hwe-dynamic-header='true']").forEach(
+      (element) => element.remove()
+    );
+
+    const headerElements = this.getDynamicHeaderElements();
+    if (headerElements.length === 0) return;
+
+    let safety = 0;
+    while (safety++ < 5 && this.removeLeadingHeaderCopy(container, headerElements)) {
+      // Keep removing stale generated headers left by older saves.
+    }
+  }
+
+  private getDynamicHeaderElements(): HTMLElement[] {
+    if (!this.dynamicHeaderHtml) return [];
+
+    const template = document.createElement("div");
+    template.innerHTML = this.dynamicHeaderHtml;
+    const wrapper = template.querySelector<HTMLElement>("[data-hwe-dynamic-header='true']");
+    const source = wrapper ?? template;
+
+    return Array.from(source.children).filter(
+      (child): child is HTMLElement => child instanceof HTMLElement
+    );
+  }
+
+  private removeLeadingHeaderCopy(
+    container: HTMLElement,
+    headerElements: HTMLElement[]
+  ): boolean {
+    const candidates = Array.from(container.children).filter(
+      (child): child is HTMLElement =>
+        child instanceof HTMLElement && child.tagName !== "STYLE"
+    );
+    if (candidates.length < headerElements.length) return false;
+
+    const leadingCandidates = candidates.slice(0, headerElements.length);
+    const matches = leadingCandidates.every((candidate, index) =>
+      this.looksLikeSameHeaderElement(candidate, headerElements[index])
+    );
+    if (!matches) return false;
+
+    leadingCandidates.forEach((candidate) => candidate.remove());
+    return true;
+  }
+
+  private looksLikeSameHeaderElement(candidate: HTMLElement, expected: HTMLElement): boolean {
+    if (candidate.tagName !== expected.tagName) return false;
+
+    const candidateClass = this.normalizeClassName(candidate.className);
+    const expectedClass = this.normalizeClassName(expected.className);
+    if (candidateClass && candidateClass === expectedClass) return true;
+
+    const candidateStyle = this.normalizeHeaderStyle(candidate.getAttribute("style"));
+    const expectedStyle = this.normalizeHeaderStyle(expected.getAttribute("style"));
+    if (candidateStyle && candidateStyle === expectedStyle) return true;
+
+    const candidateText = (candidate.textContent ?? "").replace(/\s+/g, " ").trim();
+    const expectedText = (expected.textContent ?? "").replace(/\s+/g, " ").trim();
+    if (candidateText && candidateText === expectedText) return true;
+
+    return (
+      this.hasHeaderStructuralMarker(expected) &&
+      this.getElementShape(candidate) === this.getElementShape(expected)
+    );
+  }
+
+  private normalizeClassName(value: string): string {
+    return value.split(/\s+/).filter(Boolean).sort().join(" ");
+  }
+
+  private normalizeHeaderStyle(value: string | null): string {
+    return (value ?? "")
+      .replace(/\s+/g, " ")
+      .replace(/\s*([:;])\s*/g, "$1")
+      .trim()
+      .toLowerCase();
+  }
+
+  private getElementShape(element: HTMLElement): string {
+    const children = Array.from(element.children).filter(
+      (child): child is HTMLElement => child instanceof HTMLElement
+    );
+    const self = [
+      element.tagName.toLowerCase(),
+      this.normalizeClassName(element.className),
+      this.normalizeHeaderStyle(element.getAttribute("style")),
+    ].join("|");
+
+    return children.length > 0
+      ? `${self}>${children.map((child) => this.getElementShape(child)).join(",")}`
+      : self;
+  }
+
+  private hasHeaderStructuralMarker(element: HTMLElement): boolean {
+    if (this.normalizeClassName(element.className)) return true;
+    if (this.normalizeHeaderStyle(element.getAttribute("style"))) return true;
+
+    return Array.from(element.children).some(
+      (child) => child instanceof HTMLElement && this.hasHeaderStructuralMarker(child)
+    );
   }
 
   private createPageElement(html?: string): HTMLElement {
@@ -1340,7 +1442,8 @@ export class EditorComponent {
     return this.documentSerializer.collectHtml(
       this.root,
       this.pages,
-      this.pageSetup
+      this.pageSetup,
+      this.paragraphStyleManager.cssText
     );
   }
 

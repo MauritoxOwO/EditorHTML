@@ -1,4 +1,12 @@
-const PARAGRAPH_STYLE_BLOCK_SELECTOR = "p, li, h1, h2, h3, h4, h5, h6, blockquote, pre";
+const PARAGRAPH_STYLE_BLOCK_SELECTOR = "p, div, li, h1, h2, h3, h4, h5, h6, blockquote, pre";
+const EDITOR_CONTAINER_CLASS_NAMES = new Set([
+  "hwe-page",
+  "hwe-page-inner",
+  "hwe-root",
+  "hwe-workspace",
+  "hwe-table-flow-wrapper",
+  "hwe-keep-together",
+]);
 
 export class StyleSelectionTracker {
   private lastTextSelection: Range | null = null;
@@ -23,14 +31,15 @@ export class StyleSelectionTracker {
         : range.commonAncestorContainer.parentElement;
     if (!element?.closest("[contenteditable='true']")) return;
 
+    const block = this.closestStyleBlock(element);
     this.lastTextSelection = range.cloneRange();
-    this.lastStyleBlock = element.closest<HTMLElement>(PARAGRAPH_STYLE_BLOCK_SELECTOR);
+    if (block) this.lastStyleBlock = block;
   }
 
   rememberStyleBlockFromEvent(event: Event): void {
     const root = this.rootProvider();
     const target = event.target as HTMLElement | null;
-    const block = target?.closest<HTMLElement>(PARAGRAPH_STYLE_BLOCK_SELECTOR);
+    const block = target ? this.closestStyleBlock(target) : null;
     if (block && root.contains(block)) this.lastStyleBlock = block;
   }
 
@@ -56,7 +65,7 @@ export class StyleSelectionTracker {
     const scope = editable ?? root;
     const blocks = Array.from(
       scope.querySelectorAll<HTMLElement>(PARAGRAPH_STYLE_BLOCK_SELECTOR)
-    ).filter((block) => this.rangeOverlapsBlock(range, block));
+    ).filter((block) => this.isStyleBlock(block) && this.rangeOverlapsBlock(range, block));
 
     if (blocks.length > 0) {
       this.lastStyleBlock = blocks[0];
@@ -67,7 +76,7 @@ export class StyleSelectionTracker {
       range.startContainer.nodeType === Node.ELEMENT_NODE
         ? (range.startContainer as HTMLElement)
         : range.startContainer.parentElement;
-    const currentBlock = element?.closest<HTMLElement>(PARAGRAPH_STYLE_BLOCK_SELECTOR);
+    const currentBlock = element ? this.closestStyleBlock(element) : null;
     if (currentBlock && root.contains(currentBlock)) {
       this.lastStyleBlock = currentBlock;
       return [currentBlock];
@@ -89,5 +98,34 @@ export class StyleSelectionTracker {
     const endsAfterBlockStarts =
       range.compareBoundaryPoints(Range.END_TO_START, blockRange) > 0;
     return startsBeforeBlockEnds && endsAfterBlockStarts;
+  }
+
+  private closestStyleBlock(element: HTMLElement): HTMLElement | null {
+    const root = this.rootProvider();
+    let current: HTMLElement | null = element;
+
+    while (current && root.contains(current)) {
+      if (current.matches(PARAGRAPH_STYLE_BLOCK_SELECTOR) && this.isStyleBlock(current)) {
+        return current;
+      }
+      current = current.parentElement;
+    }
+
+    return null;
+  }
+
+  private isStyleBlock(block: HTMLElement): boolean {
+    if (block.closest("[data-hwe-dynamic-header='true']")) return false;
+    if (Array.from(block.classList).some((className) => EDITOR_CONTAINER_CLASS_NAMES.has(className))) {
+      return false;
+    }
+
+    if (block.tagName !== "DIV") return true;
+    if (block.hasAttribute("contenteditable")) return false;
+    if (Array.from(block.attributes).some((attr) => attr.name.startsWith("data-hwe-"))) {
+      return false;
+    }
+
+    return true;
   }
 }
