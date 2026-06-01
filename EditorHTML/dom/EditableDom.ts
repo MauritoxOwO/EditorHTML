@@ -83,6 +83,7 @@ export function isSplittableContainer(element: HTMLElement): boolean {
   if (element.classList.contains("hwe-page") || element.classList.contains("hwe-page-inner")) {
     return false;
   }
+  if (isTextBlockDiv(element)) return false;
 
   return getMeaningfulChildren(element).length > 0;
 }
@@ -106,4 +107,15 @@ export function unwrapElement(element: HTMLElement): void {
     parent.insertBefore(element.firstChild, element);
   }
   parent.removeChild(element);
+}
+
+function isTextBlockDiv(element: HTMLElement): boolean {
+  if (element.tagName !== "DIV") return false;
+  if (element.querySelector("table, tr, td, th")) return false;
+  if ((element.textContent ?? "").replace(/\u00a0/g, " ").trim().length === 0) return false;
+
+  return !Array.from(element.children).some((child) => {
+    if (SPLITTABLE_CONTAINER_TAGS.has(child.tagName)) return true;
+    return BLANK_BLOCK_TAGS.has(child.tagName);
+  });
 }

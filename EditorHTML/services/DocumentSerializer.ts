@@ -23,6 +23,7 @@ export interface NormalizedDocument {
 
 const LARGE_DATA_IMAGE_URL_THRESHOLD = 80_000;
 const LARGE_DATA_IMAGE_PIXEL_THRESHOLD = 1_500_000;
+const MANAGED_DOCUMENT_STYLE_ATTR = "data-hwe-managed-document-style";
 const LARGE_IMAGE_PLACEHOLDER_SRC =
   "data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%221850%22%20height%3D%222420%22%20viewBox%3D%220%200%201850%202420%22%3E%3Crect%20width%3D%221850%22%20height%3D%222420%22%20fill%3D%22%23f7f7f7%22%2F%3E%3Crect%20x%3D%2250%22%20y%3D%2250%22%20width%3D%221750%22%20height%3D%222320%22%20fill%3D%22none%22%20stroke%3D%22%23bdbdbd%22%20stroke-width%3D%226%22%20stroke-dasharray%3D%2224%2024%22%2F%3E%3Ctext%20x%3D%22925%22%20y%3D%221210%22%20text-anchor%3D%22middle%22%20font-family%3D%22Arial%2C%20sans-serif%22%20font-size%3D%2272%22%20fill%3D%22%23666%22%3EImagen%20grande%20en%20pausa%3C%2Ftext%3E%3C%2Fsvg%3E";
 
@@ -45,6 +46,7 @@ export class DocumentSerializer {
     if (savedDocument) {
       temp.innerHTML = savedDocument.innerHTML;
       this.removeRuntimeOnlyState(temp);
+      this.removeManagedDocumentStyles(temp);
       const result = {
         html: temp.innerHTML || "<p><br></p>",
         pageSetup,
@@ -102,15 +104,17 @@ export class DocumentSerializer {
   collectHtml(
     root: HTMLElement,
     pages: HTMLElement[],
-    pageSetup: PageSetup
+    pageSetup: PageSetup,
+    additionalCss = ""
   ): string {
     CaretManager.removeMarkers(root);
+    const managedStyle = this.makeManagedDocumentStyleHtml(additionalCss);
 
     const html = pages
       .map((page, index) => {
         const inner = page.querySelector(".hwe-page-inner") as HTMLElement | null;
         const content = this.prepareContentForSave(inner ?? page);
-        if (index === 0) return content;
+        if (index === 0) return `${managedStyle}${content}`;
         return `<div data-hwe-page-break="before" style="page-break-before:always">${content}</div>`;
       })
       .join("\n");
@@ -235,6 +239,7 @@ ${content}
     const clone = element.cloneNode(true) as HTMLElement;
     unwrapGeneratedKeepTogetherGroups(clone);
     this.removeRuntimeOnlyState(clone);
+    this.removeManagedDocumentStyles(clone);
     this.removeDynamicDocumentHeader(clone);
     this.restoreDetachedLargeImages(clone);
     return clone.innerHTML;
@@ -244,6 +249,7 @@ ${content}
     const clone = element.cloneNode(true) as HTMLElement;
     unwrapGeneratedKeepTogetherGroups(clone);
     this.removeRuntimeOnlyState(clone);
+    this.removeManagedDocumentStyles(clone);
     this.removeDynamicDocumentHeader(clone);
     return clone.innerHTML;
   }
@@ -403,6 +409,19 @@ ${content}
     root.querySelectorAll<HTMLElement>("[data-hwe-dynamic-header='true']").forEach((element) => {
       element.remove();
     });
+  }
+
+  private removeManagedDocumentStyles(root: HTMLElement): void {
+    root.querySelectorAll<HTMLStyleElement>(`style[${MANAGED_DOCUMENT_STYLE_ATTR}='true']`).forEach(
+      (element) => element.remove()
+    );
+  }
+
+  private makeManagedDocumentStyleHtml(additionalCss: string): string {
+    const css = this.sanitizeStyleText(additionalCss.trim());
+    if (!css) return "";
+
+    return `<style ${MANAGED_DOCUMENT_STYLE_ATTR}="true">\n${css}\n</style>\n`;
   }
 
   private hasFormattingShell(element: HTMLElement): boolean {
