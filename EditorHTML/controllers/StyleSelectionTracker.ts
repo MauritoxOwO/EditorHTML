@@ -115,7 +115,7 @@ export class StyleSelectionTracker {
   }
 
   private isStyleBlock(block: HTMLElement): boolean {
-    if (block.closest("[data-hwe-dynamic-header='true']")) return false;
+    if (block.closest("[data-hwe-api-header='true'], [data-hwe-dynamic-header='true']")) return false;
     if (Array.from(block.classList).some((className) => EDITOR_CONTAINER_CLASS_NAMES.has(className))) {
       return false;
     }
