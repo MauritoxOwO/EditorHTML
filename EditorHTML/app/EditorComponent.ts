@@ -26,6 +26,7 @@ import { PasteController } from "../controllers/PasteController";
 import { AssetLayoutManager } from "../services/AssetLayoutManager";
 import { EditorDiagnosticsController } from "../controllers/EditorDiagnosticsController";
 import { EditorLayoutService } from "../services/EditorLayoutService";
+import { PrintHtmlExportService } from "../services/PrintHtmlExportService";
 import { EditorHistoryController } from "../controllers/EditorHistoryController";
 import { ImageResizeController } from "../controllers/ImageResizeController";
 import { PageBackspaceController } from "../controllers/PageBackspaceController";
@@ -90,6 +91,7 @@ export interface EditorComponentOptions {
   initialHtml?: string;
   loadHtml?: () => Promise<string> | string;
   saveHtml?: (html: string) => Promise<void> | void;
+  savePrintHtml?: (html: string) => Promise<void> | void;
   paragraphStyles?: ParagraphStyleDefinition[];
   paragraphFonts?: ParagraphFontFaceDefinition[];
   paragraphStyleCatalog?: ParagraphStyleCatalog;
@@ -112,6 +114,7 @@ export class EditorComponent {
   private toolbar!: Toolbar;
   private readonly blankLineController = new BlankLineController();
   private readonly documentSerializer = new DocumentSerializer();
+  private readonly printHtmlExportService = new PrintHtmlExportService(this.documentSerializer);
   private readonly assetLayoutManager = new AssetLayoutManager();
   private readonly pasteController = new PasteController();
   private readonly layoutService = new EditorLayoutService();
@@ -138,6 +141,7 @@ export class EditorComponent {
   private readonly entityName: string;
   private readonly entityId: string;
   private readonly fieldName: string;
+  private readonly printHtmlFieldName: string | undefined;
   private readonly styleTableConfig: ParagraphStyleTableConfig;
   private dynamicHeaderHtml = "";
   private dynamicHeaderLoaded = false;
@@ -171,6 +175,7 @@ export class EditorComponent {
     );
     this.entityName = "mcdev_htmldevtests";
     this.fieldName = "mcdev_htmlarchivooriginal";
+    this.printHtmlFieldName = this.getParameterValue(runtime.parameters, "printHtmlFieldName");
     this.styleTableConfig = {
       entitySetName:
         this.getParameterValue(runtime.parameters, "styleEntitySetName") ??
@@ -1321,21 +1326,23 @@ export class EditorComponent {
     const saveButton = this.toolbar.getSaveButton();
     saveButton.disabled = true;
     this.setStatus("Guardando...", "saving");
+    const wasSourceView = this.activeView === "source";
 
     try {
       if (this.activeView === "source" && this.sourceDirty) {
-        await this.renderAndPaginate(this.sourceEditor.value || "<p><br></p>");
-        this.sourceEditor.value = this.collectHtml();
-        this.sourceDirty = false;
-        this.activeView = "source";
+        this.activeView = "visual";
         this.updateViewTabs();
+        await this.renderAndPaginate(this.sourceEditor.value || "<p><br></p>");
+        this.sourceDirty = false;
       }
 
       await this.refreshDynamicHeaderBeforeSave();
 
       const html = this.collectHtml();
+      const printHtml = this.collectPrintHtml();
       if (this.options.saveHtml) {
         await this.options.saveHtml(html);
+        await this.savePrintHtml(printHtml);
       } else {
         await saveHtmlToFileField(
           this.baseUrl,
@@ -1345,6 +1352,14 @@ export class EditorComponent {
           html,
           this.currentFileName
         );
+        await this.savePrintHtml(printHtml);
+      }
+
+      if (wasSourceView) {
+        this.sourceEditor.value = html;
+        this.sourceDirty = false;
+        this.activeView = "source";
+        this.updateViewTabs();
       }
 
       this.isDirty = false;
@@ -1370,12 +1385,42 @@ export class EditorComponent {
     const currentHtml = this.collectHtml();
     this.dynamicHeaderHtml = nextHeaderHtml;
     this.dynamicHeaderLoaded = true;
+    const wasSourceView = this.activeView === "source";
+    if (wasSourceView) {
+      this.activeView = "visual";
+      this.updateViewTabs();
+    }
     await this.renderAndPaginate(currentHtml || "<p><br></p>");
 
-    if (this.activeView === "source") {
+    if (wasSourceView) {
       this.sourceEditor.value = this.collectHtml();
       this.sourceDirty = false;
+      this.activeView = "source";
+      this.updateViewTabs();
     }
+  }
+
+  private async savePrintHtml(printHtml: string): Promise<void> {
+    if (this.options.savePrintHtml) {
+      await this.options.savePrintHtml(printHtml);
+      return;
+    }
+
+    if (!this.printHtmlFieldName) return;
+
+    await saveHtmlToFileField(
+      this.baseUrl,
+      this.entityName,
+      this.entityId,
+      this.printHtmlFieldName,
+      printHtml,
+      this.getPrintHtmlFileName()
+    );
+  }
+
+  private getPrintHtmlFileName(): string {
+    const baseName = this.currentFileName.replace(/\.(?:html?|xhtml)$/i, "") || "content";
+    return `${baseName}.print.html`;
   }
 
   private async exportPdf(): Promise<void> {
@@ -1384,12 +1429,7 @@ export class EditorComponent {
       return;
     }
 
-    const html = this.documentSerializer.collectPdfHtml(
-      this.root,
-      this.pages,
-      this.pageSetup,
-      this.paragraphStyleManager.cssText
-    );
+    const html = this.collectPrintHtml();
     const frame = document.createElement("iframe");
     frame.title = "Exportar PDF";
     frame.style.cssText = "position:fixed;right:0;bottom:0;width:0;height:0;border:0;";
@@ -1496,6 +1536,15 @@ export class EditorComponent {
       this.pageSetup,
       this.paragraphStyleManager.cssText
     );
+  }
+
+  private collectPrintHtml(): string {
+    return this.printHtmlExportService.createPrintHtml({
+      root: this.root,
+      pages: this.pages,
+      pageSetup: this.pageSetup,
+      additionalCss: this.paragraphStyleManager.cssText,
+    });
   }
 
   private updatePageCount(): void {
@@ -1662,6 +1711,7 @@ export class EditorComponent {
 
 interface IInputs {
   htmlContent: ComponentFramework.PropertyTypes.StringProperty;
+  printHtmlFieldName: ComponentFramework.PropertyTypes.StringProperty;
   styleEntitySetName: ComponentFramework.PropertyTypes.StringProperty;
   styleClassField: ComponentFramework.PropertyTypes.StringProperty;
   styleCssField: ComponentFramework.PropertyTypes.StringProperty;
