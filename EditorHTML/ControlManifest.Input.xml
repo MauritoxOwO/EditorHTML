@@ -2,9 +2,9 @@
 <manifest>
   <control namespace="EditorHTMLPBOC" 
           constructor="EditorHTML2"
-          version="0.0.8"
-          display-name-key="EditorHTMLv0.8"
-          description-key="EditorHTML v0.8 for testing"
+          version="0.0.9"
+          display-name-key="EditorHTMLv0.9"
+          description-key="EditorHTML v0.9 for testing"
           control-type="standard"
   >
 
@@ -18,6 +18,15 @@
               usage="bound" 
               required="false" 
     />
+
+    <property name="printHtmlFieldName"
+              display-name-key="Print HTML File Field"
+              description-key="Dataverse file column schema name used to store HTML prepared for external PDF or API generation"
+              of-type="SingleLine.Text"
+              usage="input"
+              required="false"
+    />
+
     <property name="styleEntitySetName"
               display-name-key="Paragraph Style Table"
               description-key="Dataverse entity set name that stores paragraph styles"
