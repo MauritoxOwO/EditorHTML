@@ -418,10 +418,35 @@ ${content}
   }
 
   private makeManagedDocumentStyleHtml(additionalCss: string): string {
-    const css = this.sanitizeStyleText(additionalCss.trim());
+    const css = this.expandManagedDocumentCss(this.sanitizeStyleText(additionalCss.trim()));
     if (!css) return "";
 
     return `<style ${MANAGED_DOCUMENT_STYLE_ATTR}="true">\n${css}\n</style>\n`;
+  }
+
+  private expandManagedDocumentCss(css: string): string {
+    return css.replace(
+      /(^|})\s*([^{}@][^{}]*\.hwe-page-inner[^{}]*)\{/g,
+      (_match, prefix: string, selectorText: string) => {
+        const selectors = selectorText
+          .split(",")
+          .map((selector) => selector.trim())
+          .filter(Boolean);
+        const expandedSelectors = [...selectors];
+
+        selectors.forEach((selector) => {
+          const documentSelector = selector.replace(
+            /(^|\s)\.hwe-page-inner(?=\s|$|[>+~])/g,
+            '$1[data-hwe-document="true"]'
+          );
+          if (documentSelector !== selector && !expandedSelectors.includes(documentSelector)) {
+            expandedSelectors.push(documentSelector);
+          }
+        });
+
+        return `${prefix}\n${expandedSelectors.join(", ")} {`;
+      }
+    );
   }
 
   private hasFormattingShell(element: HTMLElement): boolean {
