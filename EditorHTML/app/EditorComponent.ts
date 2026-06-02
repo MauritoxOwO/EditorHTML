@@ -58,6 +58,12 @@ const DEFAULT_STYLE_TABLE_CONFIG: ParagraphStyleTableConfig = {
   documentTypeDropdownValue: "Anuncio",
 };
 const DEFAULT_MODEL_DRIVEN_EDITOR_HEIGHT_PX = 900;
+const API_HEADER_ATTR = "data-hwe-api-header";
+const API_HEADER_SOURCE_ATTR = "data-hwe-api-header-source";
+const API_HEADER_SOURCE = "ays_GenerarCabeceraAnuncio";
+const API_HEADER_SELECTOR = `[${API_HEADER_ATTR}='true']`;
+const LEGACY_DYNAMIC_HEADER_SELECTOR = "[data-hwe-dynamic-header='true']";
+const MANAGED_HEADER_SELECTOR = `${API_HEADER_SELECTOR}, ${LEGACY_DYNAMIC_HEADER_SELECTOR}`;
 const LOCAL_PARAGRAPH_STYLES: ParagraphStyleDefinition[] = [
   {
     label: "Texto general",
@@ -134,6 +140,7 @@ export class EditorComponent {
   private readonly fieldName: string;
   private readonly styleTableConfig: ParagraphStyleTableConfig;
   private dynamicHeaderHtml = "";
+  private dynamicHeaderLoaded = false;
   private currentFileName = "content.html";
 
   private rebalanceFrame: number | undefined;
@@ -408,18 +415,17 @@ export class EditorComponent {
   private async loadDynamicHeader(): Promise<void> {
     if (!this.shouldLoadDynamicHeader()) {
       this.dynamicHeaderHtml = "";
+      this.dynamicHeaderLoaded = false;
       return;
     }
 
     try {
-      const html = await fetchDynamicDocumentHeaderHtml(
-        this.baseUrl,
-        this.entityId
-      );
-      this.dynamicHeaderHtml = this.wrapDynamicHeaderHtml(html);
+      this.dynamicHeaderHtml = await this.fetchWrappedDynamicHeaderHtml();
+      this.dynamicHeaderLoaded = true;
     } catch (error) {
       console.warn("[HtmlWordEditor] dynamic header fallback:", error);
       this.dynamicHeaderHtml = "";
+      this.dynamicHeaderLoaded = false;
     }
   }
 
@@ -429,7 +435,15 @@ export class EditorComponent {
 
   private wrapDynamicHeaderHtml(html: string): string {
     if (!html.trim()) return "";
-    return `<div data-hwe-dynamic-header="true" contenteditable="false">${html}</div>`;
+    return `<div ${API_HEADER_ATTR}="true" ${API_HEADER_SOURCE_ATTR}="${API_HEADER_SOURCE}" contenteditable="false">${html}</div>`;
+  }
+
+  private async fetchWrappedDynamicHeaderHtml(): Promise<string> {
+    const html = await fetchDynamicDocumentHeaderHtml(
+      this.baseUrl,
+      this.entityId
+    );
+    return this.wrapDynamicHeaderHtml(html);
   }
 
   private async loadContent(): Promise<void> {
@@ -520,9 +534,14 @@ export class EditorComponent {
   private withDynamicHeaderHtml(html: string): string {
     const container = document.createElement("div");
     container.innerHTML = html || "<p><br></p>";
-    this.removeExistingDynamicHeaders(container);
 
-    if (this.dynamicHeaderHtml) {
+    if (this.dynamicHeaderLoaded) {
+      this.removeExistingDynamicHeaders(container);
+    } else {
+      this.promoteLegacyDynamicHeaders(container);
+    }
+
+    if (this.dynamicHeaderLoaded && this.dynamicHeaderHtml) {
       const header = document.createElement("div");
       header.innerHTML = this.dynamicHeaderHtml;
       Array.from(header.childNodes).forEach((node) => {
@@ -534,7 +553,7 @@ export class EditorComponent {
   }
 
   private removeExistingDynamicHeaders(container: HTMLElement): void {
-    container.querySelectorAll<HTMLElement>("[data-hwe-dynamic-header='true']").forEach(
+    container.querySelectorAll<HTMLElement>(MANAGED_HEADER_SELECTOR).forEach(
       (element) => element.remove()
     );
 
@@ -552,12 +571,21 @@ export class EditorComponent {
 
     const template = document.createElement("div");
     template.innerHTML = this.dynamicHeaderHtml;
-    const wrapper = template.querySelector<HTMLElement>("[data-hwe-dynamic-header='true']");
+    const wrapper = template.querySelector<HTMLElement>(MANAGED_HEADER_SELECTOR);
     const source = wrapper ?? template;
 
     return Array.from(source.children).filter(
       (child): child is HTMLElement => child instanceof HTMLElement
     );
+  }
+
+  private promoteLegacyDynamicHeaders(container: HTMLElement): void {
+    container.querySelectorAll<HTMLElement>(LEGACY_DYNAMIC_HEADER_SELECTOR).forEach((element) => {
+      element.removeAttribute("data-hwe-dynamic-header");
+      element.setAttribute(API_HEADER_ATTR, "true");
+      element.setAttribute(API_HEADER_SOURCE_ATTR, API_HEADER_SOURCE);
+      element.setAttribute("contenteditable", "false");
+    });
   }
 
   private removeLeadingHeaderCopy(
@@ -1303,6 +1331,8 @@ export class EditorComponent {
         this.updateViewTabs();
       }
 
+      await this.refreshDynamicHeaderBeforeSave();
+
       const html = this.collectHtml();
       if (this.options.saveHtml) {
         await this.options.saveHtml(html);
@@ -1324,6 +1354,27 @@ export class EditorComponent {
       this.setStatus(`Error al guardar: ${(err as Error).message}`, "error");
     } finally {
       saveButton.disabled = false;
+    }
+  }
+
+  private async refreshDynamicHeaderBeforeSave(): Promise<void> {
+    if (!this.shouldLoadDynamicHeader()) return;
+
+    const nextHeaderHtml = await this.fetchWrappedDynamicHeaderHtml();
+    const alreadyCurrent =
+      this.dynamicHeaderLoaded &&
+      this.dynamicHeaderHtml === nextHeaderHtml &&
+      this.pages.some((page) => page.querySelector(API_HEADER_SELECTOR));
+    if (alreadyCurrent) return;
+
+    const currentHtml = this.collectHtml();
+    this.dynamicHeaderHtml = nextHeaderHtml;
+    this.dynamicHeaderLoaded = true;
+    await this.renderAndPaginate(currentHtml || "<p><br></p>");
+
+    if (this.activeView === "source") {
+      this.sourceEditor.value = this.collectHtml();
+      this.sourceDirty = false;
     }
   }
 

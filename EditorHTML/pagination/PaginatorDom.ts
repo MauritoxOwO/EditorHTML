@@ -196,6 +196,7 @@ export function shouldFlattenContainerShell(element: HTMLElement): boolean {
 
 function isGeneratedOrAtomicShell(element: HTMLElement): boolean {
   return (
+    element.getAttribute("data-hwe-api-header") === "true" ||
     element.getAttribute("data-hwe-dynamic-header") === "true" ||
     element.getAttribute("data-hwe-keep-together") === "true" ||
     element.classList.contains("hwe-keep-together") ||
