@@ -619,6 +619,14 @@ body {
   margin-left: auto !important;
   margin-right: auto !important;
 }
+.hwe-page [data-hwe-api-header="true"],
+.hwe-page [data-hwe-dynamic-header="true"] {
+  display: block;
+  width: 140mm;
+  max-width: 100%;
+  margin-left: auto !important;
+  margin-right: auto !important;
+}
 .hwe-page .hwe-image-flow-block {
   display: block;
   width: 100%;
