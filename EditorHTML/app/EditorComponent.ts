@@ -36,6 +36,7 @@ import { TableDomIntegrityController } from "../controllers/TableDomIntegrityCon
 import { TableColumnResizeController } from "../controllers/TableColumnResizeController";
 import { TableCommandController } from "../controllers/TableCommandController";
 import { EditorView, EditorViewController } from "../ui/EditorViewController";
+import { RuntimePageHeaderRenderer } from "../ui/RuntimePageHeaderRenderer";
 import {
   hweDebugLog,
   hweDebugStart,
@@ -120,6 +121,7 @@ export class EditorComponent {
   private readonly layoutService = new EditorLayoutService();
   private readonly historyController = new EditorHistoryController(10);
   private readonly tableDomIntegrityController = new TableDomIntegrityController();
+  private readonly runtimePageHeaderRenderer = new RuntimePageHeaderRenderer();
   private imageResizeController!: ImageResizeController;
   private readonly pageBackspaceController = new PageBackspaceController();
   private diagnosticsController!: EditorDiagnosticsController;
@@ -750,6 +752,7 @@ export class EditorComponent {
       this.toolbar.updateActiveStates();
     });
 
+    this.runtimePageHeaderRenderer.ensureHeader(page);
     page.appendChild(inner);
     return page;
   }
@@ -933,6 +936,7 @@ export class EditorComponent {
     let previousPage: HTMLElement | null = null;
 
     this.pages.forEach((page, index) => {
+      this.runtimePageHeaderRenderer.ensureHeader(page);
       if (index === 0) {
         if (this.workspace.firstElementChild !== page) {
           this.workspace.insertBefore(page, this.workspace.firstChild);
