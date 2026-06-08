@@ -218,10 +218,10 @@
 
 .hwe-runtime-page-header {
   position: absolute;
-  top: 2.5mm;
+  top: 6mm;
   left: var(--hwe-margin-left, 12.5mm);
   right: var(--hwe-margin-right, 12.5mm);
-  height: calc(var(--hwe-margin-top, 35mm) - 4mm);
+  height: calc(var(--hwe-margin-top, 35mm) - 10mm);
   z-index: 1;
   pointer-events: none;
   user-select: none;
@@ -230,82 +230,67 @@
   font-family: Arial, Helvetica, sans-serif;
 }
 
-.hwe-runtime-page-header .bocm-header {
+.hwe-runtime-page-header .bocm-page-header {
   width: 100%;
-  height: 100%;
-  margin: 0 auto;
+  box-sizing: border-box;
+  font-family: Arial, Helvetica, sans-serif;
+  color: #222;
+}
+
+.hwe-runtime-page-header .bocm-header-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 54px;
 }
 
 .hwe-runtime-page-header .bocm-logo {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
+  width: 185px;
+  max-height: 54px;
+  height: auto;
+  display: block;
+  flex: 0 0 auto;
+  object-fit: contain;
 }
 
-.hwe-runtime-page-header .madrid-flag {
-  width: 10mm;
-  height: 10mm;
-  margin-bottom: 1.4mm;
-  background: #ed1c24;
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
-  gap: 0.8mm;
+.hwe-runtime-page-header .bocm-logo:not([src]) {
+  display: none;
 }
 
-.hwe-runtime-page-header .stars {
-  color: #fff;
-  font-size: 6.6pt;
-  line-height: 1;
-  letter-spacing: 0.5mm;
-  text-align: center;
-}
-
-.hwe-runtime-page-header .bocm-title {
-  text-align: center;
-  font-weight: 900;
-  line-height: 1;
-}
-
-.hwe-runtime-page-header .bocm-title h1 {
-  margin: 0;
-  font-size: 13.2pt;
-  font-weight: 900;
+.hwe-runtime-page-header .bocm-header-title {
+  flex: 1;
+  min-width: 0;
+  padding-left: 30px;
+  text-align: right;
+  font-size: 19px;
+  font-weight: 700;
   letter-spacing: 0;
+  white-space: nowrap;
 }
 
-.hwe-runtime-page-header .bocm-title h2 {
-  margin: 0.4mm 0 0.7mm;
-  font-size: 8.4pt;
-  font-weight: 900;
-  letter-spacing: 0;
+.hwe-runtime-page-header .bocm-separator {
+  margin-top: 4px;
+  border-top: 1px solid #333;
 }
 
-.hwe-runtime-page-header .bocm-meta-bar {
-  height: 1.6mm;
-  margin-top: 0.6mm;
-  background: #8a8a8a;
-  border-bottom: 0.45mm solid #111;
-}
-
-.hwe-runtime-page-header .bocm-info-row {
+.hwe-runtime-page-header .bocm-header-meta {
   display: grid;
   grid-template-columns: 1fr 1fr 1fr;
-  border-bottom: 0.45mm solid #111;
-  font-size: 7pt;
-  font-weight: 700;
-  line-height: 4.5mm;
+  align-items: center;
+  border-bottom: 1px solid #333;
+  font-size: 15px;
+  line-height: 24px;
 }
 
-.hwe-runtime-page-header .bocm-info-row span:nth-child(1) {
+.hwe-runtime-page-header .bocm-meta-left {
   text-align: left;
 }
 
-.hwe-runtime-page-header .bocm-info-row span:nth-child(2) {
+.hwe-runtime-page-header .bocm-meta-center {
   text-align: center;
 }
 
-.hwe-runtime-page-header .bocm-info-row span:nth-child(3) {
+.hwe-runtime-page-header .bocm-meta-right {
   text-align: right;
 }
 

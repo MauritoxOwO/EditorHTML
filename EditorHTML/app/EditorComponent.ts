@@ -15,6 +15,10 @@ import {
 } from "../services/dataverse/styleApi";
 import { fetchDynamicDocumentHeaderHtml } from "../services/dataverse/dynamicHeaderApi";
 import {
+  fetchRuntimeHeaderLogoSrc,
+  RuntimeHeaderLogoTableConfig,
+} from "../services/dataverse/runtimeHeaderLogoApi";
+import {
   applyPageSetup,
   DEFAULT_PAGE_SETUP,
   normalizePageSetup,
@@ -66,6 +70,7 @@ const API_HEADER_SOURCE = "ays_GenerarCabeceraAnuncio";
 const API_HEADER_SELECTOR = `[${API_HEADER_ATTR}='true']`;
 const LEGACY_DYNAMIC_HEADER_SELECTOR = "[data-hwe-dynamic-header='true']";
 const MANAGED_HEADER_SELECTOR = `${API_HEADER_SELECTOR}, ${LEGACY_DYNAMIC_HEADER_SELECTOR}`;
+const DEFAULT_RUNTIME_HEADER_LOGO_NAME_VALUE = "logo-bocm.jpg";
 const LOCAL_PARAGRAPH_STYLES: ParagraphStyleDefinition[] = [
   {
     label: "Texto general",
@@ -96,6 +101,8 @@ export interface EditorComponentOptions {
   paragraphStyles?: ParagraphStyleDefinition[];
   paragraphFonts?: ParagraphFontFaceDefinition[];
   paragraphStyleCatalog?: ParagraphStyleCatalog;
+  runtimeHeaderLogoConfig?: RuntimeHeaderLogoTableConfig;
+  runtimeHeaderLogoSrc?: string;
 }
 
 export class EditorComponent {
@@ -145,6 +152,8 @@ export class EditorComponent {
   private readonly fieldName: string;
   private readonly printHtmlFieldName: string | undefined;
   private readonly styleTableConfig: ParagraphStyleTableConfig;
+  private readonly runtimeHeaderLogoConfig: RuntimeHeaderLogoTableConfig;
+  private runtimeHeaderLogoSrc = "";
   private dynamicHeaderHtml = "";
   private dynamicHeaderLoaded = false;
   private currentFileName = "content.html";
@@ -178,6 +187,27 @@ export class EditorComponent {
     this.entityName = "mcdev_htmldevtests";
     this.fieldName = "mcdev_htmlarchivooriginal";
     this.printHtmlFieldName = this.getParameterValue(runtime.parameters, "printHtmlFieldName");
+    this.runtimeHeaderLogoConfig = {
+      entitySetName:
+        options.runtimeHeaderLogoConfig?.entitySetName ??
+        this.getParameterValue(runtime.parameters, "runtimeHeaderLogoEntitySetName"),
+      imageField:
+        options.runtimeHeaderLogoConfig?.imageField ??
+        this.getParameterValue(runtime.parameters, "runtimeHeaderLogoImageField"),
+      recordId:
+        options.runtimeHeaderLogoConfig?.recordId ??
+        this.getParameterValue(runtime.parameters, "runtimeHeaderLogoRecordId"),
+      idField:
+        options.runtimeHeaderLogoConfig?.idField ??
+        this.getParameterValue(runtime.parameters, "runtimeHeaderLogoIdField"),
+      nameField:
+        options.runtimeHeaderLogoConfig?.nameField ??
+        this.getParameterValue(runtime.parameters, "runtimeHeaderLogoNameField"),
+      nameValue:
+        options.runtimeHeaderLogoConfig?.nameValue ??
+        this.getParameterValue(runtime.parameters, "runtimeHeaderLogoNameValue") ??
+        DEFAULT_RUNTIME_HEADER_LOGO_NAME_VALUE,
+    };
     this.styleTableConfig = {
       entitySetName:
         this.getParameterValue(runtime.parameters, "styleEntitySetName") ??
@@ -220,7 +250,11 @@ export class EditorComponent {
       (page: HTMLElement, afterPage: HTMLElement | null) =>
         this.attachPageForMeasurement(page, afterPage)
     );
-    await Promise.all([this.loadParagraphStyles(), this.loadDynamicHeader()]);
+    await Promise.all([
+      this.loadParagraphStyles(),
+      this.loadDynamicHeader(),
+      this.loadRuntimeHeaderLogo(),
+    ]);
     await this.loadContent();
   }
 
@@ -451,6 +485,43 @@ export class EditorComponent {
       this.entityId
     );
     return this.wrapDynamicHeaderHtml(html);
+  }
+
+  private async loadRuntimeHeaderLogo(): Promise<void> {
+    const staticLogoSrc = this.options.runtimeHeaderLogoSrc?.trim();
+    if (staticLogoSrc) {
+      this.setRuntimeHeaderLogoSrc(staticLogoSrc);
+      return;
+    }
+
+    if (!this.baseUrl || !this.runtimeHeaderLogoConfig.entitySetName) {
+      this.setRuntimeHeaderLogoSrc("");
+      return;
+    }
+
+    try {
+      const logoSrc = await fetchRuntimeHeaderLogoSrc(this.baseUrl, this.runtimeHeaderLogoConfig);
+      this.setRuntimeHeaderLogoSrc(logoSrc);
+    } catch (error) {
+      console.warn("[HtmlWordEditor] runtime BOCM logo fallback:", error);
+      this.setRuntimeHeaderLogoSrc("");
+    }
+  }
+
+  private setRuntimeHeaderLogoSrc(src: string): void {
+    if (this.runtimeHeaderLogoSrc === src) return;
+
+    this.revokeRuntimeHeaderLogoSrc();
+    this.runtimeHeaderLogoSrc = src;
+    this.runtimePageHeaderRenderer.setLogoSrc(src);
+    this.pages.forEach((page) => this.runtimePageHeaderRenderer.ensureHeader(page));
+  }
+
+  private revokeRuntimeHeaderLogoSrc(): void {
+    if (this.runtimeHeaderLogoSrc.startsWith("blob:")) {
+      URL.revokeObjectURL(this.runtimeHeaderLogoSrc);
+    }
+    this.runtimeHeaderLogoSrc = "";
   }
 
   private async loadContent(): Promise<void> {
@@ -1655,16 +1726,17 @@ export class EditorComponent {
     this.paragraphStyleManager?.destroy();
     this.toolbar?.destroy();
     this.paginator?.destroy();
+    this.revokeRuntimeHeaderLogoSrc();
     this.container.innerHTML = "";
   }
 
   private applyAllocatedSize(): void {
-    const width = this.formatAllocatedWidth(this.allocatedWidth);
-    const height = this.formatAllocatedHeight(this.allocatedHeight);
+    const width = this.formatHostWidth(this.allocatedWidth);
+    const height = this.formatHostHeight(this.allocatedHeight);
 
     this.container.style.width = width;
     this.container.style.height = height;
-    this.container.style.minHeight = "0";
+    this.container.style.minHeight = this.formatHostMinHeight(this.allocatedHeight);
     this.container.style.overflow = "hidden";
     this.container.style.display = "flex";
     this.container.style.flexDirection = "column";
@@ -1694,22 +1766,36 @@ export class EditorComponent {
     return rootRect.width > 20 && rootRect.height > 20 && workspaceRect.height > 20;
   }
 
-  private formatAllocatedWidth(value: number | undefined): string {
+  private formatHostWidth(value: number | undefined): string {
+    if (this.isPcfHost) return "100%";
+
     return typeof value === "number" && Number.isFinite(value) && value > 0
       ? `${value}px`
       : "100%";
   }
 
-  private formatAllocatedHeight(value: number | undefined): string {
-    if (typeof value === "number" && Number.isFinite(value) && value > 0) {
+  private formatHostHeight(value: number | undefined): string {
+    if (this.isPcfHost) {
+      return this.hasAllocatedSize(value) ? "100%" : `${DEFAULT_MODEL_DRIVEN_EDITOR_HEIGHT_PX}px`;
+    }
+
+    if (this.hasAllocatedSize(value)) {
       return `${value}px`;
     }
 
+    return "100%";
+  }
+
+  private formatHostMinHeight(value: number | undefined): string {
     if (this.isPcfHost) {
-      return `${DEFAULT_MODEL_DRIVEN_EDITOR_HEIGHT_PX}px`;
+      return this.hasAllocatedSize(value) ? "0" : `${DEFAULT_MODEL_DRIVEN_EDITOR_HEIGHT_PX}px`;
     }
 
-    return "100%";
+    return "0";
+  }
+
+  private hasAllocatedSize(value: number | undefined): value is number {
+    return typeof value === "number" && Number.isFinite(value) && value > 0;
   }
 }
 
@@ -1726,4 +1812,10 @@ interface IInputs {
   styleTypeField: ComponentFramework.PropertyTypes.StringProperty;
   styleTypeStyleValue: ComponentFramework.PropertyTypes.StringProperty;
   styleTypeFontValue: ComponentFramework.PropertyTypes.StringProperty;
+  runtimeHeaderLogoEntitySetName: ComponentFramework.PropertyTypes.StringProperty;
+  runtimeHeaderLogoImageField: ComponentFramework.PropertyTypes.StringProperty;
+  runtimeHeaderLogoRecordId: ComponentFramework.PropertyTypes.StringProperty;
+  runtimeHeaderLogoIdField: ComponentFramework.PropertyTypes.StringProperty;
+  runtimeHeaderLogoNameField: ComponentFramework.PropertyTypes.StringProperty;
+  runtimeHeaderLogoNameValue: ComponentFramework.PropertyTypes.StringProperty;
 }

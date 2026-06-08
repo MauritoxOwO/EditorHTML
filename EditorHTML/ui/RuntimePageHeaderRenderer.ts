@@ -1,16 +1,26 @@
 export const RUNTIME_PAGE_HEADER_ATTR = "data-hwe-runtime-page-header";
+const BOCM_LOGO_SELECTOR = ".bocm-logo";
 
 export class RuntimePageHeaderRenderer {
+  private logoSrc = "";
+
+  setLogoSrc(src: string): void {
+    this.logoSrc = src;
+  }
+
   ensureHeader(page: HTMLElement): void {
     const existing = this.getDirectHeader(page);
     if (existing) {
       if (page.firstElementChild !== existing) {
         page.insertBefore(existing, page.firstChild);
       }
+      this.updateLogo(existing);
       return;
     }
 
-    page.insertBefore(this.createHeader(), page.firstChild);
+    const header = this.createHeader();
+    this.updateLogo(header);
+    page.insertBefore(header, page.firstChild);
   }
 
   private createHeader(): HTMLElement {
@@ -21,27 +31,33 @@ export class RuntimePageHeaderRenderer {
     host.setAttribute("aria-hidden", "true");
 
     host.innerHTML = `
-      <header class="bocm-header">
-        <div class="bocm-logo">
-          <div class="madrid-flag">
-            <div class="stars">&#10022;&#10022;&#10022;&#10022;&#10022;</div>
-            <div class="stars">&#10022;&#10022;&#10022;&#10022;&#10022;</div>
-          </div>
-          <div class="bocm-title">
-            <h1>BOLET&Iacute;N OFICIAL</h1>
-            <h2>DE LA COMUNIDAD DE MADRID</h2>
-          </div>
+      <header class="bocm-page-header">
+        <div class="bocm-header-top">
+          <img class="bocm-logo" alt="BOCM" />
+          <div class="bocm-header-title">BOLET&Iacute;N OFICIAL DE LA COMUNIDAD DE MADRID</div>
         </div>
-        <div class="bocm-meta-bar"></div>
-        <div class="bocm-info-row">
-          <span>B.O.C.M. N&uacute;m. X</span>
-          <span>XXXXXX X DE XXXXX DE 2026</span>
-          <span>P&aacute;g. 1</span>
+        <div class="bocm-separator"></div>
+        <div class="bocm-header-meta">
+          <span class="bocm-meta-left">B.O.C.M. N&uacute;m. X</span>
+          <span class="bocm-meta-center">XXXXXX X DE XXXXX DE 2026</span>
+          <span class="bocm-meta-right">P&aacute;g. X</span>
         </div>
       </header>
     `;
 
     return host;
+  }
+
+  private updateLogo(header: HTMLElement): void {
+    const logo = header.querySelector<HTMLImageElement>(BOCM_LOGO_SELECTOR);
+    if (!logo) return;
+
+    if (this.logoSrc) {
+      if (logo.src !== this.logoSrc) logo.src = this.logoSrc;
+      return;
+    }
+
+    logo.removeAttribute("src");
   }
 
   private getDirectHeader(page: HTMLElement): HTMLElement | null {

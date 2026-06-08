@@ -107,6 +107,54 @@
               required="false"
     />
 
+    <property name="runtimeHeaderLogoEntitySetName"
+              display-name-key="Runtime Header Logo Table"
+              description-key="Dataverse entity set name that stores the BOCM runtime page header logo"
+              of-type="SingleLine.Text"
+              usage="input"
+              required="false"
+    />
+
+    <property name="runtimeHeaderLogoImageField"
+              display-name-key="Runtime Header Logo Image Field"
+              description-key="Image or file column schema name used to download the BOCM runtime page header logo"
+              of-type="SingleLine.Text"
+              usage="input"
+              required="false"
+    />
+
+    <property name="runtimeHeaderLogoRecordId"
+              display-name-key="Runtime Header Logo Record Id"
+              description-key="Optional Dataverse row id for the BOCM runtime page header logo"
+              of-type="SingleLine.Text"
+              usage="input"
+              required="false"
+    />
+
+    <property name="runtimeHeaderLogoIdField"
+              display-name-key="Runtime Header Logo Id Field"
+              description-key="Primary id field used to find the BOCM runtime page header logo by name when no record id is configured"
+              of-type="SingleLine.Text"
+              usage="input"
+              required="false"
+    />
+
+    <property name="runtimeHeaderLogoNameField"
+              display-name-key="Runtime Header Logo Name Field"
+              description-key="Name field used to find the BOCM runtime page header logo when no record id is configured"
+              of-type="SingleLine.Text"
+              usage="input"
+              required="false"
+    />
+
+    <property name="runtimeHeaderLogoNameValue"
+              display-name-key="Runtime Header Logo Name Value"
+              description-key="Name value used to find the BOCM runtime page header logo when no record id is configured"
+              of-type="SingleLine.Text"
+              usage="input"
+              required="false"
+    />
+
     <resources>
       <code path="index.ts" order="1"/>
       <css path="css/editor.css" order="1"/>
