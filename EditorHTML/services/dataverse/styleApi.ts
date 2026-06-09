@@ -98,7 +98,7 @@ export function mapRowsToStyleCatalog(
 
     const label = String(row[config.classField] ?? "").trim();
     const cssText = String(row[config.cssField] ?? "").trim();
-    if (!label || !cssText) return;
+    if (!label) return;
 
     const kind = getStyleCatalogRowKind(row, config, cssText);
     if (kind === "font") {
@@ -108,6 +108,8 @@ export function mapRowsToStyleCatalog(
       });
       return;
     }
+
+    if (!cssText) return;
 
     catalog.styles.push({
       label,

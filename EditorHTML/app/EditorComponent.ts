@@ -85,7 +85,7 @@ const LOCAL_PARAGRAPH_STYLES: ParagraphStyleDefinition[] = [
   -ms-hyphens: auto;
   orphans: 2;
   widows: 2;
-  font-family: 'Swis721 BT','SwissRoman', Helvetica, Arial, sans-serif;
+  font-family: "Swiss721 BT", "Swis721 BT", "SwissRoman", Helvetica, Arial, sans-serif;
   font-weight: normal;
   font-style: normal;
   font-size: 11pt;

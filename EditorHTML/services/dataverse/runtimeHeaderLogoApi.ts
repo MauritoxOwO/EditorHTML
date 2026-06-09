@@ -21,6 +21,14 @@ export async function fetchRuntimeHeaderLogoSrc(
     `${baseUrl.replace(/\/$/, "")}/api/data/v9.2/` +
     `${config.entitySetName}(${recordId})/${config.imageField}/$value?size=full`;
 
+  const blob = await fetchRuntimeHeaderLogoBlob(`${url}?size=full`).catch(() =>
+    fetchRuntimeHeaderLogoBlob(url)
+  );
+
+  return blob.size > 0 ? URL.createObjectURL(blob) : "";
+}
+
+async function fetchRuntimeHeaderLogoBlob(url: string): Promise<Blob> {
   const response = await fetch(url, {
     method: "GET",
     headers: {
@@ -31,13 +39,16 @@ export async function fetchRuntimeHeaderLogoSrc(
     credentials: "same-origin",
   });
 
+  if (response.status === 204 && url.endsWith("?size=full")) {
+    return fetchRuntimeHeaderLogoBlob(url.slice(0, -"?size=full".length));
+  }
+
   if (!response.ok) {
     const body = await response.text().catch(() => "");
     throw new Error(`No se pudo cargar el logo BOCM (HTTP ${response.status}). ${body}`);
   }
 
-  const blob = await response.blob();
-  return blob.size > 0 ? URL.createObjectURL(blob) : "";
+  return response.blob();
 }
 
 async function fetchRuntimeHeaderLogoRecordId(

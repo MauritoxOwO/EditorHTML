@@ -5,6 +5,14 @@ export interface ParagraphStyleOption {
 }
 
 export const CLEAR_PARAGRAPH_STYLE_VALUE = "__hwe-clear-paragraph-style";
+const DEFAULT_FONT_FAMILIES = [
+  "Calibri",
+  "Arial",
+  "Times New Roman",
+  "Georgia",
+  "Courier New",
+  "Verdana",
+];
 
 export interface ToolbarOptions {
   onInsertTable?: () => void;
@@ -20,6 +28,7 @@ export class Toolbar {
   private toolbar!: HTMLElement;
   private saveBtn!: HTMLButtonElement;
   private styleSelect!: HTMLSelectElement;
+  private fontSelect!: HTMLSelectElement;
 
   private commandButtons = new Map<string, HTMLButtonElement>();
   private readonly handleSelectionChange = (): void => this.updateActiveStates();
@@ -62,19 +71,12 @@ export class Toolbar {
     this.toolbar.appendChild(this.styleSelect);
     this.addSep();
 
-    const fontSelect = this.makeSelect(
+    this.fontSelect = this.makeSelect(
       "Fuente",
-      [
-        { value: "Calibri",          label: "Calibri"          },
-        { value: "Arial",            label: "Arial"            },
-        { value: "Times New Roman",  label: "Times New Roman"  },
-        { value: "Georgia",          label: "Georgia"          },
-        { value: "Courier New",      label: "Courier New"      },
-        { value: "Verdana",          label: "Verdana"          },
-      ],
+      this.makeFontFamilyOptions(DEFAULT_FONT_FAMILIES),
       (value) => document.execCommand("fontName", false, value)
     );
-    this.toolbar.appendChild(fontSelect);
+    this.toolbar.appendChild(this.fontSelect);
 
     // Tamaño de fuente
     const sizeSelect = this.makeSelect(
@@ -190,6 +192,25 @@ export class Toolbar {
     this.styleSelect.disabled = styles.length === 0;
   }
 
+  setFontFamilies(fontFamilies: string[]): void {
+    if (!this.fontSelect) return;
+
+    const previousValue = this.fontSelect.value;
+    const options = this.makeFontFamilyOptions([...DEFAULT_FONT_FAMILIES, ...fontFamilies]);
+    this.fontSelect.innerHTML = "";
+    options.forEach(({ value, label, selected }) => {
+      const option = document.createElement("option");
+      option.value = value;
+      option.textContent = label;
+      if (selected) option.selected = true;
+      this.fontSelect.appendChild(option);
+    });
+
+    if (previousValue && this.hasSelectValue(this.fontSelect, previousValue)) {
+      this.fontSelect.value = previousValue;
+    }
+  }
+
   updateActiveStates(): void {
     this.commandButtons.forEach((btn, command) => {
       try {
@@ -262,6 +283,33 @@ export class Toolbar {
     sel.addEventListener("mousedown", (e) => e.stopPropagation());
     sel.addEventListener("change", () => onChange(sel.value));
     return sel;
+  }
+
+  private makeFontFamilyOptions(
+    fontFamilies: string[]
+  ): { value: string; label: string; selected?: boolean }[] {
+    return this.dedupeFontFamilies(fontFamilies).map((fontFamily, index) => ({
+      value: fontFamily,
+      label: fontFamily,
+      selected: index === 0,
+    }));
+  }
+
+  private dedupeFontFamilies(fontFamilies: string[]): string[] {
+    const seen = new Set<string>();
+    return fontFamilies
+      .map((fontFamily) => fontFamily.trim())
+      .filter(Boolean)
+      .filter((fontFamily) => {
+        const key = fontFamily.toLowerCase();
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      });
+  }
+
+  private hasSelectValue(select: HTMLSelectElement, value: string): boolean {
+    return Array.from(select.options).some((option) => option.value === value);
   }
 
   private applyFontSize(size: string): void {
