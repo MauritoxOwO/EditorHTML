@@ -33,7 +33,7 @@ export class RuntimePageHeaderRenderer {
     host.innerHTML = `
       <header class="bocm-page-header">
         <div class="bocm-header-top">
-          <img class="bocm-logo" alt="BOCM" />
+          <img class="bocm-logo" alt="BOCM" height="68" />
           <div class="bocm-header-title">BOLET&Iacute;N OFICIAL DE LA COMUNIDAD DE MADRID</div>
         </div>
         <div class="bocm-separator"></div>

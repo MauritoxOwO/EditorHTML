@@ -19,7 +19,7 @@ export async function fetchRuntimeHeaderLogoSrc(
 
   const url =
     `${baseUrl.replace(/\/$/, "")}/api/data/v9.2/` +
-    `${config.entitySetName}(${recordId})/${config.imageField}/$value`;
+    `${config.entitySetName}(${recordId})/${config.imageField}/$value?size=full`;
 
   const response = await fetch(url, {
     method: "GET",
