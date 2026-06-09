@@ -8,19 +8,30 @@ export class RuntimePageHeaderRenderer {
     this.logoSrc = src;
   }
 
-  ensureHeader(page: HTMLElement): void {
+  ensureHeader(page: HTMLElement, index?: number): void {
     const existing = this.getDirectHeader(page);
     if (existing) {
       if (page.firstElementChild !== existing) {
         page.insertBefore(existing, page.firstChild);
       }
       this.updateLogo(existing);
+
+      if (index !== undefined) {
+        this.updatePageNumber(existing, index);
+      }
       return;
     }
 
     const header = this.createHeader();
     this.updateLogo(header);
     page.insertBefore(header, page.firstChild);
+  }
+
+  private updatePageNumber(header: HTMLElement, index: number): void {
+    const pageNumberElement = header.querySelector(".bocm-meta-right");
+    if (!pageNumberElement) return;
+
+    pageNumberElement.textContent = `P&aacute;g. ${index}`;
   }
 
   private createHeader(): HTMLElement {

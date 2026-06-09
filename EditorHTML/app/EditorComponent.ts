@@ -184,8 +184,8 @@ export class EditorComponent {
     this.entityId = this.cleanGuid(
       runtime.page?.entityId ?? runtime.mode?.contextInfo?.entityId ?? ""
     );
-    this.entityName = "mcdev_htmldevtests";
-    this.fieldName = "mcdev_htmlarchivooriginal";
+    this.entityName = "ays_versionanuncios";
+    this.fieldName = "ays_archivoanuncio";
     this.printHtmlFieldName = this.getParameterValue(runtime.parameters, "printHtmlFieldName");
     this.runtimeHeaderLogoConfig = {
       entitySetName:
@@ -1007,7 +1007,8 @@ export class EditorComponent {
     let previousPage: HTMLElement | null = null;
 
     this.pages.forEach((page, index) => {
-      this.runtimePageHeaderRenderer.ensureHeader(page);
+      console.log(index);
+      this.runtimePageHeaderRenderer.ensureHeader(page, index + 1);
       if (index === 0) {
         if (this.workspace.firstElementChild !== page) {
           this.workspace.insertBefore(page, this.workspace.firstChild);
