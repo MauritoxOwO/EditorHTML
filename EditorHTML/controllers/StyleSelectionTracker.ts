@@ -23,15 +23,14 @@ export class StyleSelectionTracker {
     if (!selection || selection.rangeCount === 0) return;
 
     const range = selection.getRangeAt(0);
-    if (!root.contains(range.commonAncestorContainer)) return;
+    if (!this.isRangeInsideRoot(range, root)) return;
+    if (!this.isEditableSelection(selection, root)) return;
 
-    const element =
-      range.commonAncestorContainer.nodeType === Node.ELEMENT_NODE
-        ? (range.commonAncestorContainer as HTMLElement)
-        : range.commonAncestorContainer.parentElement;
-    if (!element?.closest("[contenteditable='true']")) return;
-
-    const block = this.closestStyleBlock(element);
+    const block =
+      this.closestStyleBlockFromNode(range.startContainer) ??
+      this.closestStyleBlockFromNode(selection.anchorNode) ??
+      this.closestStyleBlockFromNode(selection.focusNode) ??
+      this.closestStyleBlockFromNode(range.endContainer);
     this.lastTextSelection = range.cloneRange();
     if (block) this.lastStyleBlock = block;
   }
@@ -44,25 +43,26 @@ export class StyleSelectionTracker {
   }
 
   restoreTextSelection(): void {
-    if (!this.lastTextSelection) return;
+    const root = this.rootProvider();
+    const range = this.getStoredRange(root);
+    if (!range) return;
 
     const selection = window.getSelection();
-    selection?.removeAllRanges();
-    selection?.addRange(this.lastTextSelection);
+    try {
+      selection?.removeAllRanges();
+      selection?.addRange(range);
+    } catch {
+      this.lastTextSelection = null;
+    }
   }
 
   getSelectedStyleBlocks(): HTMLElement[] {
     const root = this.rootProvider();
-    const selection = window.getSelection();
-    const range = selection && selection.rangeCount > 0 ? selection.getRangeAt(0) : null;
-    if (!range || !root.contains(range.commonAncestorContainer)) {
-      return this.lastStyleBlock && root.contains(this.lastStyleBlock)
-        ? [this.lastStyleBlock]
-        : [];
-    }
+    const range = this.getUsableRange(root);
+    if (!range) return this.getLastStyleBlock(root);
 
-    const editable = this.activeEditableProvider();
-    const scope = editable ?? root;
+    const editable = this.closestEditableFromNode(range.commonAncestorContainer, root);
+    const scope = range.collapsed ? this.activeEditableProvider() ?? editable ?? root : editable ?? root;
     const blocks = Array.from(
       scope.querySelectorAll<HTMLElement>(PARAGRAPH_STYLE_BLOCK_SELECTOR)
     ).filter((block) => this.isStyleBlock(block) && this.rangeOverlapsBlock(range, block));
@@ -82,9 +82,41 @@ export class StyleSelectionTracker {
       return [currentBlock];
     }
 
+    return this.getLastStyleBlock(root);
+  }
+
+  private getUsableRange(root: HTMLElement): Range | null {
+    const selection = window.getSelection();
+    const activeRange =
+      selection && selection.rangeCount > 0 ? selection.getRangeAt(0) : null;
+    const storedRange = this.getStoredRange(root);
+
+    if (!activeRange || !this.isRangeInsideRoot(activeRange, root)) return storedRange;
+    if (activeRange.collapsed && storedRange && !storedRange.collapsed) return storedRange;
+
+    return activeRange;
+  }
+
+  private getStoredRange(root: HTMLElement): Range | null {
+    if (!this.lastTextSelection) return null;
+    return this.isRangeInsideRoot(this.lastTextSelection, root) ? this.lastTextSelection : null;
+  }
+
+  private getLastStyleBlock(root: HTMLElement): HTMLElement[] {
     return this.lastStyleBlock && root.contains(this.lastStyleBlock)
       ? [this.lastStyleBlock]
       : [];
+  }
+
+  private isRangeInsideRoot(range: Range, root: HTMLElement): boolean {
+    return root.contains(range.commonAncestorContainer);
+  }
+
+  private isEditableSelection(selection: Selection, root: HTMLElement): boolean {
+    return Boolean(
+      this.closestEditableFromNode(selection.anchorNode, root) ||
+        this.closestEditableFromNode(selection.focusNode, root)
+    );
   }
 
   private rangeOverlapsBlock(range: Range, block: HTMLElement): boolean {
@@ -112,6 +144,21 @@ export class StyleSelectionTracker {
     }
 
     return null;
+  }
+
+  private closestStyleBlockFromNode(node: Node | null): HTMLElement | null {
+    if (!node) return null;
+    const element =
+      node.nodeType === Node.ELEMENT_NODE ? (node as HTMLElement) : node.parentElement;
+    return element ? this.closestStyleBlock(element) : null;
+  }
+
+  private closestEditableFromNode(node: Node | null, root: HTMLElement): HTMLElement | null {
+    if (!node) return null;
+    const element =
+      node.nodeType === Node.ELEMENT_NODE ? (node as HTMLElement) : node.parentElement;
+    const editable = element?.closest<HTMLElement>("[contenteditable='true']") ?? null;
+    return editable && root.contains(editable) ? editable : null;
   }
 
   private isStyleBlock(block: HTMLElement): boolean {

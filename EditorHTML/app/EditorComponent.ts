@@ -1291,19 +1291,25 @@ export class EditorComponent {
     });
 
     this.styleSelectionTracker.rememberTextSelection();
-    this.markEditedAfterStyleChange(blocks[0]);
+    this.markEditedAfterStyleChange(blocks);
     this.recordHistorySnapshotNow();
   }
 
-  private markEditedAfterStyleChange(element: HTMLElement): void {
-    const page = element.closest<HTMLElement>(".hwe-page");
-    if (!page) return;
+  private markEditedAfterStyleChange(blocks: HTMLElement[]): void {
+    const affectedPageSet = new Set(
+      blocks
+        .map((block) => block.closest<HTMLElement>(".hwe-page"))
+        .filter((page): page is HTMLElement => Boolean(page))
+    );
+    const affectedPages = this.pages.filter((page) => affectedPageSet.has(page));
+    if (affectedPages.length === 0) return;
 
     this.isDirty = true;
     this.toolbar.updateActiveStates();
 
-    if (this.layoutService.pageOverflows(page)) {
-      this.scheduleRebalance(page, false, {
+    const firstOverflowPage = affectedPages.find((page) => this.layoutService.pageOverflows(page));
+    if (firstOverflowPage) {
+      this.scheduleRebalance(firstOverflowPage, false, {
         includePreviousPage: false,
         compactPages: false,
       });
