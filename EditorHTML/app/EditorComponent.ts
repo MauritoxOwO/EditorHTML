@@ -3,6 +3,7 @@ import { CaretManager } from "../pagination/CaretManager";
 import { MANUAL_PAGE_BREAK_ATTR } from "../pagination/PaginatorDom";
 import {
   CLEAR_PARAGRAPH_STYLE_VALUE,
+  ParagraphTextCase,
   Toolbar,
 } from "../ui/Toolbar";
 import { fetchHtmlFromFileField, saveHtmlToFileField } from "../services/dataverse/fileApi";
@@ -39,7 +40,7 @@ import { StyleSelectionTracker } from "../controllers/StyleSelectionTracker";
 import { TableDomIntegrityController } from "../controllers/TableDomIntegrityController";
 import { TableColumnResizeController } from "../controllers/TableColumnResizeController";
 import { TableCommandController } from "../controllers/TableCommandController";
-import { EditorView, EditorViewController } from "../ui/EditorViewController";
+import { EditorViewController } from "../ui/EditorViewController";
 import { RuntimePageHeaderRenderer } from "../ui/RuntimePageHeaderRenderer";
 import {
   hweDebugLog,
@@ -113,7 +114,6 @@ export class EditorComponent {
   private root!: HTMLElement;
   private editorHeader!: HTMLElement;
   private workspace!: HTMLElement;
-  private sourceEditor!: HTMLTextAreaElement;
   private statusMsg!: HTMLElement;
   private pageCountEl!: HTMLElement;
 
@@ -126,7 +126,15 @@ export class EditorComponent {
   private readonly assetLayoutManager = new AssetLayoutManager();
   private readonly pasteController = new PasteController();
   private readonly layoutService = new EditorLayoutService();
-  private readonly historyController = new EditorHistoryController(10);
+  private readonly historyController = new EditorHistoryController({
+    maxStates: 10,
+    collectSnapshot: () => this.collectHistoryHtml(),
+    restoreSnapshot: (snapshot) => this.renderAndPaginate(snapshot),
+    onRestored: () => {
+      this.isDirty = true;
+      this.toolbar.updateActiveStates();
+    },
+  });
   private readonly tableDomIntegrityController = new TableDomIntegrityController();
   private readonly runtimePageHeaderRenderer = new RuntimePageHeaderRenderer();
   private imageResizeController!: ImageResizeController;
@@ -142,7 +150,6 @@ export class EditorComponent {
   private allocatedHeight?: number;
   private deferredRenderHtml: string | null = null;
   private deferredRenderFrame: number | undefined;
-  private historySnapshotTimer: number | undefined;
   private resizeObserver: ResizeObserver | null = null;
   private imageHydrationRun = 0;
 
@@ -165,9 +172,6 @@ export class EditorComponent {
   private readonly handleSelectionChange = (): void => this.styleSelectionTracker.rememberTextSelection();
   private isComposing = false;
   private isDirty = false;
-  private isRestoringHistory = false;
-  private activeView: EditorView = "visual";
-  private sourceDirty = false;
 
   constructor(container: HTMLElement, context?: PcfContext, options: EditorComponentOptions = {}) {
     this.container = container;
@@ -287,20 +291,17 @@ export class EditorComponent {
       onColumnsChanged: (table) => this.markTableColumnsChanged(table),
       rootProvider: () => this.root ?? null,
     });
-    this.viewController = new EditorViewController(this.editorHeader, (view) => {
-      void this.switchView(view);
-    });
+    this.viewController = new EditorViewController(this.editorHeader);
 
     this.toolbar = new Toolbar({
+      onUndo: () => this.historyController.undo(),
       onInsertTable: () => this.tableCommandController.insertTable(),
       onInsertRowAfter: () => this.tableCommandController.insertTableRowAfter(),
       onDeleteRow: () => this.tableCommandController.deleteTableRow(),
       onInsertPageBreak: () => this.insertManualPageBreak(),
       onApplyParagraphStyle: (className) => this.applyParagraphStyle(className),
+      onApplyParagraphTextCase: (textCase) => this.applyParagraphTextCase(textCase),
       onCommand: (command) => this.imageResizeController?.handleToolbarCommand(command) ?? false,
-      onExportPdf: () => {
-        void this.exportPdf();
-      },
     });
     const toolbarEl = this.toolbar.build();
     this.toolbar.getSaveButton().addEventListener("click", () => void this.save());
@@ -328,14 +329,6 @@ export class EditorComponent {
     this.imageResizeController.start();
     this.tableColumnResizeController.start();
 
-    this.sourceEditor = document.createElement("textarea");
-    this.sourceEditor.className = "hwe-source-editor";
-    this.sourceEditor.setAttribute("spellcheck", "false");
-    this.sourceEditor.addEventListener("input", () => {
-      this.sourceDirty = true;
-      this.isDirty = true;
-    });
-    this.root.appendChild(this.sourceEditor);
     this.updateViewTabs();
 
     const statusBar = document.createElement("div");
@@ -361,32 +354,8 @@ export class EditorComponent {
     }
   }
 
-  private async switchView(view: EditorView): Promise<void> {
-    if (view === this.activeView) return;
-
-    if (view === "source") {
-      this.imageResizeController.clearSelection();
-      this.tableColumnResizeController.clear();
-      this.sourceEditor.value = this.collectHtml();
-      this.sourceDirty = false;
-      this.activeView = "source";
-      this.updateViewTabs();
-      this.sourceEditor.focus();
-      return;
-    }
-
-    if (this.sourceDirty) {
-      await this.renderAndPaginate(this.sourceEditor.value || "<p><br></p>");
-      this.sourceDirty = false;
-    }
-
-    this.activeView = "visual";
-    this.recordHistorySnapshotNow();
-    this.updateViewTabs();
-  }
-
   private updateViewTabs(): void {
-    this.viewController.update(this.activeView, this.workspace, this.sourceEditor);
+    this.viewController.update(this.workspace);
   }
 
   private setPageSetup(setup: Partial<PageSetup> | PageSetup): void {
@@ -534,7 +503,7 @@ export class EditorComponent {
           : this.options.initialHtml ?? "<p><br></p>";
 
         await this.renderAndPaginate(html || "<p><br></p>");
-        this.resetHistorySnapshot();
+        this.historyController.reset();
         this.setStatus("", "");
         return;
       }
@@ -551,12 +520,12 @@ export class EditorComponent {
       this.currentFileName = fileContent.fileName || this.currentFileName;
 
       await this.renderAndPaginate(fileContent.html || "<p><br></p>");
-      this.resetHistorySnapshot();
+      this.historyController.reset();
       this.setStatus("", "");
     } catch (err) {
       this.setStatus(`Error al cargar: ${(err as Error).message}`, "error");
       await this.renderAndPaginate("<p><br></p>");
-      this.resetHistorySnapshot();
+      this.historyController.reset();
     }
   }
 
@@ -782,7 +751,7 @@ export class EditorComponent {
           compactPages: shouldPullFromNextPages || !isEnterInput,
           overflowOnly: isEnterInput && !shouldPullFromNextPages,
         });
-        this.scheduleHistorySnapshot();
+        this.historyController.scheduleRecord();
       }
     });
     inner.addEventListener("compositionstart", () => {
@@ -792,7 +761,7 @@ export class EditorComponent {
       this.isComposing = false;
       this.blankLineController.syncEditableBlankBlocks(inner, false);
       this.scheduleRebalance(page, false, { includePreviousPage: false });
-      this.scheduleHistorySnapshot();
+      this.historyController.scheduleRecord();
     });
     inner.addEventListener("paste", (event: ClipboardEvent) => {
       if (this.tableDomIntegrityController.handlePaste(event, inner)) {
@@ -1062,7 +1031,7 @@ export class EditorComponent {
       compactPages: false,
       includePreviousPage: false,
     });
-    this.recordHistorySnapshotNow();
+    this.historyController.recordNow();
     void this.assetLayoutManager
       .waitForStableLayout(affectedPage)
       .then(() => {
@@ -1084,15 +1053,10 @@ export class EditorComponent {
       compactPages: false,
       includePreviousPage: false,
     });
-    this.recordHistorySnapshotNow();
+    this.historyController.recordNow();
   }
 
   private insertManualPageBreak(): void {
-    if (this.activeView !== "visual") {
-      this.setStatus("Vuelve al editor visual para insertar un salto.", "error");
-      return;
-    }
-
     const editable = this.getActiveEditable();
     const page = editable?.closest<HTMLElement>(".hwe-page") ?? null;
     if (!editable || !page) {
@@ -1114,7 +1078,7 @@ export class EditorComponent {
       force: true,
       includePreviousPage: false,
     });
-    this.recordHistorySnapshotNow();
+    this.historyController.recordNow();
   }
 
   private createManualPageBreakMarker(): HTMLElement {
@@ -1275,10 +1239,6 @@ export class EditorComponent {
   private applyParagraphStyle(className: string): void {
     const shouldClearStyle = className === CLEAR_PARAGRAPH_STYLE_VALUE;
     if (!shouldClearStyle && !this.paragraphStyleManager.hasClass(className)) return;
-    if (this.activeView !== "visual") {
-      this.setStatus("Vuelve al editor visual para aplicar estilos.", "error");
-      return;
-    }
 
     this.styleSelectionTracker.restoreTextSelection();
     const blocks = this.styleSelectionTracker.getSelectedStyleBlocks();
@@ -1292,27 +1252,100 @@ export class EditorComponent {
     });
 
     this.styleSelectionTracker.rememberTextSelection();
-    this.markEditedAfterStyleChange(blocks[0]);
-    this.recordHistorySnapshotNow();
+    this.markEditedAfterStyleChange(blocks);
+    this.historyController.recordNow();
   }
 
-  private markEditedAfterStyleChange(element: HTMLElement): void {
-    const page = element.closest<HTMLElement>(".hwe-page");
-    if (!page) return;
+  private applyParagraphTextCase(textCase: ParagraphTextCase): void {
+    this.styleSelectionTracker.restoreTextSelection();
+    const blocks = this.styleSelectionTracker.getSelectedStyleBlocks();
+    if (blocks.length === 0) {
+      this.setStatus("Selecciona un parrafo para cambiar mayusculas/minusculas.", "error");
+      return;
+    }
+
+    const changed = blocks.reduce(
+      (hasChanged, block) => this.transformTextNodes(block, textCase) || hasChanged,
+      false
+    );
+    if (!changed) return;
+
+    this.styleSelectionTracker.rememberTextSelection();
+    this.markEditedAfterParagraphTextCaseChange(blocks);
+    this.historyController.recordNow();
+  }
+
+  private transformTextNodes(block: HTMLElement, textCase: ParagraphTextCase): boolean {
+    const walker = document.createTreeWalker(block, NodeFilter.SHOW_TEXT, {
+      acceptNode: (node) => {
+        const parent = node.parentElement;
+        if (!parent || parent.closest("[contenteditable='false']")) {
+          return NodeFilter.FILTER_REJECT;
+        }
+
+        return NodeFilter.FILTER_ACCEPT;
+      },
+    });
+    let changed = false;
+    let current = walker.nextNode() as Text | null;
+
+    while (current) {
+      const currentText = current.textContent ?? "";
+      const nextText =
+        textCase === "uppercase"
+          ? currentText.toLocaleUpperCase("es-ES")
+          : currentText.toLocaleLowerCase("es-ES");
+      if (nextText !== currentText) {
+        current.textContent = nextText;
+        changed = true;
+      }
+      current = walker.nextNode() as Text | null;
+    }
+
+    return changed;
+  }
+
+  private markEditedAfterParagraphTextCaseChange(blocks: HTMLElement[]): void {
+    const affectedPages = this.getAffectedPagesForBlocks(blocks);
+    if (affectedPages.length === 0) return;
+
+    this.isDirty = true;
+    this.toolbar.updateActiveStates();
+    this.scheduleRebalance(affectedPages[0], true, {
+      compactPages: true,
+      force: true,
+      includePreviousPage: false,
+    });
+  }
+
+  private markEditedAfterStyleChange(blocks: HTMLElement[]): void {
+    const affectedPages = this.getAffectedPagesForBlocks(blocks);
+    if (affectedPages.length === 0) return;
 
     this.isDirty = true;
     this.toolbar.updateActiveStates();
 
-    if (this.layoutService.pageOverflows(page)) {
-      this.scheduleRebalance(page, false, {
+    const firstOverflowPage = affectedPages.find((page) => this.layoutService.pageOverflows(page));
+    if (firstOverflowPage) {
+      this.scheduleRebalance(firstOverflowPage, false, {
         includePreviousPage: false,
         compactPages: false,
       });
     }
   }
 
+  private getAffectedPagesForBlocks(blocks: HTMLElement[]): HTMLElement[] {
+    const affectedPageSet = new Set(
+      blocks
+        .map((block) => block.closest<HTMLElement>(".hwe-page"))
+        .filter((page): page is HTMLElement => Boolean(page))
+    );
+
+    return this.pages.filter((page) => affectedPageSet.has(page));
+  }
+
   private onPageKeyDown(event: KeyboardEvent): void {
-    if (this.handleHistoryShortcut(event)) return;
+    if (this.historyController.handleShortcut(event)) return;
 
     if (event.ctrlKey && event.key.toLowerCase() === "s") {
       event.preventDefault();
@@ -1327,7 +1360,7 @@ export class EditorComponent {
           this.isDirty = true;
           this.toolbar.updateActiveStates();
           this.scheduleRebalance(previousPage, true, { includePreviousPage: true });
-          this.recordHistorySnapshotNow();
+          this.historyController.recordNow();
         },
       })
     ) {
@@ -1346,7 +1379,7 @@ export class EditorComponent {
     this.isDirty = true;
     this.toolbar.updateActiveStates();
     this.scheduleRebalance(page, true, { includePreviousPage: false });
-    this.recordHistorySnapshotNow();
+    this.historyController.recordNow();
   }
 
   private markImageEdited(image: HTMLImageElement): void {
@@ -1360,7 +1393,7 @@ export class EditorComponent {
       compactPages: false,
       includePreviousPage: false,
     });
-    this.recordHistorySnapshotNow();
+    this.historyController.recordNow();
   }
 
   private markTableColumnsChanged(table: HTMLTableElement): void {
@@ -1374,7 +1407,7 @@ export class EditorComponent {
       compactPages: true,
       includePreviousPage: false,
     });
-    this.recordHistorySnapshotNow();
+    this.historyController.recordNow();
   }
 
   private getFirstTableFlowPage(table: HTMLTableElement): HTMLElement | null {
@@ -1402,16 +1435,8 @@ export class EditorComponent {
     const saveButton = this.toolbar.getSaveButton();
     saveButton.disabled = true;
     this.setStatus("Guardando...", "saving");
-    const wasSourceView = this.activeView === "source";
 
     try {
-      if (this.activeView === "source" && this.sourceDirty) {
-        this.activeView = "visual";
-        this.updateViewTabs();
-        await this.renderAndPaginate(this.sourceEditor.value || "<p><br></p>");
-        this.sourceDirty = false;
-      }
-
       await this.refreshDynamicHeaderBeforeSave();
 
       const html = this.collectHtml();
@@ -1429,13 +1454,6 @@ export class EditorComponent {
           this.currentFileName
         );
         await this.savePrintHtml(printHtml);
-      }
-
-      if (wasSourceView) {
-        this.sourceEditor.value = html;
-        this.sourceDirty = false;
-        this.activeView = "source";
-        this.updateViewTabs();
       }
 
       this.isDirty = false;
@@ -1461,19 +1479,7 @@ export class EditorComponent {
     const currentHtml = this.collectHtml();
     this.dynamicHeaderHtml = nextHeaderHtml;
     this.dynamicHeaderLoaded = true;
-    const wasSourceView = this.activeView === "source";
-    if (wasSourceView) {
-      this.activeView = "visual";
-      this.updateViewTabs();
-    }
     await this.renderAndPaginate(currentHtml || "<p><br></p>");
-
-    if (wasSourceView) {
-      this.sourceEditor.value = this.collectHtml();
-      this.sourceDirty = false;
-      this.activeView = "source";
-      this.updateViewTabs();
-    }
   }
 
   private async savePrintHtml(printHtml: string): Promise<void> {
@@ -1499,12 +1505,7 @@ export class EditorComponent {
     return `${baseName}.print.html`;
   }
 
-  private async exportPdf(): Promise<void> {
-    if (this.activeView === "source" && this.sourceDirty) {
-      this.setStatus("Vuelve al editor visual o guarda los cambios del HTML antes de exportar.", "error");
-      return;
-    }
-
+  async exportPdf(): Promise<void> {
     const html = this.collectPrintHtml();
     const frame = document.createElement("iframe");
     frame.title = "Exportar PDF";
@@ -1529,72 +1530,6 @@ export class EditorComponent {
       window.setTimeout(() => frame.remove(), 1000);
     }, 250);
     this.setStatus("Selecciona Guardar como PDF en el dialogo de impresion.", "success");
-  }
-
-  private handleHistoryShortcut(event: KeyboardEvent): boolean {
-    const isModifierPressed = event.ctrlKey || event.metaKey;
-    if (!isModifierPressed || event.altKey || this.activeView !== "visual") return false;
-
-    const key = event.key.toLowerCase();
-    const isUndo = key === "z" && !event.shiftKey;
-    const isRedo = key === "y" || (key === "z" && event.shiftKey);
-    if (!isUndo && !isRedo) return false;
-
-    event.preventDefault();
-    event.stopPropagation();
-    if (this.isRestoringHistory) return true;
-
-    this.flushPendingHistorySnapshot();
-    const snapshot = isUndo ? this.historyController.undo() : this.historyController.redo();
-    if (snapshot) void this.restoreHistorySnapshot(snapshot);
-    return true;
-  }
-
-  private resetHistorySnapshot(): void {
-    this.clearHistorySnapshotTimer();
-    this.historyController.reset(this.collectHistoryHtml());
-  }
-
-  private scheduleHistorySnapshot(): void {
-    if (this.isRestoringHistory || this.activeView !== "visual") return;
-    this.clearHistorySnapshotTimer();
-    this.historySnapshotTimer = window.setTimeout(() => {
-      this.historySnapshotTimer = undefined;
-      this.recordHistorySnapshotNow();
-    }, 650);
-  }
-
-  private flushPendingHistorySnapshot(): void {
-    if (this.historySnapshotTimer === undefined) return;
-    this.clearHistorySnapshotTimer();
-    this.recordHistorySnapshotNow();
-  }
-
-  private recordHistorySnapshotNow(): void {
-    if (this.isRestoringHistory || this.activeView !== "visual") return;
-    this.clearHistorySnapshotTimer();
-    this.historyController.record(this.collectHistoryHtml());
-  }
-
-  private async restoreHistorySnapshot(snapshot: string): Promise<void> {
-    if (this.isRestoringHistory) return;
-
-    this.clearHistorySnapshotTimer();
-    this.isRestoringHistory = true;
-    try {
-      await this.historyController.runSuspended(() => this.renderAndPaginate(snapshot));
-      this.isDirty = true;
-      this.sourceDirty = false;
-      this.toolbar.updateActiveStates();
-    } finally {
-      this.isRestoringHistory = false;
-    }
-  }
-
-  private clearHistorySnapshotTimer(): void {
-    if (this.historySnapshotTimer === undefined) return;
-    window.clearTimeout(this.historySnapshotTimer);
-    this.historySnapshotTimer = undefined;
   }
 
   private collectHistoryHtml(): string {
@@ -1685,11 +1620,7 @@ export class EditorComponent {
 
   async loadHtml(html: string): Promise<void> {
     await this.renderAndPaginate(html || "<p><br></p>");
-    this.resetHistorySnapshot();
-    if (this.activeView === "source") {
-      this.sourceEditor.value = this.collectHtml();
-      this.sourceDirty = false;
-    }
+    this.historyController.reset();
     this.isDirty = false;
     this.setStatus("", "");
   }
@@ -1702,10 +1633,6 @@ export class EditorComponent {
   }
 
   getHtml(): string {
-    if (this.activeView === "source" && this.sourceDirty) {
-      return this.sourceEditor.value;
-    }
-
     return this.collectHtml();
   }
 
@@ -1718,7 +1645,7 @@ export class EditorComponent {
     if (this.deferredRenderFrame !== undefined) {
       window.cancelAnimationFrame(this.deferredRenderFrame);
     }
-    this.clearHistorySnapshotTimer();
+    this.historyController.destroy();
     this.resizeObserver?.disconnect();
     document.removeEventListener("selectionchange", this.handleSelectionChange);
     this.imageResizeController?.destroy();
