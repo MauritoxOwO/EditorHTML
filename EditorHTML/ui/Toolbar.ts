@@ -4,6 +4,8 @@ export interface ParagraphStyleOption {
   className: string;
 }
 
+export type ParagraphTextCase = "uppercase" | "lowercase";
+
 export const CLEAR_PARAGRAPH_STYLE_VALUE = "__hwe-clear-paragraph-style";
 const DEFAULT_FONT_FAMILIES = [
   "Calibri",
@@ -15,13 +17,14 @@ const DEFAULT_FONT_FAMILIES = [
 ];
 
 export interface ToolbarOptions {
+  onUndo?: () => void;
   onInsertTable?: () => void;
   onInsertRowAfter?: () => void;
   onDeleteRow?: () => void;
   onInsertPageBreak?: () => void;
   onApplyParagraphStyle?: (className: string) => void;
+  onApplyParagraphTextCase?: (textCase: ParagraphTextCase) => void;
   onCommand?: (command: string) => boolean;
-  onExportPdf?: () => void;
 }
 
 export class Toolbar {
@@ -40,6 +43,10 @@ export class Toolbar {
     this.toolbar.className = "hwe-toolbar";
 
     // Formato básico
+    // Historial
+    this.addActionButton("↶", "Deshacer (Ctrl+Z)", () => this.options.onUndo?.());
+    this.addSep();
+
     this.addCmdButton("B",  "bold",      "<b>N</b>",  "Negrita (Ctrl+B)");
     this.addCmdButton("I",  "italic",    "<i>K</i>",  "Cursiva (Ctrl+I)");
     this.addCmdButton("U",  "underline", "<u>S</u>",  "Subrayado (Ctrl+U)");
@@ -55,6 +62,15 @@ export class Toolbar {
     // Listas
     this.addCmdButton("insertUnorderedList", "insertUnorderedList", "• Lista", "Lista con viñetas");
     this.addCmdButton("insertOrderedList",   "insertOrderedList",   "1. Lista", "Lista numerada");
+    this.addSep();
+
+    // Transformacion de parrafos seleccionados
+    this.addActionButton("ABC", "Convertir parrafos seleccionados a mayusculas", () =>
+      this.options.onApplyParagraphTextCase?.("uppercase")
+    );
+    this.addActionButton("abc", "Convertir parrafos seleccionados a minusculas", () =>
+      this.options.onApplyParagraphTextCase?.("lowercase")
+    );
     this.addSep();
 
     // Fuente 
@@ -143,10 +159,6 @@ export class Toolbar {
       this.options.onInsertPageBreak?.();
     });
     this.toolbar.appendChild(breakBtn);
-
-    this.addSep();
-
-    this.addActionButton("PDF", "Exportar a PDF", () => this.options.onExportPdf?.());
 
     this.addSep();
 

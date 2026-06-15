@@ -1,20 +1,53 @@
 import "../../EditorHTML/css/editor.css";
 import { EditorComponent } from "../../EditorHTML/app/EditorComponent";
+import type { ParagraphStyleCatalog } from "../../EditorHTML/services/dataverse/styleApi";
 import "./styles.css";
 
 const LOCAL_STORAGE_KEY = "editorhtml.local.currentHtml";
+const CODEX_SPIKE_FONT_FACE =
+  '@font-face{font-family:"CodexSpikeTest";src:url("data:font/ttf;base64,AAEAAAAKAIAAAwAgT1MvMkUoRMEAAAEoAAAAYGNtYXACYAMRAAABlAAAAQhnbHlmEyMtpgAAAqQAAABAaGVhZC4phbwAAACsAAAANmhoZWEFogJXAAAA5AAAACRobXR4BpAAUAAAAYgAAAAMbG9jYQANAC0AAAKcAAAACG1heHAABQAKAAABCAAAACBuYW1laWAwPgAAAuQAAAHIcG9zdHDgcWsAAASsAAAALgABAAAAAQAAxuVV3V8PPPUAAQPoAAAAAOY5IPIAAAAA5jkg8gA3AAACbAL4AAAAAwACAAAAAAAAAAEAAAM0/0wAAAK8ACgASwJEAAEAAAAAAAAAAAAAAAAAAAADAAEAAAADAAgAAQAAAAAAAgAAAAAAAAAAAAAAAAAAAAAAAwIwAZAABQAEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAPz8/PwAAACAAfQM0/0wAAAOEANwAAAAAAAAAAAAAAAAAAAAgAAACvAAoAWgAAAJsACgAAAACAAAAAwAAABQAAwABAAAAFAAEAPQAAAAOAAgAAgAGACMAWwBdAF8AewB9//8AAAAgACUAXQBfAGEAff//AAAAAP+l/6MAAP+FAAEADgAUAAAAAAB8AAAAAAABAAIAAgACAAIAAgACAAIAAgACAAIAAgACAAIAAgACAAIAAgACAAIAAgACAAIAAgACAAIAAgACAAIAAgACAAIAAgACAAIAAgACAAIAAgACAAIAAgACAAIAAgACAAIAAgACAAIAAgACAAIAAgACAAIAAgACAAIAAgACAAIAAgACAAIAAgACAAIAAgACAAIAAgACAAIAAgACAAIAAgACAAIAAgACAAIAAgACAAIAAAANAA0AIAABAFAAAAJsArwAAwAAMyERIVACHP3kArwAAAEANwAAAjAC+AAHAAAzMzczAQMjF1XXQcP+7UGlm+ECF/784QAAAAAMAJYAAQAAAAAAAQAOAAAAAQAAAAAAAgAHAA4AAQAAAAAAAwAaABUAAQAAAAAABAAWAC8AAQAAAAAABQALAEUAAQAAAAAABgAWAFAAAwABBAkAAQAcAGYAAwABBAkAAgAOAIIAAwABBAkAAwA0AJAAAwABBAkABAAsAMQAAwABBAkABQAWAPAAAwABBAkABgAsAQZDb2RleFNwaWtlVGVzdFJlZ3VsYXJDb2RleFNwaWtlVGVzdCBSZWd1bGFyIDEuMENvZGV4U3Bpa2VUZXN0IFJlZ3VsYXJWZXJzaW9uIDEuMENvZGV4U3Bpa2VUZXN0LVJlZ3VsYXIAQwBvAGQAZQB4AFMAcABpAGsAZQBUAGUAcwB0AFIAZQBnAHUAbABhAHIAQwBvAGQAZQB4AFMAcABpAGsAZQBUAGUAcwB0ACAAUgBlAGcAdQBsAGEAcgAgADEALgAwAEMAbwBkAGUAeABTAHAAaQBrAGUAVABlAHMAdAAgAFIAZQBnAHUAbABhAHIAVgBlAHIAcwBpAG8AbgAgADEALgAwAEMAbwBkAGUAeABTAHAAaQBrAGUAVABlAHMAdAAtAFIAZQBnAHUAbABhAHIAAgAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAADAAAAAwECBXNwaWtlAAA=") format("truetype");font-weight:400;font-style:normal;}';
+const SANDBOX_PARAGRAPH_STYLE_CATALOG: ParagraphStyleCatalog = {
+  styles: [
+    {
+      label: "Texto general",
+      className: "texto-general",
+      cssText: `.texto-general {
+  display: inline-block;
+  text-indent: 20pt;
+  margin: 0;
+  text-align: justify;
+  hyphens: auto;
+  font-family: Calibri, Arial, sans-serif;
+  font-size: 11pt;
+}`,
+    },
+    {
+      label: "Texto Spike",
+      className: "texto-spike",
+      cssText: `.texto-spike {
+  font-family: "CodexSpikeTest";
+  font-size: 16pt;
+  line-height: 1.2;
+}`,
+    },
+  ],
+  fonts: [
+    {
+      label: "CodexSpikeTest",
+      cssText: CODEX_SPIKE_FONT_FACE,
+    },
+  ],
+};
 
 const editorHost = document.querySelector<HTMLDivElement>("#editor-host");
 const fileInput = document.querySelector<HTMLInputElement>("#html-file");
 const sourceName = document.querySelector<HTMLSpanElement>("#source-name");
 const sampleButton = document.querySelector<HTMLButtonElement>("#sample-button");
-const downloadButton = document.querySelector<HTMLButtonElement>("#download-button");
 
-if (!editorHost || !fileInput || !sourceName || !sampleButton || !downloadButton) {
+if (!editorHost || !fileInput || !sourceName || !sampleButton) {
   throw new Error("No se pudo inicializar el harness local del editor.");
 }
 
-let currentFileName = "documento-ejemplo.html";
 const query = new URLSearchParams(window.location.search);
 const fixtureName = query.get("fixture");
 
@@ -24,6 +57,7 @@ const getInitialHtml = (): string => {
 
 const editor = new EditorComponent(editorHost, undefined, {
   initialHtml: getInitialHtml(),
+  paragraphStyleCatalog: SANDBOX_PARAGRAPH_STYLE_CATALOG,
   saveHtml: (html) => {
     localStorage.setItem(LOCAL_STORAGE_KEY, html);
   },
@@ -45,7 +79,6 @@ async function loadFixture(name: string): Promise<void> {
   }
 
   const html = await response.text();
-  currentFileName = `${name}.html`;
   sourceName!.textContent = `Fixture: ${name}`;
   await editor.loadHtml(html);
 }
@@ -55,7 +88,6 @@ fileInput.addEventListener("change", async () => {
   if (!file) return;
 
   const html = await file.text();
-  currentFileName = file.name;
   sourceName.textContent = file.name;
   localStorage.setItem(LOCAL_STORAGE_KEY, html);
   await editor.loadHtml(html);
@@ -63,21 +95,10 @@ fileInput.addEventListener("change", async () => {
 });
 
 sampleButton.addEventListener("click", async () => {
-  currentFileName = "documento-ejemplo.html";
   sourceName.textContent = "Documento de ejemplo";
   const html = makeSampleHtml();
   localStorage.setItem(LOCAL_STORAGE_KEY, html);
   await editor.loadHtml(html);
-});
-
-downloadButton.addEventListener("click", () => {
-  const blob = new Blob([editor.getHtml()], { type: "text/html;charset=utf-8" });
-  const url = URL.createObjectURL(blob);
-  const anchor = document.createElement("a");
-  anchor.href = url;
-  anchor.download = currentFileName.replace(/\.(htm|html)$/i, "") + ".html";
-  anchor.click();
-  URL.revokeObjectURL(url);
 });
 
 function makeSampleHtml(): string {
@@ -89,6 +110,7 @@ function makeSampleHtml(): string {
   return `
     <h1>Documento de prueba</h1>
     <p>Este contenido se carga localmente, pero usa el mismo componente, paginador, estilos A4 y toolbar que el PCF.</p>
+    <p class="texto-spike">Prueba visible de fuente CodexSpikeTest: ABC xyz 123.</p>
     <table>
       <thead>
         <tr><th>Concepto</th><th>Detalle</th><th>Estado</th></tr>

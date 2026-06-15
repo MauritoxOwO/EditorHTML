@@ -183,24 +183,6 @@
   background: #d0d0d0;
 }
 
-.hwe-source-editor {
-  flex: 1 1 auto;
-  width: 100%;
-  min-height: 0;
-  padding: 16px;
-  border: 0;
-  outline: none;
-  resize: none;
-  box-sizing: border-box;
-  background: #1f1f1f;
-  color: #f3f3f3;
-  font-family: Consolas, "Courier New", monospace;
-  font-size: 12px;
-  line-height: 1.5;
-  tab-size: 2;
-  white-space: pre;
-}
-
 /* Pagina A4 */
 .hwe-page {
   width: var(--hwe-page-width, 210mm);
@@ -717,7 +699,6 @@
   .hwe-editor-header,
   .hwe-toolbar,
   .hwe-view-tabs,
-  .hwe-source-editor,
   .hwe-statusbar,
   .hwe-page-divider {
     display: none !important;
