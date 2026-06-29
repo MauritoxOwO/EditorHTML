@@ -6,7 +6,11 @@ import {
   ParagraphTextCase,
   Toolbar,
 } from "../ui/Toolbar";
-import { fetchHtmlFromFileField, saveHtmlToFileField } from "../services/dataverse/fileApi";
+import {
+  fetchHtmlFromFileField,
+  isFileFieldEmpty,
+  saveHtmlToFileField,
+} from "../services/dataverse/fileApi";
 import {
   fetchParagraphStyleCatalog,
   ParagraphFontFaceDefinition,
@@ -40,6 +44,7 @@ import { StyleSelectionTracker } from "../controllers/StyleSelectionTracker";
 import { TableDomIntegrityController } from "../controllers/TableDomIntegrityController";
 import { TableColumnResizeController } from "../controllers/TableColumnResizeController";
 import { TableCommandController } from "../controllers/TableCommandController";
+import { TextSelectionFormatter } from "../controllers/TextSelectionFormatter";
 import { EditorViewController } from "../ui/EditorViewController";
 import { RuntimePageHeaderRenderer } from "../ui/RuntimePageHeaderRenderer";
 import {
@@ -56,13 +61,25 @@ type QueuedRebalance = Required<RebalanceOptions> & {
 };
 
 const DEFAULT_STYLE_TABLE_CONFIG: ParagraphStyleTableConfig = {
-  entitySetName: "mcdev_htmlstyles",
-  classField: "mcdev_cssclass",
-  cssField: "mcdev_css",
+  entitySetName: "ays_parametrocsses",
+  classField: "ays_nombre",
+  cssField: "ays_contenido",
   stateField: "statecode",
-  dropdownField: "mostrarendesplegable",
-  documentTypeField: "tipodoc",
-  documentTypeDropdownValue: "Anuncio",
+  dropdownField: "ays_mostrardesplegable_sn",
+  documentTypeField: "ays_tipodoc_opt",
+  documentTypeDropdownValue: "864480000",
+  typeField: "ays_tipo_opt",
+  styleTypeValue: "864480000",
+  fontTypeValue: "864480001",
+};
+const DEFAULT_ENTITY_NAME = "ays_versionanuncios";
+const DEFAULT_FIELD_NAME = "ays_archivoanuncio";
+const DEFAULT_PRINT_HTML_FIELD_NAME = "ays_archivoanuncio2";
+const DEFAULT_RUNTIME_HEADER_LOGO_CONFIG: RuntimeHeaderLogoTableConfig = {
+  entitySetName: "ays_parametroscsses",
+  imageField: "ays_archivoimagen",
+  idField: "ays_parametrocssid",
+  nameField: "ays_name",
 };
 const DEFAULT_MODEL_DRIVEN_EDITOR_HEIGHT_PX = 900;
 const API_HEADER_ATTR = "data-hwe-api-header";
@@ -97,8 +114,6 @@ const LOCAL_PARAGRAPH_STYLES: ParagraphStyleDefinition[] = [
 export interface EditorComponentOptions {
   initialHtml?: string;
   loadHtml?: () => Promise<string> | string;
-  saveHtml?: (html: string) => Promise<void> | void;
-  savePrintHtml?: (html: string) => Promise<void> | void;
   paragraphStyles?: ParagraphStyleDefinition[];
   paragraphFonts?: ParagraphFontFaceDefinition[];
   paragraphStyleCatalog?: ParagraphStyleCatalog;
@@ -126,12 +141,12 @@ export class EditorComponent {
   private readonly assetLayoutManager = new AssetLayoutManager();
   private readonly pasteController = new PasteController();
   private readonly layoutService = new EditorLayoutService();
+  private readonly textSelectionFormatter = new TextSelectionFormatter();
   private readonly historyController = new EditorHistoryController({
     maxStates: 10,
     collectSnapshot: () => this.collectHistoryHtml(),
     restoreSnapshot: (snapshot) => this.renderAndPaginate(snapshot),
     onRestored: () => {
-      this.isDirty = true;
       this.toolbar.updateActiveStates();
     },
   });
@@ -171,7 +186,6 @@ export class EditorComponent {
   private readonly pendingInputTypes = new WeakMap<HTMLElement, string>();
   private readonly handleSelectionChange = (): void => this.styleSelectionTracker.rememberTextSelection();
   private isComposing = false;
-  private isDirty = false;
 
   constructor(container: HTMLElement, context?: PcfContext, options: EditorComponentOptions = {}) {
     this.container = container;
@@ -188,25 +202,30 @@ export class EditorComponent {
     this.entityId = this.cleanGuid(
       runtime.page?.entityId ?? runtime.mode?.contextInfo?.entityId ?? ""
     );
-    this.entityName = "mcdev_htmldevtests";
-    this.fieldName = "mcdev_htmlarchivooriginal";
-    this.printHtmlFieldName = this.getParameterValue(runtime.parameters, "printHtmlFieldName");
+    this.entityName =
+      this.getParameterValue(runtime.parameters, "entityName") ?? DEFAULT_ENTITY_NAME;
+    this.fieldName =
+      this.getParameterValue(runtime.parameters, "fieldName") ?? DEFAULT_FIELD_NAME;
+    this.printHtmlFieldName =
+      this.getParameterValue(runtime.parameters, "printHtmlFieldName") ??
+      DEFAULT_PRINT_HTML_FIELD_NAME;
     this.runtimeHeaderLogoConfig = {
       entitySetName:
         options.runtimeHeaderLogoConfig?.entitySetName ??
-        this.getParameterValue(runtime.parameters, "runtimeHeaderLogoEntitySetName"),
+        this.getParameterValue(runtime.parameters, "runtimeHeaderLogoEntitySetName") ??
+        DEFAULT_RUNTIME_HEADER_LOGO_CONFIG.entitySetName,
       imageField:
         options.runtimeHeaderLogoConfig?.imageField ??
-        this.getParameterValue(runtime.parameters, "runtimeHeaderLogoImageField"),
-      recordId:
-        options.runtimeHeaderLogoConfig?.recordId ??
-        this.getParameterValue(runtime.parameters, "runtimeHeaderLogoRecordId"),
+        this.getParameterValue(runtime.parameters, "runtimeHeaderLogoImageField") ??
+        DEFAULT_RUNTIME_HEADER_LOGO_CONFIG.imageField,
       idField:
         options.runtimeHeaderLogoConfig?.idField ??
-        this.getParameterValue(runtime.parameters, "runtimeHeaderLogoIdField"),
+        this.getParameterValue(runtime.parameters, "runtimeHeaderLogoIdField") ??
+        DEFAULT_RUNTIME_HEADER_LOGO_CONFIG.idField,
       nameField:
         options.runtimeHeaderLogoConfig?.nameField ??
-        this.getParameterValue(runtime.parameters, "runtimeHeaderLogoNameField"),
+        this.getParameterValue(runtime.parameters, "runtimeHeaderLogoNameField") ??
+        DEFAULT_RUNTIME_HEADER_LOGO_CONFIG.nameField,
       nameValue:
         options.runtimeHeaderLogoConfig?.nameValue ??
         this.getParameterValue(runtime.parameters, "runtimeHeaderLogoNameValue") ??
@@ -301,6 +320,7 @@ export class EditorComponent {
       onInsertPageBreak: () => this.insertManualPageBreak(),
       onApplyParagraphStyle: (className) => this.applyParagraphStyle(className),
       onApplyParagraphTextCase: (textCase) => this.applyParagraphTextCase(textCase),
+      onApplyFontSize: (fontSize) => this.applyFontSize(fontSize),
       onCommand: (command) => this.imageResizeController?.handleToolbarCommand(command) ?? false,
     });
     const toolbarEl = this.toolbar.build();
@@ -521,7 +541,15 @@ export class EditorComponent {
 
       await this.renderAndPaginate(fileContent.html || "<p><br></p>");
       this.historyController.reset();
-      this.setStatus("", "");
+      try {
+        await this.ensureInitialPrintHtmlSaved();
+        this.historyController.reset();
+        this.setStatus("", "");
+      } catch (error) {
+        this.historyController.reset();
+        console.warn("[HtmlWordEditor] initial print HTML save failed:", error);
+        this.setStatus(`No se pudo preparar el HTML para PDF: ${(error as Error).message}`, "error");
+      }
     } catch (err) {
       this.setStatus(`Error al cargar: ${(err as Error).message}`, "error");
       await this.renderAndPaginate("<p><br></p>");
@@ -733,7 +761,6 @@ export class EditorComponent {
       if (this.isDeleteInput(event.inputType)) this.pagesNeedingPull.add(page);
     });
     inner.addEventListener("input", () => {
-      this.isDirty = true;
       this.toolbar.updateActiveStates();
       if (!this.isComposing) {
         const inputType = this.pendingInputTypes.get(page) ?? "";
@@ -1024,7 +1051,6 @@ export class EditorComponent {
     }
     this.layoutService.applyOfficialTableWidths(affectedPage);
 
-    this.isDirty = true;
     this.toolbar.updateActiveStates();
     this.scheduleRebalance(affectedPage, false, {
       compactPages: false,
@@ -1046,7 +1072,6 @@ export class EditorComponent {
     this.blankLineController.syncEditableBlankBlocks(inner, false);
     this.layoutService.applyOfficialTableWidths(page);
 
-    this.isDirty = true;
     this.toolbar.updateActiveStates();
     this.scheduleRebalance(page, false, {
       compactPages: false,
@@ -1070,7 +1095,6 @@ export class EditorComponent {
     this.layoutService.applyOfficialTableWidths(page);
     this.placeCaretAtStart(caretTarget ?? marker.nextSibling, editable);
 
-    this.isDirty = true;
     this.toolbar.updateActiveStates();
     this.scheduleRebalance(page, false, {
       compactPages: true,
@@ -1274,6 +1298,16 @@ export class EditorComponent {
     this.historyController.recordNow();
   }
 
+  private applyFontSize(fontSize: string): void {
+    this.styleSelectionTracker.restoreTextSelection();
+    const affectedElements = this.textSelectionFormatter.applyFontSize(fontSize);
+    if (affectedElements.length === 0) return;
+
+    this.styleSelectionTracker.rememberTextSelection();
+    this.markEditedAfterInlineTextFormatChange(affectedElements);
+    this.historyController.recordNow();
+  }
+
   private transformTextNodes(block: HTMLElement, textCase: ParagraphTextCase): boolean {
     const walker = document.createTreeWalker(block, NodeFilter.SHOW_TEXT, {
       acceptNode: (node) => {
@@ -1308,7 +1342,18 @@ export class EditorComponent {
     const affectedPages = this.getAffectedPagesForBlocks(blocks);
     if (affectedPages.length === 0) return;
 
-    this.isDirty = true;
+    this.toolbar.updateActiveStates();
+    this.scheduleRebalance(affectedPages[0], true, {
+      compactPages: true,
+      force: true,
+      includePreviousPage: false,
+    });
+  }
+
+  private markEditedAfterInlineTextFormatChange(elements: HTMLElement[]): void {
+    const affectedPages = this.getAffectedPagesForBlocks(elements);
+    if (affectedPages.length === 0) return;
+
     this.toolbar.updateActiveStates();
     this.scheduleRebalance(affectedPages[0], true, {
       compactPages: true,
@@ -1321,7 +1366,6 @@ export class EditorComponent {
     const affectedPages = this.getAffectedPagesForBlocks(blocks);
     if (affectedPages.length === 0) return;
 
-    this.isDirty = true;
     this.toolbar.updateActiveStates();
 
     const firstOverflowPage = affectedPages.find((page) => this.layoutService.pageOverflows(page));
@@ -1356,7 +1400,6 @@ export class EditorComponent {
       this.pageBackspaceController.handleBackspaceAtPageStart(event, {
         pages: this.pages,
         onContentChanged: (previousPage) => {
-          this.isDirty = true;
           this.toolbar.updateActiveStates();
           this.scheduleRebalance(previousPage, true, { includePreviousPage: true });
           this.historyController.recordNow();
@@ -1375,7 +1418,6 @@ export class EditorComponent {
   private markEditedAndRebalance(element: HTMLElement): void {
     const page = element.closest<HTMLElement>(".hwe-page");
     if (!page) return;
-    this.isDirty = true;
     this.toolbar.updateActiveStates();
     this.scheduleRebalance(page, true, { includePreviousPage: false });
     this.historyController.recordNow();
@@ -1385,7 +1427,6 @@ export class EditorComponent {
     const page = image.closest<HTMLElement>(".hwe-page");
     if (!page) return;
 
-    this.isDirty = true;
     this.toolbar.updateActiveStates();
     this.layoutService.applyOfficialTableWidths(page);
     this.scheduleRebalance(page, false, {
@@ -1399,7 +1440,6 @@ export class EditorComponent {
     const page = this.getFirstTableFlowPage(table) ?? table.closest<HTMLElement>(".hwe-page");
     if (!page) return;
 
-    this.isDirty = true;
     this.toolbar.updateActiveStates();
     this.layoutService.applyOfficialTableWidths(page);
     this.scheduleRebalance(page, true, {
@@ -1440,22 +1480,16 @@ export class EditorComponent {
 
       const html = this.collectHtml();
       const printHtml = this.collectPrintHtml();
-      if (this.options.saveHtml) {
-        await this.options.saveHtml(html);
-        await this.savePrintHtml(printHtml);
-      } else {
-        await saveHtmlToFileField(
-          this.baseUrl,
-          this.entityName,
-          this.entityId,
-          this.fieldName,
-          html,
-          this.currentFileName
-        );
-        await this.savePrintHtml(printHtml);
-      }
+      await saveHtmlToFileField(
+        this.baseUrl,
+        this.entityName,
+        this.entityId,
+        this.fieldName,
+        html,
+        this.currentFileName
+      );
+      await this.savePrintHtml(printHtml);
 
-      this.isDirty = false;
       this.setStatus("Guardado correctamente", "success");
       window.setTimeout(() => this.setStatus("", ""), 3000);
     } catch (err) {
@@ -1481,12 +1515,22 @@ export class EditorComponent {
     await this.renderAndPaginate(currentHtml || "<p><br></p>");
   }
 
-  private async savePrintHtml(printHtml: string): Promise<void> {
-    if (this.options.savePrintHtml) {
-      await this.options.savePrintHtml(printHtml);
-      return;
-    }
+  private async ensureInitialPrintHtmlSaved(): Promise<void> {
+    if (!this.printHtmlFieldName) return;
 
+    const isPreparedFileEmpty = await isFileFieldEmpty(
+      this.baseUrl,
+      this.entityName,
+      this.entityId,
+      this.printHtmlFieldName
+    );
+    if (!isPreparedFileEmpty) return;
+
+    await this.refreshDynamicHeaderBeforeSave();
+    await this.savePrintHtml(this.collectPrintHtml());
+  }
+
+  private async savePrintHtml(printHtml: string): Promise<void> {
     if (!this.printHtmlFieldName) return;
 
     await saveHtmlToFileField(
@@ -1620,7 +1664,6 @@ export class EditorComponent {
   async loadHtml(html: string): Promise<void> {
     await this.renderAndPaginate(html || "<p><br></p>");
     this.historyController.reset();
-    this.isDirty = false;
     this.setStatus("", "");
   }
 
@@ -1728,6 +1771,8 @@ export class EditorComponent {
 
 interface IInputs {
   htmlContent: ComponentFramework.PropertyTypes.StringProperty;
+  entityName: ComponentFramework.PropertyTypes.StringProperty;
+  fieldName: ComponentFramework.PropertyTypes.StringProperty;
   printHtmlFieldName: ComponentFramework.PropertyTypes.StringProperty;
   styleEntitySetName: ComponentFramework.PropertyTypes.StringProperty;
   styleClassField: ComponentFramework.PropertyTypes.StringProperty;
@@ -1741,7 +1786,6 @@ interface IInputs {
   styleTypeFontValue: ComponentFramework.PropertyTypes.StringProperty;
   runtimeHeaderLogoEntitySetName: ComponentFramework.PropertyTypes.StringProperty;
   runtimeHeaderLogoImageField: ComponentFramework.PropertyTypes.StringProperty;
-  runtimeHeaderLogoRecordId: ComponentFramework.PropertyTypes.StringProperty;
   runtimeHeaderLogoIdField: ComponentFramework.PropertyTypes.StringProperty;
   runtimeHeaderLogoNameField: ComponentFramework.PropertyTypes.StringProperty;
   runtimeHeaderLogoNameValue: ComponentFramework.PropertyTypes.StringProperty;

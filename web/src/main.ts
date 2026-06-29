@@ -58,9 +58,6 @@ const getInitialHtml = (): string => {
 const editor = new EditorComponent(editorHost, undefined, {
   initialHtml: getInitialHtml(),
   paragraphStyleCatalog: SANDBOX_PARAGRAPH_STYLE_CATALOG,
-  saveHtml: (html) => {
-    localStorage.setItem(LOCAL_STORAGE_KEY, html);
-  },
 });
 
 void editor.init().then(() => {

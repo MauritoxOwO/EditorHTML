@@ -2,7 +2,20 @@ import { getMeaningfulChildren } from "../dom/EditableDom";
 
 const TEXT_FLOW_SELECTOR = "p, h1, h2, h3, h4, h5, h6, blockquote, pre, ul, ol, li";
 const LONG_TABLE_MIN_ROWS = 60;
-const LONG_TABLE_MIN_COLUMNS = 6;
+const COMPACT_TABLE_MIN_COLUMNS = 6;
+const DENSE_TABLE_MIN_COLUMNS = 8;
+const ULTRA_DENSE_TABLE_MIN_COLUMNS = 10;
+const COMPACT_TABLE_MAX_COLUMN_PERCENT = 10;
+const DENSE_TABLE_MAX_COLUMN_PERCENT = 8;
+const ULTRA_DENSE_TABLE_MAX_COLUMN_PERCENT = 6;
+const TABLE_DENSITY_CLASSES = [
+  "hwe-long-word-table",
+  "hwe-table-compact",
+  "hwe-table-dense",
+  "hwe-table-ultra-dense",
+];
+
+type TableDensity = "compact" | "dense" | "ultra-dense" | null;
 
 export class EditorLayoutService {
   applyOfficialTableWidths(root: HTMLElement): void {
@@ -58,7 +71,7 @@ export class EditorLayoutService {
     table.style.setProperty("margin-right", "0", "important");
     this.normalizeColumnWidths(table);
     this.clearTableStructureHeights(table);
-    this.normalizeLongTable(table);
+    this.normalizeTableDensity(table);
   }
 
   private normalizeColumnWidths(table: HTMLTableElement): void {
@@ -83,11 +96,60 @@ export class EditorLayoutService {
     return this.parseCssLength(styleWidth) ?? this.parseCssLength(attrWidth);
   }
 
-  private normalizeLongTable(table: HTMLTableElement): void {
+  private normalizeTableDensity(table: HTMLTableElement): void {
     const rowCount = table.querySelectorAll("tbody tr, tfoot tr").length;
     const columnCount = this.getColumnCount(table);
-    const isLongTable = rowCount >= LONG_TABLE_MIN_ROWS || columnCount >= LONG_TABLE_MIN_COLUMNS;
-    table.classList.toggle("hwe-long-word-table", isLongTable);
+    const minColumnPercent = this.getMinimumColumnPercent(table);
+    const density = this.getTableDensity(rowCount, columnCount, minColumnPercent);
+
+    TABLE_DENSITY_CLASSES.forEach((className) => table.classList.remove(className));
+    if (!density) return;
+
+    table.classList.add(`hwe-table-${density}`);
+    table.classList.add("hwe-long-word-table");
+  }
+
+  private getTableDensity(
+    rowCount: number,
+    columnCount: number,
+    minColumnPercent: number | null
+  ): TableDensity {
+    if (
+      columnCount >= ULTRA_DENSE_TABLE_MIN_COLUMNS ||
+      (minColumnPercent !== null && minColumnPercent <= ULTRA_DENSE_TABLE_MAX_COLUMN_PERCENT)
+    ) {
+      return "ultra-dense";
+    }
+    if (
+      columnCount >= DENSE_TABLE_MIN_COLUMNS ||
+      (minColumnPercent !== null && minColumnPercent <= DENSE_TABLE_MAX_COLUMN_PERCENT)
+    ) {
+      return "dense";
+    }
+    if (
+      rowCount >= LONG_TABLE_MIN_ROWS ||
+      columnCount >= COMPACT_TABLE_MIN_COLUMNS ||
+      (minColumnPercent !== null && minColumnPercent <= COMPACT_TABLE_MAX_COLUMN_PERCENT)
+    ) {
+      return "compact";
+    }
+
+    return null;
+  }
+
+  private getMinimumColumnPercent(table: HTMLTableElement): number | null {
+    const columns = Array.from(table.querySelectorAll<HTMLTableColElement>("col"));
+    if (columns.length === 0) return null;
+
+    const widths = columns.map((column) => this.readColumnWidth(column) ?? 0);
+    const total = widths.reduce((sum, width) => sum + width, 0);
+    if (total <= 0) return null;
+
+    return widths.reduce<number | null>((minimum, width) => {
+      if (width <= 0) return minimum;
+      const percent = (width / total) * 100;
+      return minimum === null ? percent : Math.min(minimum, percent);
+    }, null);
   }
 
   private getColumnCount(table: HTMLTableElement): number {

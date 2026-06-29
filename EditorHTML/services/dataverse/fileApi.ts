@@ -35,6 +35,35 @@ export async function fetchHtmlFromFileField(
   };
 }
 
+export async function isFileFieldEmpty(
+  baseUrl: string,
+  entityName: string,
+  entityId: string,
+  fieldName: string
+): Promise<boolean> {
+  const url = `${baseUrl}/api/data/v9.2/${entityName}(${entityId})/${fieldName}/$value`;
+
+  const response = await fetch(url, {
+    method: "GET",
+    headers: {
+      Accept: "application/octet-stream, */*",
+    },
+    credentials: "same-origin",
+  });
+
+  if (response.status === 204 || response.status === 404) return true;
+
+  if (!response.ok) {
+    const body = await response.text().catch(() => "");
+    throw new Error(
+      `No se pudo comprobar el archivo (HTTP ${response.status}). ${body}`
+    );
+  }
+
+  const buffer = await response.arrayBuffer();
+  return buffer.byteLength === 0;
+}
+
 export async function saveHtmlToFileField(
   baseUrl: string,
   entityName: string,
