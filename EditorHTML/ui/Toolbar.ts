@@ -24,6 +24,7 @@ export interface ToolbarOptions {
   onInsertPageBreak?: () => void;
   onApplyParagraphStyle?: (className: string) => void;
   onApplyParagraphTextCase?: (textCase: ParagraphTextCase) => void;
+  onApplyFontSize?: (fontSize: string) => void;
   onCommand?: (command: string) => boolean;
 }
 
@@ -102,7 +103,7 @@ export class Toolbar {
         label: String(s),
         selected: s === 11,
       })),
-      (value) => this.applyFontSize(value + "pt")
+      (value) => this.options.onApplyFontSize?.(value + "pt")
     );
     this.toolbar.appendChild(sizeSelect);
 
@@ -322,22 +323,5 @@ export class Toolbar {
 
   private hasSelectValue(select: HTMLSelectElement, value: string): boolean {
     return Array.from(select.options).some((option) => option.value === value);
-  }
-
-  private applyFontSize(size: string): void {
-    const sel = window.getSelection();
-    if (!sel || sel.rangeCount === 0 || sel.isCollapsed) return;
-
-    const range = sel.getRangeAt(0);
-    const span  = document.createElement("span");
-    span.style.fontSize = size;
-
-    try {
-      range.surroundContents(span);
-    } catch {
-      const fragment = range.extractContents();
-      span.appendChild(fragment);
-      range.insertNode(span);
-    }
   }
 }

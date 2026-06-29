@@ -1,7 +1,6 @@
 export interface RuntimeHeaderLogoTableConfig {
   entitySetName?: string;
   imageField?: string;
-  recordId?: string;
   idField?: string;
   nameField?: string;
   nameValue?: string;
@@ -13,13 +12,12 @@ export async function fetchRuntimeHeaderLogoSrc(
 ): Promise<string> {
   if (!baseUrl || !config.entitySetName || !config.imageField) return "";
 
-  const recordId =
-    cleanGuid(config.recordId) ?? (await fetchRuntimeHeaderLogoRecordId(baseUrl, config));
+  const recordId = await fetchRuntimeHeaderLogoRecordIdByName(baseUrl, config);
   if (!recordId) return "";
 
   const url =
     `${baseUrl.replace(/\/$/, "")}/api/data/v9.2/` +
-    `${config.entitySetName}(${recordId})/${config.imageField}/$value?size=full`;
+    `${config.entitySetName}(${recordId})/${config.imageField}/$value`;
 
   const blob = await fetchRuntimeHeaderLogoBlob(`${url}?size=full`).catch(() =>
     fetchRuntimeHeaderLogoBlob(url)
@@ -51,7 +49,7 @@ async function fetchRuntimeHeaderLogoBlob(url: string): Promise<Blob> {
   return response.blob();
 }
 
-async function fetchRuntimeHeaderLogoRecordId(
+async function fetchRuntimeHeaderLogoRecordIdByName(
   baseUrl: string,
   config: RuntimeHeaderLogoTableConfig
 ): Promise<string> {

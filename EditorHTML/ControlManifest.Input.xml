@@ -19,6 +19,22 @@
               required="false" 
     />
 
+    <property name="entityName"
+              display-name-key="HTML Entity Set Name"
+              description-key="Dataverse entity set name used to load and save the main HTML file"
+              of-type="SingleLine.Text"
+              usage="input"
+              required="false"
+    />
+
+    <property name="fieldName"
+              display-name-key="HTML File Field"
+              description-key="Dataverse file column schema name used to load and save the main HTML file"
+              of-type="SingleLine.Text"
+              usage="input"
+              required="false"
+    />
+
     <property name="printHtmlFieldName"
               display-name-key="Print HTML File Field"
               description-key="Dataverse file column schema name used to store HTML prepared for external PDF or API generation"
@@ -123,17 +139,9 @@
               required="false"
     />
 
-    <property name="runtimeHeaderLogoRecordId"
-              display-name-key="Runtime Header Logo Record Id"
-              description-key="Optional Dataverse row id for the BOCM runtime page header logo"
-              of-type="SingleLine.Text"
-              usage="input"
-              required="false"
-    />
-
     <property name="runtimeHeaderLogoIdField"
               display-name-key="Runtime Header Logo Id Field"
-              description-key="Primary id field used to find the BOCM runtime page header logo by name when no record id is configured"
+              description-key="Primary id field used to download the BOCM runtime page header logo after finding it by name"
               of-type="SingleLine.Text"
               usage="input"
               required="false"
@@ -141,7 +149,7 @@
 
     <property name="runtimeHeaderLogoNameField"
               display-name-key="Runtime Header Logo Name Field"
-              description-key="Name field used to find the BOCM runtime page header logo when no record id is configured"
+              description-key="Name field used to find the BOCM runtime page header logo"
               of-type="SingleLine.Text"
               usage="input"
               required="false"
@@ -149,7 +157,7 @@
 
     <property name="runtimeHeaderLogoNameValue"
               display-name-key="Runtime Header Logo Name Value"
-              description-key="Name value used to find the BOCM runtime page header logo when no record id is configured"
+              description-key="Name value used to find the BOCM runtime page header logo"
               of-type="SingleLine.Text"
               usage="input"
               required="false"
