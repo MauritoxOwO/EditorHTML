@@ -54,6 +54,7 @@ import {
 } from "../debug/DebugLogger";
 
 type PcfContext = ComponentFramework.Context<IInputs>;
+type RuntimeParameters = Record<string, { raw?: string | null }>;
 type StatusType = "success" | "error" | "saving" | "";
 type QueuedRebalance = Required<RebalanceOptions> & {
   page: HTMLElement;
@@ -117,7 +118,6 @@ export interface EditorComponentOptions {
   paragraphStyles?: ParagraphStyleDefinition[];
   paragraphFonts?: ParagraphFontFaceDefinition[];
   paragraphStyleCatalog?: ParagraphStyleCatalog;
-  runtimeHeaderLogoConfig?: RuntimeHeaderLogoTableConfig;
   runtimeHeaderLogoSrc?: string;
 }
 
@@ -195,69 +195,78 @@ export class EditorComponent {
     const runtime = (context ?? {}) as unknown as {
       page?: { getClientUrl?: () => string; entityId?: string };
       mode?: { contextInfo?: { entityId?: string; entityTypeName?: string } };
-      parameters?: Record<string, { raw?: string | null }>;
+      parameters?: RuntimeParameters;
     };
 
     this.baseUrl = this.getClientUrl(runtime);
     this.entityId = this.cleanGuid(
       runtime.page?.entityId ?? runtime.mode?.contextInfo?.entityId ?? ""
     );
-    this.entityName = "ays_versionanuncios";
-    this.fieldName = "ays_archivoanuncio";
-    this.printHtmlFieldName = this.getParameterValue(runtime.parameters, "printHtmlFieldName");
-    this.runtimeHeaderLogoConfig = {
+    this.entityName =
+      this.getParameterValue(runtime.parameters, "entityName") ?? DEFAULT_ENTITY_NAME;
+    this.fieldName =
+      this.getParameterValue(runtime.parameters, "fieldName") ?? DEFAULT_FIELD_NAME;
+    this.printHtmlFieldName =
+      this.getParameterValue(runtime.parameters, "printHtmlFieldName") ??
+      DEFAULT_PRINT_HTML_FIELD_NAME;
+
+    this.styleTableConfig = this.resolveStyleTableConfig(runtime.parameters);
+    this.runtimeHeaderLogoConfig = this.resolveRuntimeHeaderLogoConfig(runtime.parameters);
+  }
+
+  // Construye los parametros Dataverse de la tabla de estilos y del logo desde PCF o defaults.
+  private resolveStyleTableConfig(parameters?: RuntimeParameters): ParagraphStyleTableConfig {
+    return {
       entitySetName:
-        options.runtimeHeaderLogoConfig?.entitySetName ??
-        this.getParameterValue(runtime.parameters, "runtimeHeaderLogoEntitySetName") ??
-        DEFAULT_RUNTIME_HEADER_LOGO_CONFIG.entitySetName,
-      imageField:
-        options.runtimeHeaderLogoConfig?.imageField ??
-        this.getParameterValue(runtime.parameters, "runtimeHeaderLogoImageField") ??
-        DEFAULT_RUNTIME_HEADER_LOGO_CONFIG.imageField,
-      idField:
-        options.runtimeHeaderLogoConfig?.idField ??
-        this.getParameterValue(runtime.parameters, "runtimeHeaderLogoIdField") ??
-        DEFAULT_RUNTIME_HEADER_LOGO_CONFIG.idField,
-      nameField:
-        options.runtimeHeaderLogoConfig?.nameField ??
-        this.getParameterValue(runtime.parameters, "runtimeHeaderLogoNameField") ??
-        DEFAULT_RUNTIME_HEADER_LOGO_CONFIG.nameField,
-      nameValue:
-        options.runtimeHeaderLogoConfig?.nameValue ??
-        this.getParameterValue(runtime.parameters, "runtimeHeaderLogoNameValue") ??
-        DEFAULT_RUNTIME_HEADER_LOGO_NAME_VALUE,
-    };
-    this.styleTableConfig = {
-      entitySetName:
-        this.getParameterValue(runtime.parameters, "styleEntitySetName") ??
+        this.getParameterValue(parameters, "styleEntitySetName") ??
         DEFAULT_STYLE_TABLE_CONFIG.entitySetName,
       classField:
-        this.getParameterValue(runtime.parameters, "styleClassField") ??
+        this.getParameterValue(parameters, "styleClassField") ??
         DEFAULT_STYLE_TABLE_CONFIG.classField,
       cssField:
-        this.getParameterValue(runtime.parameters, "styleCssField") ??
+        this.getParameterValue(parameters, "styleCssField") ??
         DEFAULT_STYLE_TABLE_CONFIG.cssField,
       stateField:
-        this.getParameterValue(runtime.parameters, "styleStateField") ??
+        this.getParameterValue(parameters, "styleStateField") ??
         DEFAULT_STYLE_TABLE_CONFIG.stateField,
       dropdownField:
-        this.getParameterValue(runtime.parameters, "styleDropdownField") ??
+        this.getParameterValue(parameters, "styleDropdownField") ??
         DEFAULT_STYLE_TABLE_CONFIG.dropdownField,
       documentTypeField:
-        this.getParameterValue(runtime.parameters, "styleDocumentTypeField") ??
+        this.getParameterValue(parameters, "styleDocumentTypeField") ??
         DEFAULT_STYLE_TABLE_CONFIG.documentTypeField,
       documentTypeDropdownValue:
-        this.getParameterValue(runtime.parameters, "styleDocumentTypeDropdownValue") ??
+        this.getParameterValue(parameters, "styleDocumentTypeDropdownValue") ??
         DEFAULT_STYLE_TABLE_CONFIG.documentTypeDropdownValue,
       typeField:
-        this.getParameterValue(runtime.parameters, "styleTypeField") ??
+        this.getParameterValue(parameters, "styleTypeField") ??
         DEFAULT_STYLE_TABLE_CONFIG.typeField,
       styleTypeValue:
-        this.getParameterValue(runtime.parameters, "styleTypeStyleValue") ??
+        this.getParameterValue(parameters, "styleTypeStyleValue") ??
         DEFAULT_STYLE_TABLE_CONFIG.styleTypeValue,
       fontTypeValue:
-        this.getParameterValue(runtime.parameters, "styleTypeFontValue") ??
+        this.getParameterValue(parameters, "styleTypeFontValue") ??
         DEFAULT_STYLE_TABLE_CONFIG.fontTypeValue,
+    };
+  }
+
+  private resolveRuntimeHeaderLogoConfig(parameters?: RuntimeParameters): RuntimeHeaderLogoTableConfig {
+    return {
+      entitySetName:
+        this.getParameterValue(parameters, "runtimeHeaderLogoEntitySetName") ??
+        DEFAULT_RUNTIME_HEADER_LOGO_CONFIG.entitySetName,
+      imageField:
+        this.getParameterValue(parameters, "runtimeHeaderLogoImageField") ??
+        DEFAULT_RUNTIME_HEADER_LOGO_CONFIG.imageField,
+      idField:
+        this.getParameterValue(parameters, "runtimeHeaderLogoIdField") ??
+        DEFAULT_RUNTIME_HEADER_LOGO_CONFIG.idField,
+      nameField:
+        this.getParameterValue(parameters, "runtimeHeaderLogoNameField") ??
+        DEFAULT_RUNTIME_HEADER_LOGO_CONFIG.nameField,
+      nameValue:
+        this.getParameterValue(parameters, "runtimeHeaderLogoNameValue") ??
+        DEFAULT_RUNTIME_HEADER_LOGO_NAME_VALUE,
     };
   }
 
@@ -401,7 +410,7 @@ export class EditorComponent {
   }
 
   private getParameterValue(
-    parameters: Record<string, { raw?: string | null }> | undefined,
+    parameters: RuntimeParameters | undefined,
     name: string
   ): string | undefined {
     const value = parameters?.[name]?.raw?.trim();
