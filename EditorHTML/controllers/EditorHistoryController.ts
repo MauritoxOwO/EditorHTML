@@ -4,6 +4,7 @@ export interface EditorHistoryControllerOptions {
   collectSnapshot: () => string;
   restoreSnapshot: (snapshot: string) => Promise<void> | void;
   onRestored?: () => void;
+  onAvailabilityChanged?: (canUndo: boolean, canRedo: boolean) => void;
 }
 
 export class EditorHistoryController {
@@ -23,16 +24,25 @@ export class EditorHistoryController {
     return this.index > 0;
   }
 
-  handleShortcut(event: KeyboardEvent): boolean {
-    const isModifierPressed = event.ctrlKey || event.metaKey;
-    if (!isModifierPressed || event.altKey) return false;
+  get canRedo(): boolean {
+    return this.index >= 0 && this.index < this.snapshots.length - 1;
+  }
 
-    const isUndo = event.key.toLowerCase() === "z" && !event.shiftKey;
-    if (!isUndo) return false;
+  handleShortcut(event: KeyboardEvent): boolean {
+    if (event.altKey) return false;
+
+    const key = event.key.toLowerCase();
+    const isUndo = (event.ctrlKey || event.metaKey) && key === "z" && !event.shiftKey;
+    const isRedo = event.ctrlKey && !event.metaKey && key === "y" && !event.shiftKey;
+    if (!isUndo && !isRedo) return false;
 
     event.preventDefault();
     event.stopPropagation();
-    this.undo();
+    if (isRedo) {
+      this.redo();
+    } else {
+      this.undo();
+    }
     return true;
   }
 
@@ -41,6 +51,7 @@ export class EditorHistoryController {
     const snapshot = this.options.collectSnapshot();
     this.snapshots = [snapshot];
     this.index = 0;
+    this.notifyAvailabilityChanged();
   }
 
   scheduleRecord(): void {
@@ -72,6 +83,18 @@ export class EditorHistoryController {
     if (snapshot) void this.restore(snapshot);
   }
 
+  redo(): void {
+    if (this.isRestoring) return;
+
+    this.flushPendingRecord();
+    if (!this.canRedo) return;
+
+    this.index += 1;
+    this.notifyAvailabilityChanged();
+    const snapshot = this.snapshots[this.index];
+    if (snapshot) void this.restore(snapshot);
+  }
+
   destroy(): void {
     this.clearPendingRecord();
   }
@@ -92,12 +115,14 @@ export class EditorHistoryController {
       this.snapshots.shift();
     }
     this.index = this.snapshots.length - 1;
+    this.notifyAvailabilityChanged();
     return true;
   }
 
   private popUndoSnapshot(): string | null {
     if (!this.canUndo) return null;
     this.index -= 1;
+    this.notifyAvailabilityChanged();
     return this.snapshots[this.index] ?? null;
   }
 
@@ -118,5 +143,9 @@ export class EditorHistoryController {
     if (this.recordTimer === undefined) return;
     window.clearTimeout(this.recordTimer);
     this.recordTimer = undefined;
+  }
+
+  private notifyAvailabilityChanged(): void {
+    this.options.onAvailabilityChanged?.(this.canUndo, this.canRedo);
   }
 }

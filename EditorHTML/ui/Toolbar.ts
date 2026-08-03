@@ -1,10 +1,16 @@
 
+import type { TextCase } from "../controllers/TextSelectionFormatter";
+
 export interface ParagraphStyleOption {
   label: string;
   className: string;
 }
 
-export type ParagraphTextCase = "uppercase" | "lowercase";
+export interface SelectionFormattingInterface {
+  fontSize?: string;
+  fontFamily?: string;
+  paragraphStyle?: string;
+}
 
 export const CLEAR_PARAGRAPH_STYLE_VALUE = "__hwe-clear-paragraph-style";
 const DEFAULT_FONT_FAMILIES = [
@@ -18,12 +24,15 @@ const DEFAULT_FONT_FAMILIES = [
 
 export interface ToolbarOptions {
   onUndo?: () => void;
+  onRedo?: () => void;
+  onToggleUnorderedList?: () => void;
+  onToggleOrderedList?: () => void;
   onInsertTable?: () => void;
   onInsertRowAfter?: () => void;
   onDeleteRow?: () => void;
   onInsertPageBreak?: () => void;
   onApplyParagraphStyle?: (className: string) => void;
-  onApplyParagraphTextCase?: (textCase: ParagraphTextCase) => void;
+  onApplyTextCase?: (textCase: TextCase) => void;
   onApplyFontSize?: (fontSize: string) => void;
   onCommand?: (command: string) => boolean;
 }
@@ -31,7 +40,10 @@ export interface ToolbarOptions {
 export class Toolbar {
   private toolbar!: HTMLElement;
   private saveBtn!: HTMLButtonElement;
+  private undoBtn!: HTMLButtonElement;
+  private redoBtn!: HTMLButtonElement;
   private styleSelect!: HTMLSelectElement;
+  private sizeSelect!: HTMLSelectElement;
   private fontSelect!: HTMLSelectElement;
 
   private commandButtons = new Map<string, HTMLButtonElement>();
@@ -45,7 +57,9 @@ export class Toolbar {
 
     // Formato básico
     // Historial
-    this.addActionButton("↶", "Deshacer (Ctrl+Z)", () => this.options.onUndo?.());
+    this.undoBtn = this.addActionButton("↶", "Deshacer (Ctrl+Z)", () => this.options.onUndo?.());
+    this.redoBtn = this.addActionButton("↷", "Rehacer (Ctrl+Y)", () => this.options.onRedo?.());
+    this.setHistoryAvailability(false, false);
     this.addSep();
 
     this.addCmdButton("B",  "bold",      "<b>N</b>",  "Negrita (Ctrl+B)");
@@ -61,16 +75,26 @@ export class Toolbar {
     this.addSep();
 
     // Listas
-    this.addCmdButton("insertUnorderedList", "insertUnorderedList", "• Lista", "Lista con viñetas");
-    this.addCmdButton("insertOrderedList",   "insertOrderedList",   "1. Lista", "Lista numerada");
+    this.addStatefulActionButton(
+      "insertUnorderedList",
+      "• Lista",
+      "Lista con viñetas",
+      () => this.options.onToggleUnorderedList?.()
+    );
+    this.addStatefulActionButton(
+      "insertOrderedList",
+      "1. Lista",
+      "Lista numerada",
+      () => this.options.onToggleOrderedList?.()
+    );
     this.addSep();
 
-    // Transformacion de parrafos seleccionados
-    this.addActionButton("ABC", "Convertir parrafos seleccionados a mayusculas", () =>
-      this.options.onApplyParagraphTextCase?.("uppercase")
+    // Transformacion del texto seleccionado
+    this.addActionButton("ABC", "Convertir texto seleccionado a mayusculas", () =>
+      this.options.onApplyTextCase?.("uppercase")
     );
-    this.addActionButton("abc", "Convertir parrafos seleccionados a minusculas", () =>
-      this.options.onApplyParagraphTextCase?.("lowercase")
+    this.addActionButton("abc", "Convertir texto seleccionado a minusculas", () =>
+      this.options.onApplyTextCase?.("lowercase")
     );
     this.addSep();
 
@@ -80,7 +104,6 @@ export class Toolbar {
       [{ value: "", label: "Estilo", selected: true }],
       (value) => {
         if (value) this.options.onApplyParagraphStyle?.(value);
-        this.styleSelect.value = "";
       }
     );
     this.styleSelect.className = "hwe-style-select";
@@ -96,16 +119,16 @@ export class Toolbar {
     this.toolbar.appendChild(this.fontSelect);
 
     // Tamaño de fuente
-    const sizeSelect = this.makeSelect(
+    this.sizeSelect = this.makeSelect(
       "Tamaño",
-      [8, 9, 10, 11, 12, 14, 16, 18, 20, 24, 28, 36, 48].map((s) => ({
+      ["", 8, 9, 10, 11, 12, 14, 16, 18, 20, 24, 28, 36, 48].map((s) => ({
         value: String(s),
         label: String(s),
-        selected: s === 11,
+        selected: s === "",
       })),
       (value) => this.options.onApplyFontSize?.(value + "pt")
     );
-    this.toolbar.appendChild(sizeSelect);
+    this.toolbar.appendChild(this.sizeSelect);
 
     this.addSep();
 
@@ -172,6 +195,21 @@ export class Toolbar {
     document.addEventListener("selectionchange", this.handleSelectionChange);
 
     return this.toolbar;
+  }
+
+  setSelectionFormatting(state: SelectionFormattingInterface): void {
+    const fontSize = this.getCleanFontSizeValue(state.fontSize);
+    this.setSelectValue(this.sizeSelect, fontSize);
+    this.setSelectValue(this.fontSelect, state.fontFamily);
+
+    const paragraphStyle =
+      state.paragraphStyle === "" ? CLEAR_PARAGRAPH_STYLE_VALUE : state.paragraphStyle;
+    this.setSelectValue(this.styleSelect, paragraphStyle);
+  }
+
+  setHistoryAvailability(canUndo: boolean, canRedo: boolean): void {
+    if (this.undoBtn) this.undoBtn.disabled = !canUndo;
+    if (this.redoBtn) this.redoBtn.disabled = !canRedo;
   }
 
   getSaveButton(): HTMLButtonElement {
@@ -260,7 +298,11 @@ export class Toolbar {
     this.toolbar.appendChild(btn);
   }
 
-  private addActionButton(label: string, title: string, onAction: () => void): void {
+  private addActionButton(
+    label: string,
+    title: string,
+    onAction: () => void
+  ): HTMLButtonElement {
     const btn = document.createElement("button");
     btn.textContent = label;
     btn.title = title;
@@ -268,6 +310,24 @@ export class Toolbar {
       e.preventDefault();
       onAction();
     });
+    this.toolbar.appendChild(btn);
+    return btn;
+  }
+
+  private addStatefulActionButton(
+    command: string,
+    label: string,
+    title: string,
+    onAction: () => void
+  ): void {
+    const btn = document.createElement("button");
+    btn.textContent = label;
+    btn.title = title;
+    btn.addEventListener("mousedown", (event) => {
+      event.preventDefault();
+      onAction();
+    });
+    this.commandButtons.set(command, btn);
     this.toolbar.appendChild(btn);
   }
 
@@ -323,5 +383,28 @@ export class Toolbar {
 
   private hasSelectValue(select: HTMLSelectElement, value: string): boolean {
     return Array.from(select.options).some((option) => option.value === value);
+  }
+
+  private setSelectValue(select: HTMLSelectElement | undefined, value?: string): void {
+    if (!select) return;
+    if (!value) {
+      select.value = "";
+      return;
+    }
+
+    const matchingOption = Array.from(select.options).find(
+      (option) => option.value.toLowerCase() === value.toLowerCase()
+    );
+    select.value = matchingOption?.value ?? "";
+  }
+
+  private getCleanFontSizeValue(fontSize?: string): string {
+    if (!fontSize) return "";
+
+    const value = Number.parseFloat(fontSize);
+    if (!Number.isFinite(value)) return "";
+
+    const points = fontSize.endsWith("px") ? value * 0.75 : value;
+    return String(Math.round(points * 100) / 100);
   }
 }

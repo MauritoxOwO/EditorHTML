@@ -4,6 +4,7 @@ import {
   ParagraphStyleCatalog,
   ParagraphStyleDefinition,
 } from "./dataverse/styleApi";
+import { EDITOR_ROOT_SELECTOR } from "../dom/EditorCssScope";
 
 const GENERIC_FONT_FAMILIES = new Set([
   "serif",
@@ -135,7 +136,9 @@ export class ParagraphStyleManager {
 
   private formatParagraphStyleCss(style: ParagraphStyleDefinition): string {
     const declarations = this.getParagraphStyleDeclarations(style);
-    return declarations ? `.hwe-page-inner .${style.className} { ${declarations} }` : "";
+    return declarations
+      ? `${EDITOR_ROOT_SELECTOR} .hwe-page-inner .${style.className} { ${declarations} }`
+      : "";
   }
 
   private getParagraphStyleDeclarations(style: ParagraphStyleDefinition): string {

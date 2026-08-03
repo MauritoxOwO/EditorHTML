@@ -1,6 +1,6 @@
 import { getMeaningfulChildren } from "../dom/EditableDom";
 
-const TEXT_FLOW_SELECTOR = "p, h1, h2, h3, h4, h5, h6, blockquote, pre, ul, ol, li";
+const TEXT_FLOW_SELECTOR = "p, h1, h2, h3, h4, h5, h6, blockquote, pre, ul, ol";
 const LONG_TABLE_MIN_ROWS = 60;
 const COMPACT_TABLE_MIN_COLUMNS = 6;
 const DENSE_TABLE_MIN_COLUMNS = 8;
@@ -203,6 +203,7 @@ export class EditorLayoutService {
 
     inner.querySelectorAll<HTMLElement>(TEXT_FLOW_SELECTOR).forEach((element) => {
       if (element.closest("td, th")) return;
+      if (element.closest("li")) return;
       if (element.querySelector("img, table, tr, td, th, figure, video, canvas, svg")) return;
       element.classList.add("hwe-text-flow-block");
     });

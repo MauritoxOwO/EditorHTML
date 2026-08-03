@@ -12,6 +12,7 @@ import {
   removeComments,
   unwrapElement,
 } from "../dom/EditableDom";
+import { removeEditorRootFromSelector } from "../dom/EditorCssScope";
 import { unwrapGeneratedKeepTogetherGroups } from "../pagination/KeepTogetherController";
 import { addOcrTextLayers } from "../ocr/PdfOcrLayer";
 import { hweDebugLog, hweDebugStart } from "../debug/DebugLogger";
@@ -407,6 +408,9 @@ ${content}
     root.querySelectorAll<HTMLElement>(".hwe-image-selected").forEach((element) => {
       element.classList.remove("hwe-image-selected");
     });
+    root.querySelectorAll<HTMLElement>(".hwe-table-selected").forEach((element) => {
+      element.classList.remove("hwe-table-selected");
+    });
   }
 
   private removeDynamicDocumentHeader(root: HTMLElement): void {
@@ -439,7 +443,7 @@ ${content}
         const expandedSelectors = [...selectors];
 
         selectors.forEach((selector) => {
-          const documentSelector = selector.replace(
+          const documentSelector = removeEditorRootFromSelector(selector).replace(
             /(^|\s)\.hwe-page-inner(?=\s|$|[>+~])/g,
             '$1[data-hwe-document="true"]'
           );
@@ -615,6 +619,11 @@ body {
 }
 .hwe-page li {
   margin-bottom: 2pt;
+}
+.hwe-page li > ul,
+.hwe-page li > ol {
+  margin: 2pt 0 0;
+  padding-left: 24pt;
 }
 .hwe-page .hwe-text-flow-block {
   display: block !important;

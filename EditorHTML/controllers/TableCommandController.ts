@@ -1,3 +1,5 @@
+import { getTableFlowFragments, getTableFlowRows } from "../dom/TableFlow";
+
 export interface TableCommandContext {
   getActiveEditable: () => HTMLElement | null;
   getEditableForPageIndex: (pageIndex: number) => HTMLElement | null;
@@ -81,7 +83,7 @@ export class TableCommandController {
     const editable = row.closest<HTMLElement>("[contenteditable='true']");
     if (!table || !editable) return;
 
-    const flowRows = this.getTableFlowRows(table);
+    const flowRows = getTableFlowRows(this.context.rootProvider(), table);
     const adjacentRow =
       this.getSiblingTableRow(row.nextElementSibling) ??
       this.getSiblingTableRow(row.previousElementSibling);
@@ -99,7 +101,7 @@ export class TableCommandController {
 
     const nextRow = adjacentRow?.isConnected
       ? adjacentRow
-      : this.getTableFlowRows(table)[0] ?? null;
+      : getTableFlowRows(this.context.rootProvider(), table)[0] ?? null;
     this.lastSelectedTableRow = nextRow;
     const cell = nextRow?.cells[0] as HTMLElement | undefined;
     if (cell) this.placeCaretInElement(cell);
@@ -174,7 +176,7 @@ export class TableCommandController {
     menu.appendChild(
       this.makeContextMenuButton("Eliminar fila", () => this.deleteTableRow())
     );
-    document.body.appendChild(menu);
+    this.context.rootProvider().appendChild(menu);
     this.contextMenu = menu;
     return menu;
   }
@@ -191,31 +193,15 @@ export class TableCommandController {
     return button;
   }
 
-  private getTableFlowRows(table: HTMLTableElement): HTMLTableRowElement[] {
-    const flowId = table.getAttribute("data-hwe-table-flow-id");
-    if (!flowId) return Array.from(table.rows);
-
-    const rows: HTMLTableRowElement[] = [];
-    Array.from(this.context.rootProvider().querySelectorAll<HTMLTableElement>("table"))
-      .filter((candidate) => candidate.getAttribute("data-hwe-table-flow-id") === flowId)
-      .forEach((candidate) => rows.push(...Array.from(candidate.rows)));
-    return rows;
-  }
-
   private removeWholeTableFlow(table: HTMLTableElement): void {
     const flowRoot = this.getTableFlowRoot(table);
     const blank = document.createElement("p");
     blank.appendChild(document.createElement("br"));
     flowRoot.parentNode?.insertBefore(blank, flowRoot.nextSibling);
 
-    const flowId = table.getAttribute("data-hwe-table-flow-id");
-    if (flowId) {
-      Array.from(this.context.rootProvider().querySelectorAll<HTMLTableElement>("table"))
-        .filter((tableInFlow) => tableInFlow.getAttribute("data-hwe-table-flow-id") === flowId)
-        .forEach((tableInFlow) => this.getTableFlowRoot(tableInFlow).remove());
-    } else {
-      flowRoot.remove();
-    }
+    getTableFlowFragments(this.context.rootProvider(), table).forEach((fragment) =>
+      this.getTableFlowRoot(fragment).remove()
+    );
 
     this.lastSelectedTableRow = null;
     this.placeCaretInElement(blank);
