@@ -1,3 +1,5 @@
+export type TextCase = "uppercase" | "lowercase";
+
 export class TextSelectionFormatter {
   applyFontSize(size: string): HTMLElement[] {
     const selection = window.getSelection();
@@ -5,13 +7,33 @@ export class TextSelectionFormatter {
 
     const affectedElements: HTMLElement[] = [];
     for (let index = 0; index < selection.rangeCount; index++) {
-      affectedElements.push(...this.wrapSelectedTextNodes(selection.getRangeAt(index), size));
+      const targets = this.getSelectedTextTargets(selection.getRangeAt(index));
+      targets.forEach((target) => {
+        const element = this.wrapTextNodeTarget(target, size);
+        if (element) affectedElements.push(element);
+      });
     }
 
     return affectedElements;
   }
 
-  private wrapSelectedTextNodes(range: Range, size: string): HTMLElement[] {
+  transformSelectedTextCase(textCase: TextCase): HTMLElement[] {
+    const selection = window.getSelection();
+    if (!selection || selection.rangeCount === 0 || selection.isCollapsed) return [];
+
+    const affectedElements = new Set<HTMLElement>();
+    for (let index = 0; index < selection.rangeCount; index++) {
+      const targets = this.getSelectedTextTargets(selection.getRangeAt(index));
+      targets.forEach((target) => {
+        const element = this.transformTextTarget(target, textCase);
+        if (element) affectedElements.add(element);
+      });
+    }
+
+    return Array.from(affectedElements);
+  }
+
+  private getSelectedTextTargets(range: Range): TextTarget[] {
     const root =
       range.commonAncestorContainer.nodeType === Node.ELEMENT_NODE
         ? (range.commonAncestorContainer as HTMLElement)
@@ -40,9 +62,7 @@ export class TextSelectionFormatter {
       current = walker.nextNode() as Text | null;
     }
 
-    return targets
-      .map((target) => this.wrapTextNodeTarget(target, size))
-      .filter((element): element is HTMLElement => Boolean(element));
+    return targets;
   }
 
   private getSelectedTextTarget(range: Range, node: Text): TextTarget | null {
@@ -52,6 +72,22 @@ export class TextSelectionFormatter {
     if (start >= end) return null;
 
     return { node, start, end };
+  }
+
+  private transformTextTarget(target: TextTarget, textCase: TextCase): HTMLElement | null {
+    const { node, start, end } = target;
+    const parent = node.parentElement;
+    if (!parent) return null;
+
+    const selectedText = node.data.slice(start, end);
+    const transformedText =
+      textCase === "uppercase"
+        ? selectedText.toLocaleUpperCase("es-ES")
+        : selectedText.toLocaleLowerCase("es-ES");
+    if (transformedText === selectedText) return null;
+
+    node.replaceData(start, end - start, transformedText);
+    return parent;
   }
 
   private wrapTextNodeTarget(target: TextTarget, size: string): HTMLElement | null {

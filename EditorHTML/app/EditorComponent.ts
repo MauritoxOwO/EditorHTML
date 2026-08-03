@@ -3,7 +3,6 @@ import { CaretManager } from "../pagination/CaretManager";
 import { MANUAL_PAGE_BREAK_ATTR } from "../pagination/PaginatorDom";
 import {
   CLEAR_PARAGRAPH_STYLE_VALUE,
-  ParagraphTextCase,
   Toolbar,
 } from "../ui/Toolbar";
 import {
@@ -44,7 +43,14 @@ import { StyleSelectionTracker } from "../controllers/StyleSelectionTracker";
 import { TableDomIntegrityController } from "../controllers/TableDomIntegrityController";
 import { TableColumnResizeController } from "../controllers/TableColumnResizeController";
 import { TableCommandController } from "../controllers/TableCommandController";
-import { TextSelectionFormatter } from "../controllers/TextSelectionFormatter";
+import { TableSelectionController } from "../controllers/TableSelectionController";
+import { EDITOR_ROOT_CLASS } from "../dom/EditorCssScope";
+import { ListCommandController } from "../controllers/ListCommandController";
+import {
+  TextCase,
+  TextSelectionFormatter,
+} from "../controllers/TextSelectionFormatter";
+import { SelectionFormattingResolver } from "../controllers/SelectionFormattingResolver";
 import { EditorViewController } from "../ui/EditorViewController";
 import { RuntimePageHeaderRenderer } from "../ui/RuntimePageHeaderRenderer";
 import {
@@ -90,28 +96,6 @@ const API_HEADER_SELECTOR = `[${API_HEADER_ATTR}='true']`;
 const LEGACY_DYNAMIC_HEADER_SELECTOR = "[data-hwe-dynamic-header='true']";
 const MANAGED_HEADER_SELECTOR = `${API_HEADER_SELECTOR}, ${LEGACY_DYNAMIC_HEADER_SELECTOR}`;
 const DEFAULT_RUNTIME_HEADER_LOGO_NAME_VALUE = "logo-bocm.jpg";
-const LOCAL_PARAGRAPH_STYLES: ParagraphStyleDefinition[] = [
-  {
-    label: "Texto general",
-    className: "texto-general",
-    cssText: `.texto-general {
-  display: inline-block;
-  text-indent: 20pt;
-  margin: 0;
-  text-align: justify;
-  hyphens: auto;
-  -webkit-hyphens: auto;
-  -ms-hyphens: auto;
-  orphans: 2;
-  widows: 2;
-  font-family: "Swiss721 BT", "Swis721 BT", "SwissRoman", Helvetica, Arial, sans-serif;
-  font-weight: normal;
-  font-style: normal;
-  font-size: 11pt;
-}`,
-  },
-];
-
 export interface EditorComponentOptions {
   initialHtml?: string;
   loadHtml?: () => Promise<string> | string;
@@ -147,7 +131,10 @@ export class EditorComponent {
     collectSnapshot: () => this.collectHistoryHtml(),
     restoreSnapshot: (snapshot) => this.renderAndPaginate(snapshot),
     onRestored: () => {
-      this.toolbar.updateActiveStates();
+      this.updateToolbarSelectionState();
+    },
+    onAvailabilityChanged: (canUndo, canRedo) => {
+      this.toolbar?.setHistoryAvailability(canUndo, canRedo);
     },
   });
   private readonly tableDomIntegrityController = new TableDomIntegrityController();
@@ -157,8 +144,11 @@ export class EditorComponent {
   private diagnosticsController!: EditorDiagnosticsController;
   private paragraphStyleManager!: ParagraphStyleManager;
   private styleSelectionTracker!: StyleSelectionTracker;
+  private selectionFormattingResolver!: SelectionFormattingResolver;
   private tableColumnResizeController!: TableColumnResizeController;
   private tableCommandController!: TableCommandController;
+  private tableSelectionController!: TableSelectionController;
+  private listCommandController!: ListCommandController;
   private viewController!: EditorViewController;
   private pageSetup: PageSetup = DEFAULT_PAGE_SETUP;
   private allocatedWidth?: number;
@@ -184,7 +174,10 @@ export class EditorComponent {
   private pendingRebalance: QueuedRebalance | null = null;
   private readonly pagesNeedingPull = new WeakSet<HTMLElement>();
   private readonly pendingInputTypes = new WeakMap<HTMLElement, string>();
-  private readonly handleSelectionChange = (): void => this.styleSelectionTracker.rememberTextSelection();
+  private readonly handleSelectionChange = (): void => {
+    this.styleSelectionTracker.rememberTextSelection();
+    this.updateToolbarSelectionState();
+  };
   private isComposing = false;
 
   constructor(container: HTMLElement, context?: PcfContext, options: EditorComponentOptions = {}) {
@@ -293,7 +286,7 @@ export class EditorComponent {
     this.applyAllocatedSize();
 
     this.root = document.createElement("div");
-    this.root.className = "hwe-root";
+    this.root.className = EDITOR_ROOT_CLASS;
     this.applyCurrentPageSetup();
     installHweDebugGlobals(() => this.root ?? null);
     hweDebugLog("editor.buildShell", {
@@ -315,18 +308,32 @@ export class EditorComponent {
       onColumnsChanged: (table) => this.markTableColumnsChanged(table),
       rootProvider: () => this.root ?? null,
     });
+    this.tableSelectionController = new TableSelectionController({
+      rootProvider: () => this.root ?? null,
+      onTableChanged: (table) => this.markTableTextFormattingChanged(table),
+    });
+    this.listCommandController = new ListCommandController({
+      rootProvider: () => this.root ?? null,
+      getActiveEditable: () => this.getActiveEditable(),
+      onListChanged: (element) => this.markEditedAndRebalance(element),
+    });
     this.viewController = new EditorViewController(this.editorHeader);
 
     this.toolbar = new Toolbar({
       onUndo: () => this.historyController.undo(),
+      onRedo: () => this.historyController.redo(),
+      onToggleUnorderedList: () => this.listCommandController.toggleUnorderedList(),
+      onToggleOrderedList: () => this.listCommandController.toggleOrderedList(),
       onInsertTable: () => this.tableCommandController.insertTable(),
       onInsertRowAfter: () => this.tableCommandController.insertTableRowAfter(),
       onDeleteRow: () => this.tableCommandController.deleteTableRow(),
       onInsertPageBreak: () => this.insertManualPageBreak(),
       onApplyParagraphStyle: (className) => this.applyParagraphStyle(className),
-      onApplyParagraphTextCase: (textCase) => this.applyParagraphTextCase(textCase),
+      onApplyTextCase: (textCase) => this.applySelectedTextCase(textCase),
       onApplyFontSize: (fontSize) => this.applyFontSize(fontSize),
-      onCommand: (command) => this.imageResizeController?.handleToolbarCommand(command) ?? false,
+      onCommand: (command) =>
+        this.tableSelectionController.handleToolbarCommand(command) ||
+        (this.imageResizeController?.handleToolbarCommand(command) ?? false),
     });
     const toolbarEl = this.toolbar.build();
     this.toolbar.getSaveButton().addEventListener("click", () => void this.save());
@@ -336,6 +343,10 @@ export class EditorComponent {
       () => this.root,
       () => this.getActiveEditable()
     );
+    this.selectionFormattingResolver = new SelectionFormattingResolver({
+      rootProvider: () => this.root,
+      isParagraphStyleClass: (className) => this.paragraphStyleManager.hasClass(className),
+    });
     this.diagnosticsController = new EditorDiagnosticsController(
       () => this.root ?? null,
       (message, type) => this.setStatus(message, type)
@@ -353,6 +364,7 @@ export class EditorComponent {
     });
     this.imageResizeController.start();
     this.tableColumnResizeController.start();
+    this.tableSelectionController.start();
 
     this.updateViewTabs();
 
@@ -429,21 +441,14 @@ export class EditorComponent {
         : this.baseUrl
           ? await fetchParagraphStyleCatalog(this.baseUrl, this.styleTableConfig)
           : {
-              styles: LOCAL_PARAGRAPH_STYLES,
+              styles: [],
               fonts: [],
             };
 
-      this.paragraphStyleManager.setCatalog(
-        catalog.styles.length > 0
-          ? catalog
-          : {
-              styles: LOCAL_PARAGRAPH_STYLES,
-              fonts: catalog.fonts,
-            }
-      );
+      this.paragraphStyleManager.setCatalog(catalog);
     } catch (error) {
-      console.warn("[HtmlWordEditor] paragraph styles fallback:", error);
-      this.paragraphStyleManager.setStyles(LOCAL_PARAGRAPH_STYLES);
+      console.warn("[HtmlWordEditor] paragraph styles:", error);
+      this.paragraphStyleManager.setCatalog({ styles: [], fonts: [] });
     }
   }
 
@@ -766,7 +771,7 @@ export class EditorComponent {
       if (this.isDeleteInput(event.inputType)) this.pagesNeedingPull.add(page);
     });
     inner.addEventListener("input", () => {
-      this.toolbar.updateActiveStates();
+      this.updateToolbarSelectionState();
       if (!this.isComposing) {
         const inputType = this.pendingInputTypes.get(page) ?? "";
         this.pendingInputTypes.delete(page);
@@ -812,6 +817,7 @@ export class EditorComponent {
     inner.addEventListener("keyup", () => {
       this.styleSelectionTracker.rememberTextSelection();
       this.tableCommandController.rememberSelectedTableRow();
+      this.updateToolbarSelectionState();
     });
     inner.addEventListener("click", (event) => {
       this.tableCommandController.rememberTableRowFromEvent(event);
@@ -821,7 +827,7 @@ export class EditorComponent {
       this.styleSelectionTracker.rememberStyleBlockFromEvent(event);
       this.styleSelectionTracker.rememberTextSelection();
       this.tableCommandController.rememberSelectedTableRow();
-      this.toolbar.updateActiveStates();
+      this.updateToolbarSelectionState();
     });
 
     this.runtimePageHeaderRenderer.ensureHeader(page);
@@ -1057,7 +1063,7 @@ export class EditorComponent {
     }
     this.layoutService.applyOfficialTableWidths(affectedPage);
 
-    this.toolbar.updateActiveStates();
+    this.updateToolbarSelectionState();
     this.scheduleRebalance(affectedPage, false, {
       compactPages: false,
       includePreviousPage: false,
@@ -1078,7 +1084,7 @@ export class EditorComponent {
     this.blankLineController.syncEditableBlankBlocks(inner, false);
     this.layoutService.applyOfficialTableWidths(page);
 
-    this.toolbar.updateActiveStates();
+    this.updateToolbarSelectionState();
     this.scheduleRebalance(page, false, {
       compactPages: false,
       includePreviousPage: false,
@@ -1101,7 +1107,7 @@ export class EditorComponent {
     this.layoutService.applyOfficialTableWidths(page);
     this.placeCaretAtStart(caretTarget ?? marker.nextSibling, editable);
 
-    this.toolbar.updateActiveStates();
+    this.updateToolbarSelectionState();
     this.scheduleRebalance(page, false, {
       compactPages: true,
       force: true,
@@ -1285,26 +1291,19 @@ export class EditorComponent {
     this.historyController.recordNow();
   }
 
-  private applyParagraphTextCase(textCase: ParagraphTextCase): void {
+  private applySelectedTextCase(textCase: TextCase): void {
     this.styleSelectionTracker.restoreTextSelection();
-    const blocks = this.styleSelectionTracker.getSelectedStyleBlocks();
-    if (blocks.length === 0) {
-      this.setStatus("Selecciona un parrafo para cambiar mayusculas/minusculas.", "error");
-      return;
-    }
-
-    const changed = blocks.reduce(
-      (hasChanged, block) => this.transformTextNodes(block, textCase) || hasChanged,
-      false
-    );
-    if (!changed) return;
+    const affectedElements = this.textSelectionFormatter.transformSelectedTextCase(textCase);
+    if (affectedElements.length === 0) return;
 
     this.styleSelectionTracker.rememberTextSelection();
-    this.markEditedAfterParagraphTextCaseChange(blocks);
+    this.markEditedAfterInlineTextFormatChange(affectedElements);
     this.historyController.recordNow();
   }
 
   private applyFontSize(fontSize: string): void {
+    if (this.tableSelectionController.applyFontSize(fontSize)) return;
+
     this.styleSelectionTracker.restoreTextSelection();
     const affectedElements = this.textSelectionFormatter.applyFontSize(fontSize);
     if (affectedElements.length === 0) return;
@@ -1314,53 +1313,11 @@ export class EditorComponent {
     this.historyController.recordNow();
   }
 
-  private transformTextNodes(block: HTMLElement, textCase: ParagraphTextCase): boolean {
-    const walker = document.createTreeWalker(block, NodeFilter.SHOW_TEXT, {
-      acceptNode: (node) => {
-        const parent = node.parentElement;
-        if (!parent || parent.closest("[contenteditable='false']")) {
-          return NodeFilter.FILTER_REJECT;
-        }
-
-        return NodeFilter.FILTER_ACCEPT;
-      },
-    });
-    let changed = false;
-    let current = walker.nextNode() as Text | null;
-
-    while (current) {
-      const currentText = current.textContent ?? "";
-      const nextText =
-        textCase === "uppercase"
-          ? currentText.toLocaleUpperCase("es-ES")
-          : currentText.toLocaleLowerCase("es-ES");
-      if (nextText !== currentText) {
-        current.textContent = nextText;
-        changed = true;
-      }
-      current = walker.nextNode() as Text | null;
-    }
-
-    return changed;
-  }
-
-  private markEditedAfterParagraphTextCaseChange(blocks: HTMLElement[]): void {
-    const affectedPages = this.getAffectedPagesForBlocks(blocks);
-    if (affectedPages.length === 0) return;
-
-    this.toolbar.updateActiveStates();
-    this.scheduleRebalance(affectedPages[0], true, {
-      compactPages: true,
-      force: true,
-      includePreviousPage: false,
-    });
-  }
-
   private markEditedAfterInlineTextFormatChange(elements: HTMLElement[]): void {
     const affectedPages = this.getAffectedPagesForBlocks(elements);
     if (affectedPages.length === 0) return;
 
-    this.toolbar.updateActiveStates();
+    this.updateToolbarSelectionState();
     this.scheduleRebalance(affectedPages[0], true, {
       compactPages: true,
       force: true,
@@ -1372,7 +1329,7 @@ export class EditorComponent {
     const affectedPages = this.getAffectedPagesForBlocks(blocks);
     if (affectedPages.length === 0) return;
 
-    this.toolbar.updateActiveStates();
+    this.updateToolbarSelectionState();
 
     const firstOverflowPage = affectedPages.find((page) => this.layoutService.pageOverflows(page));
     if (firstOverflowPage) {
@@ -1396,6 +1353,8 @@ export class EditorComponent {
   private onPageKeyDown(event: KeyboardEvent): void {
     if (this.historyController.handleShortcut(event)) return;
 
+    if (this.listCommandController.handleKeyDown(event)) return;
+
     if (event.ctrlKey && event.key.toLowerCase() === "s") {
       event.preventDefault();
       void this.save();
@@ -1406,7 +1365,7 @@ export class EditorComponent {
       this.pageBackspaceController.handleBackspaceAtPageStart(event, {
         pages: this.pages,
         onContentChanged: (previousPage) => {
-          this.toolbar.updateActiveStates();
+          this.updateToolbarSelectionState();
           this.scheduleRebalance(previousPage, true, { includePreviousPage: true });
           this.historyController.recordNow();
         },
@@ -1424,7 +1383,7 @@ export class EditorComponent {
   private markEditedAndRebalance(element: HTMLElement): void {
     const page = element.closest<HTMLElement>(".hwe-page");
     if (!page) return;
-    this.toolbar.updateActiveStates();
+    this.updateToolbarSelectionState();
     this.scheduleRebalance(page, true, { includePreviousPage: false });
     this.historyController.recordNow();
   }
@@ -1433,7 +1392,7 @@ export class EditorComponent {
     const page = image.closest<HTMLElement>(".hwe-page");
     if (!page) return;
 
-    this.toolbar.updateActiveStates();
+    this.updateToolbarSelectionState();
     this.layoutService.applyOfficialTableWidths(page);
     this.scheduleRebalance(page, false, {
       compactPages: false,
@@ -1446,8 +1405,19 @@ export class EditorComponent {
     const page = this.getFirstTableFlowPage(table) ?? table.closest<HTMLElement>(".hwe-page");
     if (!page) return;
 
-    this.toolbar.updateActiveStates();
+    this.updateToolbarSelectionState();
     this.layoutService.applyOfficialTableWidths(page);
+    this.scheduleRebalance(page, true, {
+      compactPages: true,
+      includePreviousPage: false,
+    });
+    this.historyController.recordNow();
+  }
+
+  private markTableTextFormattingChanged(table: HTMLTableElement): void {
+    const page = this.getFirstTableFlowPage(table) ?? table.closest<HTMLElement>(".hwe-page");
+    if (!page) return;
+
     this.scheduleRebalance(page, true, {
       compactPages: true,
       includePreviousPage: false,
@@ -1616,6 +1586,11 @@ export class EditorComponent {
     this.statusMsg.className = "hwe-status-msg" + (type ? ` ${type}` : "");
   }
 
+  private updateToolbarSelectionState(): void {
+    this.toolbar.updateActiveStates();
+    this.toolbar.setSelectionFormatting(this.selectionFormattingResolver.resolve());
+  }
+
   private getActiveEditable(): HTMLElement | null {
     const active = document.activeElement as HTMLElement | null;
     if (active?.matches("[contenteditable='true']") && this.root.contains(active)) {
@@ -1699,6 +1674,7 @@ export class EditorComponent {
     this.imageResizeController?.destroy();
     this.tableColumnResizeController?.destroy();
     this.tableCommandController?.destroy();
+    this.tableSelectionController?.destroy();
     this.paragraphStyleManager?.destroy();
     this.toolbar?.destroy();
     this.paginator?.destroy();

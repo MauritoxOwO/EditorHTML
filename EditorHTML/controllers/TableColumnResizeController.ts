@@ -1,3 +1,5 @@
+import { getTableFlowFragments } from "../dom/TableFlow";
+
 export interface TableColumnResizeControllerOptions {
   onColumnsChanged: (table: HTMLTableElement) => void;
   rootProvider: () => HTMLElement | null;
@@ -106,7 +108,7 @@ export class TableColumnResizeController {
     const startWidths = this.readColumnWidths(hit.table, columnCount, tableWidth);
 
     this.dragState = {
-      affectedTables: this.getAffectedTables(hit.table),
+      affectedTables: getTableFlowFragments(this.options.rootProvider(), hit.table),
       boundaryIndex: hit.boundaryIndex,
       columnCount,
       currentWidths: startWidths,
@@ -335,19 +337,6 @@ export class TableColumnResizeController {
     return Array.from(table.children).find(
       (child) => child.tagName === "COLGROUP"
     ) as HTMLTableColElement | null;
-  }
-
-  private getAffectedTables(table: HTMLTableElement): HTMLTableElement[] {
-    const flowId = table.getAttribute("data-hwe-table-flow-id");
-    if (!flowId) return [table];
-
-    const root = this.options.rootProvider();
-    if (!root) return [table];
-
-    const tables = Array.from(root.querySelectorAll<HTMLTableElement>(TABLE_SELECTOR)).filter(
-      (candidate) => candidate.getAttribute("data-hwe-table-flow-id") === flowId
-    );
-    return tables.length > 0 ? tables : [table];
   }
 
   private ensureGuide(): void {

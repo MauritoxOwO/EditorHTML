@@ -1,8 +1,10 @@
+import { EDITOR_ROOT_CLASS } from "../dom/EditorCssScope";
+
 const PARAGRAPH_STYLE_BLOCK_SELECTOR = "p, div, li, h1, h2, h3, h4, h5, h6, blockquote, pre";
 const EDITOR_CONTAINER_CLASS_NAMES = new Set([
   "hwe-page",
   "hwe-page-inner",
-  "hwe-root",
+  EDITOR_ROOT_CLASS,
   "hwe-workspace",
   "hwe-table-flow-wrapper",
   "hwe-keep-together",
@@ -126,9 +128,9 @@ export class StyleSelectionTracker {
     blockRange.selectNodeContents(block);
 
     const startsBeforeBlockEnds =
-      range.compareBoundaryPoints(Range.START_TO_END, blockRange) < 0;
+      range.compareBoundaryPoints(Range.START_TO_END, blockRange) > 0;
     const endsAfterBlockStarts =
-      range.compareBoundaryPoints(Range.END_TO_START, blockRange) > 0;
+      range.compareBoundaryPoints(Range.END_TO_START, blockRange) < 0;
     return startsBeforeBlockEnds && endsAfterBlockStarts;
   }
 
