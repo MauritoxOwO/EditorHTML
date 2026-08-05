@@ -72,7 +72,7 @@ const DEFAULT_STYLE_TABLE_CONFIG: ParagraphStyleTableConfig = {
   classField: "ays_nombre",
   cssField: "ays_contenido",
   stateField: "statecode",
-  dropdownField: "ays_mostrardesplegable_sn",
+  dropdownField: "ays_mostrarendesplegable_sn",
   documentTypeField: "ays_tipodoc_opt",
   documentTypeDropdownValue: "864480000",
   typeField: "ays_tipo_opt",
@@ -83,10 +83,10 @@ const DEFAULT_ENTITY_NAME = "ays_versionanuncios";
 const DEFAULT_FIELD_NAME = "ays_archivoanuncio";
 const DEFAULT_PRINT_HTML_FIELD_NAME = "ays_archivoanuncio2";
 const DEFAULT_RUNTIME_HEADER_LOGO_CONFIG: RuntimeHeaderLogoTableConfig = {
-  entitySetName: "ays_parametroscsses",
+  entitySetName: "ays_parametrocsses",
   imageField: "ays_archivoimagen",
   idField: "ays_parametrocssid",
-  nameField: "ays_name",
+  nameField: "ays_nombre",
 };
 const DEFAULT_MODEL_DRIVEN_EDITOR_HEIGHT_PX = 900;
 const API_HEADER_ATTR = "data-hwe-api-header";
@@ -95,7 +95,7 @@ const API_HEADER_SOURCE = "ays_GenerarCabeceraAnuncio";
 const API_HEADER_SELECTOR = `[${API_HEADER_ATTR}='true']`;
 const LEGACY_DYNAMIC_HEADER_SELECTOR = "[data-hwe-dynamic-header='true']";
 const MANAGED_HEADER_SELECTOR = `${API_HEADER_SELECTOR}, ${LEGACY_DYNAMIC_HEADER_SELECTOR}`;
-const DEFAULT_RUNTIME_HEADER_LOGO_NAME_VALUE = "logo-bocm.jpg";
+const DEFAULT_RUNTIME_HEADER_LOGO_NAME_VALUE = "Logo anuncio";
 export interface EditorComponentOptions {
   initialHtml?: string;
   loadHtml?: () => Promise<string> | string;
@@ -1014,7 +1014,6 @@ export class EditorComponent {
     let previousPage: HTMLElement | null = null;
 
     this.pages.forEach((page, index) => {
-      console.log(index);
       this.runtimePageHeaderRenderer.ensureHeader(page, index + 1);
       if (index === 0) {
         if (this.workspace.firstElementChild !== page) {

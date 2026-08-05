@@ -31,7 +31,7 @@ export class RuntimePageHeaderRenderer {
     const pageNumberElement = header.querySelector(".bocm-meta-right");
     if (!pageNumberElement) return;
 
-    pageNumberElement.textContent = `P&aacute;g. ${index}`;
+    pageNumberElement.textContent = `Pág. ${index}`;
   }
 
   private createHeader(): HTMLElement {
@@ -45,13 +45,13 @@ export class RuntimePageHeaderRenderer {
       <header class="bocm-page-header">
         <div class="bocm-header-top">
           <img class="bocm-logo" alt="BOCM" height="68" />
-          <div class="bocm-header-title">BOLET&Iacute;N OFICIAL DE LA COMUNIDAD DE MADRID</div>
+          <div class="bocm-header-title">BOLETÍN OFICIAL DE LA COMUNIDAD DE MADRID</div>
         </div>
         <div class="bocm-separator"></div>
         <div class="bocm-header-meta">
-          <span class="bocm-meta-left">B.O.C.M. N&uacute;m. X</span>
+          <span class="bocm-meta-left">B.O.C.M. Núm. X</span>
           <span class="bocm-meta-center">XXXXXX X DE XXXXX DE 2026</span>
-          <span class="bocm-meta-right">P&aacute;g. X</span>
+          <span class="bocm-meta-right">Pág. X</span>
         </div>
       </header>
     `;

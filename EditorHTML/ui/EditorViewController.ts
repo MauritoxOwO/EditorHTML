@@ -9,7 +9,13 @@ export class EditorViewController {
 
     this.visualTabBtn = this.makeViewTabButton("Editor");
 
+    const versionLabel = document.createElement("span");
+    versionLabel.className = "hwe-version-label";
+    versionLabel.textContent = `v1.10`;
+    
+
     viewTabs.appendChild(this.visualTabBtn);
+    viewTabs.appendChild(versionLabel);
     this.header.appendChild(viewTabs);
   }
 

@@ -178,6 +178,13 @@
   background: #ededed;
 }
 
+.pcf-html-editor-root .hwe-view-tabs-label {
+  margin-left: 8px;
+  color: #555;
+  font-size: 12px;
+  align-self: center;
+}
+
 .pcf-html-editor-root .hwe-view-tabs button {
   min-width: 72px;
   padding: 5px 12px;
