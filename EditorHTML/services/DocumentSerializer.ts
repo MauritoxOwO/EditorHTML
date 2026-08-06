@@ -12,7 +12,10 @@ import {
   removeComments,
   unwrapElement,
 } from "../dom/EditableDom";
-import { removeEditorRootFromSelector } from "../dom/EditorCssScope";
+import {
+  rebaseEditorCssForPdf,
+  removeEditorRootFromSelector,
+} from "../dom/EditorCssScope";
 import { unwrapGeneratedKeepTogetherGroups } from "../pagination/KeepTogetherController";
 import { addOcrTextLayers } from "../ocr/PdfOcrLayer";
 import { hweDebugLog, hweDebugStart } from "../debug/DebugLogger";
@@ -158,7 +161,9 @@ export class DocumentSerializer {
       .map((style) => style.textContent ?? "")
       .filter(Boolean)
       .join("\n");
-    const css = this.sanitizeStyleText([preservedCss, additionalCss].filter(Boolean).join("\n"));
+    const css = rebaseEditorCssForPdf(
+      this.sanitizeStyleText([preservedCss, additionalCss].filter(Boolean).join("\n"))
+    );
 
     return `<!doctype html>
 <html>

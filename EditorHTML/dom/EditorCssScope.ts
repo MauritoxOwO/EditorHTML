@@ -8,3 +8,19 @@ export function removeEditorRootFromSelector(selector: string): string {
     ? trimmedSelector.slice(scopedPrefix.length)
     : trimmedSelector;
 }
+
+export function rebaseEditorCssForPdf(css: string): string {
+  const editorRootPattern = escapeRegExp(EDITOR_ROOT_SELECTOR);
+
+  return css
+    .replace(
+      new RegExp(`${editorRootPattern}\\s+\\.hwe-page-inner\\b`, "g"),
+      ".hwe-page .hwe-page-inner"
+    )
+    .replace(new RegExp(`${editorRootPattern}\\s+\\.hwe-page\\b`, "g"), ".hwe-page")
+    .replace(new RegExp(`${editorRootPattern}\\s+`, "g"), "");
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
