@@ -164,9 +164,80 @@
   background: #eef6fc;
 }
 
-.pcf-html-editor-root .hwe-page table.hwe-table-selected {
-  outline: 2px solid #0078d4;
-  outline-offset: 2px;
+.pcf-html-editor-root .hwe-table-selection-toolbar {
+  position: absolute;
+  z-index: 100003;
+  display: none;
+  gap: 2px;
+  padding: 3px;
+  border: 1px solid #8f8f8f;
+  border-radius: 4px;
+  background: #fff;
+  box-shadow: 0 2px 7px rgba(0, 0, 0, 0.2);
+  box-sizing: border-box;
+  font-family: "Segoe UI", Arial, sans-serif;
+}
+
+.pcf-html-editor-root .hwe-table-selection-toolbar button {
+  min-width: 54px;
+  padding: 3px 8px;
+  border: 1px solid transparent;
+  border-radius: 3px;
+  background: transparent;
+  color: #1f1f1f;
+  cursor: pointer;
+  font: 12px/1.4 "Segoe UI", Arial, sans-serif;
+}
+
+.pcf-html-editor-root .hwe-table-selection-toolbar button:hover,
+.pcf-html-editor-root .hwe-table-selection-toolbar button:focus-visible {
+  outline: none;
+  border-color: #88aadd;
+  background: #eef6fc;
+}
+
+.pcf-html-editor-root .hwe-table-selection-toolbar button.hwe-active {
+  border-color: #4a90d9;
+  background: #c7dff7;
+  font-weight: 600;
+}
+
+.pcf-html-editor-root .hwe-table-selection-toolbar button:disabled {
+  border-color: transparent;
+  background: transparent;
+  color: #8a8a8a;
+  cursor: not-allowed;
+}
+
+.pcf-html-editor-root .hwe-table-selection-hint {
+  align-self: center;
+  max-width: 150px;
+  padding: 0 4px;
+  color: #555;
+  font: 11px/1.2 "Segoe UI", Arial, sans-serif;
+  white-space: normal;
+}
+
+.pcf-html-editor-root .hwe-table-selection-overlay {
+  position: absolute;
+  z-index: 100001;
+  border: 2px solid #0078d4;
+  background: rgba(0, 120, 212, 0.08);
+  box-sizing: border-box;
+  pointer-events: none;
+}
+
+.pcf-html-editor-root .hwe-table-selection-overlay-table {
+  background: transparent;
+}
+
+.pcf-html-editor-root .hwe-table-selection-overlay-row {
+  background: rgba(0, 120, 212, 0.1);
+}
+
+.pcf-html-editor-root .hwe-table-selection-overlay-column {
+  border-width: 1px;
+  background: rgba(0, 120, 212, 0.13);
 }
 
 .pcf-html-editor-root .hwe-view-tabs {

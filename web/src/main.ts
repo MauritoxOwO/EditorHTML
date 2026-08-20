@@ -60,13 +60,20 @@ const editor = new EditorComponent(editorHost, undefined, {
   paragraphStyleCatalog: SANDBOX_PARAGRAPH_STYLE_CATALOG,
 });
 
-void editor.init().then(() => {
-  if (fixtureName) {
-    void loadFixture(fixtureName);
-  }
-});
+void initializeEditor();
+
+async function initializeEditor(): Promise<void> {
+  await editor.init();
+  if (fixtureName) await loadFixture(fixtureName);
+}
 
 async function loadFixture(name: string): Promise<void> {
+  if (name === "table-selection-10-pages") {
+    sourceName!.textContent = "Fixture: tabla de 10 paginas";
+    await editor.loadHtml(makeLongTableHtml(135));
+    return;
+  }
+
   const response = await fetch(`/fixtures/${encodeURIComponent(name)}.html`, {
     cache: "no-store",
   });
@@ -78,6 +85,39 @@ async function loadFixture(name: string): Promise<void> {
   const html = await response.text();
   sourceName!.textContent = `Fixture: ${name}`;
   await editor.loadHtml(html);
+}
+
+function makeLongTableHtml(rowCount: number): string {
+  const rows = Array.from({ length: rowCount }, (_, index) => {
+    const rowNumber = index + 1;
+    const id = String(rowNumber).padStart(3, "0");
+    const status = rowNumber % 3 === 0 ? "Revision" : "Activo";
+    const team = `Equipo ${(rowNumber % 5) + 1}`;
+
+    return `<tr style="height:35pt">
+      <td style="border:1px solid #333;padding:4px;text-align:center">${id}</td>
+      <td style="border:1px solid #333;padding:4px;text-align:center">${status}</td>
+      <td style="border:1px solid #333;padding:4px">Fila ${id} de la prueba de seleccion distribuida en diez paginas. El texto fuerza una altura estable y permite identificar el fragmento seleccionado.</td>
+      <td style="border:1px solid #333;padding:4px;text-align:center">${team}</td>
+    </tr>`;
+  }).join("");
+
+  return `<h1>Tabla de seleccion de diez paginas</h1>
+    <p>Fixture generado por el sandbox para validar seleccion de filas y columnas entre fragmentos.</p>
+    <table data-hwe-repeat-header="true" style="width:100%;border-collapse:collapse;table-layout:fixed">
+      <colgroup>
+        <col style="width:12%"><col style="width:18%"><col style="width:50%"><col style="width:20%">
+      </colgroup>
+      <thead>
+        <tr style="height:30pt">
+          <th style="border:1px solid #333;padding:4px">ID</th>
+          <th style="border:1px solid #333;padding:4px">Estado</th>
+          <th style="border:1px solid #333;padding:4px">Descripcion</th>
+          <th style="border:1px solid #333;padding:4px">Responsable</th>
+        </tr>
+      </thead>
+      <tbody>${rows}</tbody>
+    </table>`;
 }
 
 fileInput.addEventListener("change", async () => {

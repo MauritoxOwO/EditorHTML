@@ -15,7 +15,7 @@ export function rebaseEditorCssForPdf(css: string): string {
   return css
     .replace(
       new RegExp(`${editorRootPattern}\\s+\\.hwe-page-inner\\b`, "g"),
-      ".hwe-page .hwe-page-inner"
+      ".hwe-page-inner"
     )
     .replace(new RegExp(`${editorRootPattern}\\s+\\.hwe-page\\b`, "g"), ".hwe-page")
     .replace(new RegExp(`${editorRootPattern}\\s+`, "g"), "");
