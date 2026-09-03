@@ -1,4 +1,5 @@
 import { hweDebugLog } from "../debug/DebugLogger";
+import { ensureFlowIdentity, INLINE_FLOW_ID } from "./FlowIdentity";
 import {
   isAtomicElement,
   isEmptyNode,
@@ -91,6 +92,7 @@ export class TextBlockSplitter {
       return true;
     }
 
+    ensureFlowIdentity(element, INLINE_FLOW_ID);
     const clone = element.cloneNode(false) as HTMLElement;
     const moved = this.moveLastInlinePiece(element, clone);
 

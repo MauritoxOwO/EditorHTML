@@ -3,6 +3,13 @@ import { TablePaginator } from "./TablePaginator";
 import { TextBlockSplitter } from "./TextBlockSplitter";
 import { hweDebugLog, hweDebugStart } from "../debug/DebugLogger";
 import {
+  AUTO_IMAGE_MAX_HEIGHT,
+  CONTAINER_FLOW_ID,
+  ensureFlowIdentity,
+  GENERATED_ROW_GROUP,
+  ROW_GROUP_ORIGIN,
+} from "./FlowIdentity";
+import {
   getContentHeight,
   getContentLimitBottom,
   getInner,
@@ -249,6 +256,11 @@ export class Paginator {
   private mergeTableRows(targetTable: HTMLElement, sourceTable: HTMLElement): void {
     const targetBody = this.getOrCreateTableBody(targetTable);
     this.getTableBodyRows(sourceTable).forEach((row) => targetBody.appendChild(row));
+    // Rebalancing gathers rows into one tbody; retain their original grouping
+    // for comparison, just as when TablePaginator creates an overflow tbody.
+    if (Array.from(targetBody.children).every((row) => row.hasAttribute(ROW_GROUP_ORIGIN))) {
+      targetBody.setAttribute(GENERATED_ROW_GROUP, "true");
+    }
     sourceTable.remove();
   }
 
@@ -415,6 +427,7 @@ export class Paginator {
       const contentHeight = getContentHeight(page);
       element.style.maxWidth = "100%";
       element.style.maxHeight = `${contentHeight}px`;
+      element.setAttribute(AUTO_IMAGE_MAX_HEIGHT, element.style.maxHeight);
       element.style.height = "auto";
       element.style.objectFit = "contain";
     }
@@ -946,6 +959,7 @@ export class Paginator {
 
       image.style.maxWidth = "100%";
       image.style.maxHeight = `${availableHeight}px`;
+      image.setAttribute(AUTO_IMAGE_MAX_HEIGHT, image.style.maxHeight);
       image.style.height = "auto";
       image.style.objectFit = "contain";
       changed = true;
@@ -978,6 +992,7 @@ export class Paginator {
     page: HTMLElement
   ): boolean {
     const startedAt = performance.now();
+    ensureFlowIdentity(container, CONTAINER_FLOW_ID);
     const overflowContainer = container.cloneNode(false) as HTMLElement;
     targetInner.insertBefore(overflowContainer, targetInner.firstChild);
 

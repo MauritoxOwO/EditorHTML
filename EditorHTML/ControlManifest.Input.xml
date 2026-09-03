@@ -19,6 +19,14 @@
               required="false" 
     />
 
+    <property name="documentDirty"
+              display-name-key="Campo para identificar cambios pendientes"
+              description-key="Indica si el documento contiene cambios sin guardar"
+              of-type="TwoOptions"
+              usage="bound"
+              required="false"
+    />
+
     <property name="entityName"
               display-name-key="HTML Entity Set Name"
               description-key="Dataverse entity set name used to load and save the main HTML file"

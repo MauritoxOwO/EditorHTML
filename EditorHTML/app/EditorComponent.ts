@@ -103,6 +103,7 @@ export interface EditorComponentOptions {
   paragraphFonts?: ParagraphFontFaceDefinition[];
   paragraphStyleCatalog?: ParagraphStyleCatalog;
   runtimeHeaderLogoSrc?: string;
+  onDirtyChanged?: (dirty: boolean) => void;
 }
 
 export class EditorComponent {
@@ -132,6 +133,7 @@ export class EditorComponent {
     restoreSnapshot: (snapshot) => this.renderAndPaginate(snapshot),
     onRestored: () => {
       this.updateToolbarSelectionState();
+      this.updateDirtyState(this.collectHtml());
     },
     onAvailabilityChanged: (canUndo, canRedo) => {
       this.toolbar?.setHistoryAvailability(canUndo, canRedo);
@@ -169,6 +171,8 @@ export class EditorComponent {
   private dynamicHeaderHtml = "";
   private dynamicHeaderLoaded = false;
   private currentFileName = "content.html";
+  private lastSavedHtml: string | null = null;
+  private isSaving = false;
 
   private rebalanceFrame: number | undefined;
   private pendingRebalance: QueuedRebalance | null = null;
@@ -265,18 +269,28 @@ export class EditorComponent {
 
   async init(): Promise<void> {
     this.buildShell();
+
+    this.root.inert = true;
+
+    try{
     this.paginator = new Paginator(
       (html?: string) => this.createPageElement(html),
       (pages: HTMLElement[]) => this.onPagesChanged(pages),
       (page: HTMLElement, afterPage: HTMLElement | null) =>
         this.attachPageForMeasurement(page, afterPage)
     );
+
     await Promise.all([
       this.loadParagraphStyles(),
       this.loadDynamicHeader(),
       this.loadRuntimeHeaderLogo(),
     ]);
+
     await this.loadContent();
+
+    this.lastSavedHtml = this.documentSerializer.normalizeHtmlForDirtyCheck(this.collectHtml());
+
+    } finally { this.root.inert = false; }
   }
 
   private buildShell(): void {
@@ -772,6 +786,7 @@ export class EditorComponent {
     });
     inner.addEventListener("input", () => {
       this.updateToolbarSelectionState();
+
       if (!this.isComposing) {
         const inputType = this.pendingInputTypes.get(page) ?? "";
         this.pendingInputTypes.delete(page);
@@ -779,17 +794,25 @@ export class EditorComponent {
         const shouldPullFromNextPages =
           this.isDeleteInput(inputType) || this.pagesNeedingPull.has(page);
         this.blankLineController.syncEditableBlankBlocks(inner, isEnterInput);
+
         if (this.tableDomIntegrityController.normalize(inner)) {
           this.layoutService.applyOfficialTableWidths(page);
         }
+
         this.pagesNeedingPull.delete(page);
+
         this.scheduleRebalance(page, shouldPullFromNextPages, {
           includePreviousPage: shouldPullFromNextPages,
           compactPages: shouldPullFromNextPages || !isEnterInput,
           overflowOnly: isEnterInput && !shouldPullFromNextPages,
         });
+
         this.historyController.scheduleRecord();
       }
+
+      this.updateDirtyState(this.collectHtml());
+
+ 
     });
     inner.addEventListener("compositionstart", () => {
       this.isComposing = true;
@@ -799,6 +822,7 @@ export class EditorComponent {
       this.blankLineController.syncEditableBlankBlocks(inner, false);
       this.scheduleRebalance(page, false, { includePreviousPage: false });
       this.historyController.scheduleRecord();
+      this.updateDirtyState(this.collectHtml());
     });
     inner.addEventListener("paste", (event: ClipboardEvent) => {
       if (this.tableDomIntegrityController.handlePaste(event, inner)) {
@@ -1068,6 +1092,7 @@ export class EditorComponent {
       includePreviousPage: false,
     });
     this.historyController.recordNow();
+    this.updateDirtyState(this.collectHtml());
     void this.assetLayoutManager
       .waitForStableLayout(affectedPage)
       .then(() => {
@@ -1089,6 +1114,7 @@ export class EditorComponent {
       includePreviousPage: false,
     });
     this.historyController.recordNow();
+    this.updateDirtyState(this.collectHtml());
   }
 
   private insertManualPageBreak(): void {
@@ -1113,6 +1139,7 @@ export class EditorComponent {
       includePreviousPage: false,
     });
     this.historyController.recordNow();
+    this.updateDirtyState(this.collectHtml());
   }
 
   private createManualPageBreakMarker(): HTMLElement {
@@ -1288,6 +1315,7 @@ export class EditorComponent {
     this.styleSelectionTracker.rememberTextSelection();
     this.markEditedAfterStyleChange(blocks);
     this.historyController.recordNow();
+    this.updateDirtyState(this.collectHtml());
   }
 
   private applySelectedTextCase(textCase: TextCase): void {
@@ -1298,6 +1326,7 @@ export class EditorComponent {
     this.styleSelectionTracker.rememberTextSelection();
     this.markEditedAfterInlineTextFormatChange(affectedElements);
     this.historyController.recordNow();
+    this.updateDirtyState(this.collectHtml());
   }
 
   private applyFontSize(fontSize: string): void {
@@ -1310,6 +1339,7 @@ export class EditorComponent {
     this.styleSelectionTracker.rememberTextSelection();
     this.markEditedAfterInlineTextFormatChange(affectedElements);
     this.historyController.recordNow();
+    this.updateDirtyState(this.collectHtml());
   }
 
   private markEditedAfterInlineTextFormatChange(elements: HTMLElement[]): void {
@@ -1367,6 +1397,7 @@ export class EditorComponent {
           this.updateToolbarSelectionState();
           this.scheduleRebalance(previousPage, true, { includePreviousPage: true });
           this.historyController.recordNow();
+          this.updateDirtyState(this.collectHtml());
         },
       })
     ) {
@@ -1385,6 +1416,7 @@ export class EditorComponent {
     this.updateToolbarSelectionState();
     this.scheduleRebalance(page, true, { includePreviousPage: false });
     this.historyController.recordNow();
+    this.updateDirtyState(this.collectHtml());
   }
 
   private markImageEdited(image: HTMLImageElement): void {
@@ -1398,6 +1430,7 @@ export class EditorComponent {
       includePreviousPage: false,
     });
     this.historyController.recordNow();
+    this.updateDirtyState(this.collectHtml());
   }
 
   private markTableColumnsChanged(table: HTMLTableElement): void {
@@ -1411,6 +1444,7 @@ export class EditorComponent {
       includePreviousPage: false,
     });
     this.historyController.recordNow();
+    this.updateDirtyState(this.collectHtml());
   }
 
   private markTableTextFormattingChanged(table: HTMLTableElement): void {
@@ -1422,6 +1456,7 @@ export class EditorComponent {
       includePreviousPage: false,
     });
     this.historyController.recordNow();
+    this.updateDirtyState(this.collectHtml());
   }
 
   private getFirstTableFlowPage(table: HTMLTableElement): HTMLElement | null {
@@ -1446,8 +1481,12 @@ export class EditorComponent {
   }
 
   private async save(): Promise<void> {
+
+    if(this.isSaving) return;
+
     const saveButton = this.toolbar.getSaveButton();
     saveButton.disabled = true;
+    this.isSaving = true;
     this.setStatus("Guardando...", "saving");
 
     try {
@@ -1465,12 +1504,16 @@ export class EditorComponent {
       );
       await this.savePrintHtml(printHtml);
 
+      this.lastSavedHtml = this.documentSerializer.normalizeHtmlForDirtyCheck(html);
+      this.updateDirtyState(this.collectHtml());
+
       this.setStatus("Guardado correctamente", "success");
       window.setTimeout(() => this.setStatus("", ""), 3000);
     } catch (err) {
       this.setStatus(`Error al guardar: ${(err as Error).message}`, "error");
     } finally {
       saveButton.disabled = false;
+      this.isSaving = false;
     }
   }
 
@@ -1748,7 +1791,18 @@ export class EditorComponent {
   private hasAllocatedSize(value: number | undefined): value is number {
     return typeof value === "number" && Number.isFinite(value) && value > 0;
   }
+
+  private updateDirtyState(currentHtml: string): void {
+    if (this.lastSavedHtml === null) return; 
+    
+    const normalizeHtml = this.documentSerializer.normalizeHtmlForDirtyCheck(currentHtml);
+
+    const dirty = normalizeHtml !== this.lastSavedHtml;
+    this.options.onDirtyChanged?.(dirty);
+  }
+
 }
+
 
 interface IInputs {
   htmlContent: ComponentFramework.PropertyTypes.StringProperty;

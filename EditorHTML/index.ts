@@ -5,15 +5,22 @@ import { EditorComponent } from "./app/EditorComponent";
 export class EditorHTML2 implements ComponentFramework.StandardControl<IInputs, IOutputs> {
 
     private editor!: EditorComponent;
+    private notifyOutputChanges!: () => void;
+    private documentDirty = false;
 
   public init(
     context: ComponentFramework.Context<IInputs>,
-    _notifyOutputChanged: () => void,
+    notifyOutputChanged: () => void,
     _state: ComponentFramework.Dictionary,
     container: HTMLDivElement
   ): void {
     context.mode.trackContainerResize(true);
-    this.editor = new EditorComponent(container, context);
+    this.notifyOutputChanges = notifyOutputChanged;
+    this.editor = new EditorComponent(container, context, {
+      onDirtyChanged: (dirty: boolean) => {
+        this.setDocumentDirty(dirty);
+      }
+    });
     this.editor.resize(context.mode.allocatedWidth, context.mode.allocatedHeight);
     this.editor.init().catch((err) => {
       console.error("[HtmlWordEditor] init error:", err);
@@ -25,7 +32,16 @@ export class EditorHTML2 implements ComponentFramework.StandardControl<IInputs, 
   }
 
   public getOutputs(): IOutputs {
-    return {};
+    return {
+      documentDirty: this.documentDirty,
+    };
+  }
+
+  private setDocumentDirty(value : boolean) : void{
+    if (this.documentDirty === value) return;
+
+    this.documentDirty = value;
+    this.notifyOutputChanges();
   }
 
   public destroy(): void {

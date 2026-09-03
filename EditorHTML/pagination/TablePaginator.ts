@@ -1,4 +1,10 @@
 import { hweDebugLog } from "../debug/DebugLogger";
+import {
+  ensureFlowIdentity,
+  GENERATED_ROW_GROUP,
+  ROW_GROUP_ID,
+  ROW_GROUP_ORIGIN,
+} from "./FlowIdentity";
 
 export interface TablePaginatorContext {
   getContentLimitBottom(inner: HTMLElement): number;
@@ -28,6 +34,7 @@ export class TablePaginator {
     const rowsForNext = rows.slice(splitRowIndex);
     if (rowsForNext.length === 0) return false;
 
+    this.rememberRowGroups(table);
     const flowId = this.ensureTableFlowId(table);
     table.setAttribute("data-hwe-table-fragment", "true");
 
@@ -36,6 +43,7 @@ export class TablePaginator {
     newTable.setAttribute("data-hwe-table-fragment", "true");
 
     const tbody = document.createElement("tbody");
+    tbody.setAttribute(GENERATED_ROW_GROUP, "true");
     rowsForNext.forEach((row) => tbody.appendChild(row));
     newTable.appendChild(tbody);
 
@@ -60,6 +68,23 @@ export class TablePaginator {
     const id = `hwe-table-${Date.now().toString(36)}-${TablePaginator.tableFlowCounter++}`;
     table.setAttribute("data-hwe-table-flow-id", id);
     return id;
+  }
+
+  private rememberRowGroups(table: HTMLElement): void {
+    Array.from(table.children).forEach((group) => {
+      if (!["TBODY", "TFOOT"].includes(group.tagName) || group.hasAttribute(GENERATED_ROW_GROUP)) return;
+      ensureFlowIdentity(group as HTMLElement, ROW_GROUP_ID);
+      const origin = JSON.stringify([
+        group.getAttribute(ROW_GROUP_ID),
+        group.tagName,
+        Array.from(group.attributes)
+          .filter((attribute) => attribute.name !== ROW_GROUP_ID)
+          .map((attribute) => [attribute.name, attribute.value]),
+      ]);
+      Array.from(group.children).forEach((row) => {
+        if (row.tagName === "TR") row.setAttribute(ROW_GROUP_ORIGIN, origin);
+      });
+    });
   }
 
   private cloneTableShell(table: HTMLElement): HTMLElement {
