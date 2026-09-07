@@ -19,6 +19,7 @@ import {
 import { unwrapGeneratedKeepTogetherGroups } from "../pagination/KeepTogetherController";
 import { addOcrTextLayers } from "../ocr/PdfOcrLayer";
 import { hweDebugLog, hweDebugStart } from "../debug/DebugLogger";
+import { normalizeDirtyHtml } from "./DirtyHtmlNormalizer";
 
 export interface NormalizedDocument {
   html: string;
@@ -104,6 +105,10 @@ export class DocumentSerializer {
       source: "generic-html",
     });
     return result;
+  }
+
+  normalizeHtmlForDirtyCheck(html: string): string {
+    return normalizeDirtyHtml(html);
   }
 
   collectHtml(

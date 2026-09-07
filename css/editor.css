@@ -1,0 +1,889 @@
+/* Contenedor raiz del PCF */
+.pcf-html-editor-root {
+  --hwe-page-width: 210mm;
+  --hwe-page-height: 297mm;
+  --hwe-margin-top: 35mm;
+  --hwe-margin-right: 12.5mm;
+  --hwe-margin-bottom: 20mm;
+  --hwe-margin-left: 12.5mm;
+  --hwe-text-width: 140mm;
+  --hwe-page-view-zoom: 1.18;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  max-height: 100%;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  position: relative;
+  box-sizing: border-box;
+  font-family: "Segoe UI", sans-serif;
+}
+
+.pcf-html-editor-root .hwe-editor-header {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  position: sticky;
+  top: 0;
+  z-index: 200000;
+  background: #ededed;
+}
+
+/* Toolbar */
+.pcf-html-editor-root .hwe-toolbar {
+  flex-shrink: 0;
+  background: #f3f3f3;
+  border-bottom: 1px solid #ccc;
+  padding: 5px 10px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  align-items: center;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+}
+
+.pcf-html-editor-root .hwe-toolbar button {
+  min-width: 28px;
+  padding: 3px 9px;
+  border: 1px solid #bbb;
+  border-radius: 3px;
+  background: #fff;
+  cursor: pointer;
+  font-size: 13px;
+  line-height: 1.4;
+  user-select: none;
+  transition: background 0.12s, border-color 0.12s;
+}
+
+.pcf-html-editor-root .hwe-toolbar button:hover {
+  background: #ddeeff;
+  border-color: #88aadd;
+}
+
+.pcf-html-editor-root .hwe-toolbar button.hwe-active {
+  background: #c7dff7;
+  border-color: #4a90d9;
+  font-weight: 700;
+}
+
+.pcf-html-editor-root .hwe-toolbar select {
+  height: 26px;
+  padding: 3px 5px;
+  border: 1px solid #bbb;
+  border-radius: 3px;
+  background: #fff;
+  cursor: pointer;
+  font-size: 12px;
+}
+
+.pcf-html-editor-root .hwe-toolbar .hwe-style-select {
+  min-width: 120px;
+}
+
+.pcf-html-editor-root .hwe-toolbar .hwe-sep {
+  width: 1px;
+  height: 20px;
+  margin: 0 3px;
+  flex-shrink: 0;
+  background: #ccc;
+}
+
+.pcf-html-editor-root .hwe-save-btn {
+  margin-left: auto !important;
+  padding: 3px 16px !important;
+  border-color: #005a9e !important;
+  background: #0078d4 !important;
+  color: #fff !important;
+  font-weight: 600;
+}
+
+.pcf-html-editor-root .hwe-save-btn:hover {
+  background: #106ebe !important;
+}
+
+.pcf-html-editor-root .hwe-save-btn:disabled {
+  border-color: #888 !important;
+  background: #999 !important;
+  cursor: not-allowed !important;
+}
+
+.pcf-html-editor-root .hwe-table-context-menu {
+  position: fixed;
+  z-index: 250000;
+  min-width: 158px;
+  display: none;
+  padding: 4px;
+  border: 1px solid #9f9f9f;
+  border-radius: 4px;
+  background: #fff;
+  box-shadow: 0 3px 12px rgba(0, 0, 0, 0.22);
+  box-sizing: border-box;
+  font-family: "Segoe UI", Arial, sans-serif;
+  font-size: 12px;
+}
+
+.pcf-html-editor-root .hwe-table-context-menu button {
+  width: 100%;
+  padding: 6px 10px;
+  border: 0;
+  border-radius: 3px;
+  background: transparent;
+  color: #1f1f1f;
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+}
+
+.pcf-html-editor-root .hwe-table-context-menu button:hover,
+.pcf-html-editor-root .hwe-table-context-menu button:focus {
+  outline: none;
+  background: #eaf3ff;
+}
+
+.pcf-html-editor-root .hwe-table-selector {
+  position: absolute;
+  z-index: 100002;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid #6b6b6b;
+  border-radius: 2px;
+  background: #fff;
+  color: #333;
+  cursor: pointer;
+  font: 12px/1 "Segoe UI Symbol", "Segoe UI", sans-serif;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
+}
+
+.pcf-html-editor-root .hwe-table-selector:hover {
+  border-color: #0078d4;
+  background: #eef6fc;
+}
+
+.pcf-html-editor-root .hwe-table-selection-toolbar {
+  position: absolute;
+  z-index: 100003;
+  display: none;
+  gap: 2px;
+  padding: 3px;
+  border: 1px solid #8f8f8f;
+  border-radius: 4px;
+  background: #fff;
+  box-shadow: 0 2px 7px rgba(0, 0, 0, 0.2);
+  box-sizing: border-box;
+  font-family: "Segoe UI", Arial, sans-serif;
+}
+
+.pcf-html-editor-root .hwe-table-selection-toolbar button {
+  min-width: 54px;
+  padding: 3px 8px;
+  border: 1px solid transparent;
+  border-radius: 3px;
+  background: transparent;
+  color: #1f1f1f;
+  cursor: pointer;
+  font: 12px/1.4 "Segoe UI", Arial, sans-serif;
+}
+
+.pcf-html-editor-root .hwe-table-selection-toolbar button:hover,
+.pcf-html-editor-root .hwe-table-selection-toolbar button:focus-visible {
+  outline: none;
+  border-color: #88aadd;
+  background: #eef6fc;
+}
+
+.pcf-html-editor-root .hwe-table-selection-toolbar button.hwe-active {
+  border-color: #4a90d9;
+  background: #c7dff7;
+  font-weight: 600;
+}
+
+.pcf-html-editor-root .hwe-table-selection-toolbar button:disabled {
+  border-color: transparent;
+  background: transparent;
+  color: #8a8a8a;
+  cursor: not-allowed;
+}
+
+.pcf-html-editor-root .hwe-table-selection-hint {
+  align-self: center;
+  max-width: 150px;
+  padding: 0 4px;
+  color: #555;
+  font: 11px/1.2 "Segoe UI", Arial, sans-serif;
+  white-space: normal;
+}
+
+.pcf-html-editor-root .hwe-table-selection-overlay {
+  position: absolute;
+  z-index: 100001;
+  border: 2px solid #0078d4;
+  background: rgba(0, 120, 212, 0.08);
+  box-sizing: border-box;
+  pointer-events: none;
+}
+
+.pcf-html-editor-root .hwe-table-selection-overlay-table {
+  background: transparent;
+}
+
+.pcf-html-editor-root .hwe-table-selection-overlay-row {
+  background: rgba(0, 120, 212, 0.1);
+}
+
+.pcf-html-editor-root .hwe-table-selection-overlay-column {
+  border-width: 1px;
+  background: rgba(0, 120, 212, 0.13);
+}
+
+.pcf-html-editor-root .hwe-view-tabs {
+  flex-shrink: 0;
+  display: flex;
+  gap: 2px;
+  padding: 6px 10px 0;
+  border-bottom: 1px solid #c8c8c8;
+  background: #ededed;
+}
+
+.pcf-html-editor-root .hwe-view-tabs-label {
+  margin-left: 8px;
+  color: #555;
+  font-size: 12px;
+  align-self: center;
+}
+
+.pcf-html-editor-root .hwe-view-tabs button {
+  min-width: 72px;
+  padding: 5px 12px;
+  border: 1px solid #c8c8c8;
+  border-bottom: 0;
+  border-radius: 4px 4px 0 0;
+  background: #f8f8f8;
+  color: #333;
+  cursor: pointer;
+  font-size: 12px;
+}
+
+.pcf-html-editor-root .hwe-view-tabs button.hwe-active {
+  background: #fff;
+  color: #000;
+  font-weight: 600;
+}
+
+/* Workspace */
+.pcf-html-editor-root .hwe-workspace {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  overflow-anchor: none;
+  padding: 24px 16px 48px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0;
+  box-sizing: border-box;
+  background: #d0d0d0;
+}
+
+/* Pagina A4 */
+.pcf-html-editor-root .hwe-page {
+  width: var(--hwe-page-width, 210mm);
+  height: var(--hwe-page-height, 297mm);
+  zoom: var(--hwe-page-view-zoom, 1);
+  flex: 0 0 auto;
+  margin: 0;
+  padding: 0;
+  position: relative;
+  overflow: hidden;
+  box-sizing: border-box;
+  background: #fff;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.28);
+}
+
+.pcf-html-editor-root .hwe-runtime-page-header {
+  position: absolute;
+  top: 6mm;
+  left: var(--hwe-margin-left, 12.5mm);
+  right: var(--hwe-margin-right, 12.5mm);
+  height: calc(var(--hwe-margin-top, 35mm) - 10mm);
+  z-index: 1;
+  pointer-events: none;
+  user-select: none;
+  overflow: hidden;
+  color: #222;
+  font-family: Arial, Helvetica, sans-serif;
+}
+
+.pcf-html-editor-root .hwe-runtime-page-header .bocm-page-header {
+  width: 100%;
+  box-sizing: border-box;
+  font-family: Arial, Helvetica, sans-serif;
+  color: #222;
+}
+
+.pcf-html-editor-root .hwe-runtime-page-header .bocm-header-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 54px;
+}
+
+.pcf-html-editor-root .hwe-runtime-page-header .bocm-logo {
+  width: 132px;
+  max-height: 38px;
+  height: auto;
+  display: block;
+  flex: 0 0 auto;
+  object-fit: contain;
+}
+
+.pcf-html-editor-root .hwe-runtime-page-header .bocm-logo:not([src]) {
+  display: none;
+}
+
+.pcf-html-editor-root .hwe-runtime-page-header .bocm-header-title {
+  flex: 1;
+  min-width: 0;
+  padding-left: 30px;
+  text-align: right;
+  font-size: 19px;
+  font-weight: 700;
+  letter-spacing: 0;
+  white-space: nowrap;
+}
+
+.pcf-html-editor-root .hwe-runtime-page-header .bocm-separator {
+  margin-top: 4px;
+  border-top: 1px solid #333;
+}
+
+.pcf-html-editor-root .hwe-runtime-page-header .bocm-header-meta {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  align-items: center;
+  border-bottom: 1px solid #333;
+  font-size: 15px;
+  line-height: 24px;
+}
+
+.pcf-html-editor-root .hwe-runtime-page-header .bocm-meta-left {
+  text-align: left;
+}
+
+.pcf-html-editor-root .hwe-runtime-page-header .bocm-meta-center {
+  text-align: center;
+}
+
+.pcf-html-editor-root .hwe-runtime-page-header .bocm-meta-right {
+  text-align: right;
+}
+
+.pcf-html-editor-root .hwe-page-inner {
+  width: 100%;
+  height: 100%;
+  padding: var(--hwe-margin-top, 35mm) var(--hwe-margin-right, 12.5mm)
+    var(--hwe-margin-bottom, 20mm) var(--hwe-margin-left, 12.5mm);
+  box-sizing: border-box;
+  outline: none;
+  overflow: visible;
+  color: #000;
+  font-family: Calibri, "Segoe UI", Arial, sans-serif;
+  font-size: 11pt;
+  line-height: 1.15;
+  overflow-wrap: break-word;
+  word-wrap: break-word;
+  white-space: normal;
+}
+
+.pcf-html-editor-root .hwe-page-inner *,
+.pcf-html-editor-root .hwe-page-inner *::before,
+.pcf-html-editor-root .hwe-page-inner *::after {
+  box-sizing: border-box;
+  max-width: 100%;
+}
+
+.pcf-html-editor-root .hwe-page-inner div,
+.pcf-html-editor-root .hwe-page-inner p,
+.pcf-html-editor-root .hwe-page-inner section,
+.pcf-html-editor-root .hwe-page-inner article,
+.pcf-html-editor-root .hwe-page-inner span,
+.pcf-html-editor-root .hwe-page-inner li {
+  max-width: 100%;
+  overflow-wrap: break-word;
+  word-wrap: break-word;
+  white-space: normal;
+}
+
+.pcf-html-editor-root .hwe-page-inner body,
+.pcf-html-editor-root .hwe-page-inner html {
+  width: auto;
+  margin: 0;
+  padding: 0;
+}
+
+.pcf-html-editor-root .hwe-page-inner hr {
+  display: none;
+}
+
+.pcf-html-editor-root .hwe-page-inner:focus {
+  outline: none;
+}
+
+.pcf-html-editor-root .hwe-page-inner > table,
+.pcf-html-editor-root .hwe-table-flow-wrapper {
+  width: 100% !important;
+  max-width: 100% !important;
+  margin-left: 0;
+  margin-right: 0;
+}
+
+.pcf-html-editor-root .hwe-table-flow-wrapper > table {
+  width: 100% !important;
+}
+
+/* Contenido */
+.pcf-html-editor-root .hwe-page p {
+  min-height: 1em;
+  margin: 0 0 8pt;
+}
+
+.pcf-html-editor-root .hwe-page h1 {
+  margin: 12pt 0 6pt;
+  font-size: 20pt;
+  font-weight: 700;
+  line-height: 1.2;
+}
+
+.pcf-html-editor-root .hwe-page h2 {
+  margin: 10pt 0 4pt;
+  font-size: 16pt;
+  font-weight: 700;
+  line-height: 1.2;
+}
+
+.pcf-html-editor-root .hwe-page h3 {
+  margin: 8pt 0 4pt;
+  font-size: 13pt;
+  font-weight: 700;
+  line-height: 1.2;
+}
+
+.pcf-html-editor-root .hwe-page ul,
+.pcf-html-editor-root .hwe-page ol {
+  margin: 0 0 8pt;
+  padding-left: 24pt;
+}
+
+.pcf-html-editor-root .hwe-page li {
+  margin-bottom: 2pt;
+}
+
+.pcf-html-editor-root .hwe-page li > ul,
+.pcf-html-editor-root .hwe-page li > ol {
+  margin: 2pt 0 0;
+  padding-left: 24pt;
+}
+
+.pcf-html-editor-root .hwe-page .hwe-text-flow-block {
+  display: block !important;
+  width: var(--hwe-text-width, 140mm) !important;
+  max-width: 100%;
+  margin-left: auto !important;
+  margin-right: auto !important;
+}
+
+.pcf-html-editor-root .hwe-page [data-hwe-api-header="true"],
+.pcf-html-editor-root .hwe-page [data-hwe-dynamic-header="true"] {
+  display: block;
+  width: var(--hwe-text-width, 140mm);
+  max-width: 100%;
+  margin-left: auto !important;
+  margin-right: auto !important;
+}
+
+.pcf-html-editor-root .hwe-page .hwe-image-flow-block {
+  display: block;
+  width: 100%;
+  max-width: 100% !important;
+  height: auto;
+  margin-left: 0;
+  margin-right: 0;
+}
+
+.pcf-html-editor-root .hwe-page table {
+  max-width: 100% !important;
+  margin: 8pt 0;
+  border-collapse: collapse;
+  break-inside: auto;
+}
+
+.pcf-html-editor-root .hwe-page table:not(.hwe-word-table) {
+  width: 100% !important;
+  table-layout: fixed;
+}
+
+.pcf-html-editor-root .hwe-page table:not(.hwe-word-table) td,
+.pcf-html-editor-root .hwe-page table:not(.hwe-word-table) th {
+  padding: 4pt 6pt;
+  border: 1px solid #999;
+  vertical-align: top;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+}
+
+.pcf-html-editor-root .hwe-page table:not(.hwe-word-table) th {
+  background: #f0f0f0;
+  font-weight: 700;
+}
+
+.pcf-html-editor-root .hwe-page table.hwe-word-table {
+  width: 100% !important;
+  table-layout: fixed;
+  border-collapse: collapse;
+  margin-top: 0;
+  margin-bottom: 0;
+  page-break-inside: auto;
+}
+
+.pcf-html-editor-root .hwe-page table.hwe-word-table[data-hwe-align="center"] {
+  margin-left: auto;
+  margin-right: auto;
+}
+
+.pcf-html-editor-root .hwe-page table.hwe-word-table td,
+.pcf-html-editor-root .hwe-page table.hwe-word-table th {
+  vertical-align: top;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+}
+
+.pcf-html-editor-root .hwe-page table.hwe-word-table tr,
+.pcf-html-editor-root .hwe-page table.hwe-word-table td,
+.pcf-html-editor-root .hwe-page table.hwe-word-table th {
+  height: auto !important;
+  min-height: 0 !important;
+  max-height: none !important;
+}
+
+.pcf-html-editor-root .hwe-page table.hwe-word-table p {
+  min-height: 0;
+  margin: 0;
+  line-height: inherit;
+}
+
+.pcf-html-editor-root .hwe-page table.hwe-word-table.hwe-long-word-table,
+.pcf-html-editor-root .hwe-page table.hwe-word-table.hwe-table-compact {
+  font-size: 9.5pt;
+  line-height: 1.05;
+}
+
+.pcf-html-editor-root .hwe-page table.hwe-word-table.hwe-long-word-table td,
+.pcf-html-editor-root .hwe-page table.hwe-word-table.hwe-long-word-table th,
+.pcf-html-editor-root .hwe-page table.hwe-word-table.hwe-table-compact td,
+.pcf-html-editor-root .hwe-page table.hwe-word-table.hwe-table-compact th {
+  padding: 1.5pt 2.25pt !important;
+}
+
+.pcf-html-editor-root .hwe-page table.hwe-word-table.hwe-table-dense {
+  font-size: 8.5pt;
+  line-height: 1;
+}
+
+.pcf-html-editor-root .hwe-page table.hwe-word-table.hwe-table-dense td,
+.pcf-html-editor-root .hwe-page table.hwe-word-table.hwe-table-dense th {
+  padding: 1.25pt 2pt !important;
+}
+
+.pcf-html-editor-root .hwe-page table.hwe-word-table.hwe-table-ultra-dense {
+  font-size: 7.5pt;
+  line-height: 1;
+}
+
+.pcf-html-editor-root .hwe-page table.hwe-word-table.hwe-table-ultra-dense td,
+.pcf-html-editor-root .hwe-page table.hwe-word-table.hwe-table-ultra-dense th {
+  padding: 1pt 1.5pt !important;
+}
+
+.pcf-html-editor-root .hwe-page table.hwe-word-table.hwe-long-word-table td *:not([data-hwe-user-font-size="true"]):not([style*="font-size"]),
+.pcf-html-editor-root .hwe-page table.hwe-word-table.hwe-long-word-table th *:not([data-hwe-user-font-size="true"]):not([style*="font-size"]),
+.pcf-html-editor-root .hwe-page table.hwe-word-table.hwe-table-compact td *:not([data-hwe-user-font-size="true"]):not([style*="font-size"]),
+.pcf-html-editor-root .hwe-page table.hwe-word-table.hwe-table-compact th *:not([data-hwe-user-font-size="true"]):not([style*="font-size"]),
+.pcf-html-editor-root .hwe-page table.hwe-word-table.hwe-table-dense td *:not([data-hwe-user-font-size="true"]):not([style*="font-size"]),
+.pcf-html-editor-root .hwe-page table.hwe-word-table.hwe-table-dense th *:not([data-hwe-user-font-size="true"]):not([style*="font-size"]),
+.pcf-html-editor-root .hwe-page table.hwe-word-table.hwe-table-ultra-dense td *:not([data-hwe-user-font-size="true"]):not([style*="font-size"]),
+.pcf-html-editor-root .hwe-page table.hwe-word-table.hwe-table-ultra-dense th *:not([data-hwe-user-font-size="true"]):not([style*="font-size"]) {
+  font-size: inherit !important;
+}
+
+.pcf-html-editor-root .hwe-page table.hwe-word-table.hwe-long-word-table td *:not([data-hwe-user-font-size="true"]):not([style*="line-height"]),
+.pcf-html-editor-root .hwe-page table.hwe-word-table.hwe-long-word-table th *:not([data-hwe-user-font-size="true"]):not([style*="line-height"]),
+.pcf-html-editor-root .hwe-page table.hwe-word-table.hwe-table-compact td *:not([data-hwe-user-font-size="true"]):not([style*="line-height"]),
+.pcf-html-editor-root .hwe-page table.hwe-word-table.hwe-table-compact th *:not([data-hwe-user-font-size="true"]):not([style*="line-height"]),
+.pcf-html-editor-root .hwe-page table.hwe-word-table.hwe-table-dense td *:not([data-hwe-user-font-size="true"]):not([style*="line-height"]),
+.pcf-html-editor-root .hwe-page table.hwe-word-table.hwe-table-dense th *:not([data-hwe-user-font-size="true"]):not([style*="line-height"]),
+.pcf-html-editor-root .hwe-page table.hwe-word-table.hwe-table-ultra-dense td *:not([data-hwe-user-font-size="true"]):not([style*="line-height"]),
+.pcf-html-editor-root .hwe-page table.hwe-word-table.hwe-table-ultra-dense th *:not([data-hwe-user-font-size="true"]):not([style*="line-height"]) {
+  line-height: inherit !important;
+}
+
+.pcf-html-editor-root .hwe-page table.hwe-word-table thead,
+.pcf-html-editor-root .hwe-page table.hwe-word-table tbody,
+.pcf-html-editor-root .hwe-page table.hwe-word-table tfoot {
+  break-inside: auto;
+  page-break-inside: auto;
+}
+
+.pcf-html-editor-root .hwe-page table.hwe-word-table tr {
+  break-inside: avoid;
+  page-break-inside: avoid;
+}
+
+.pcf-html-editor-root.hwe-table-column-resize-ready,
+.pcf-html-editor-root.hwe-table-column-resize-ready * {
+  cursor: col-resize !important;
+}
+
+.pcf-html-editor-root.hwe-table-column-resizing {
+  user-select: none;
+}
+
+.pcf-html-editor-root .hwe-table-column-resize-guide {
+  position: absolute;
+  width: 2px;
+  min-height: 12px;
+  background: #0078d4;
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.75);
+  pointer-events: none;
+  z-index: 150000;
+}
+
+.pcf-html-editor-root .hwe-page .hwe-keep-together,
+.pcf-html-editor-root .hwe-page [data-hwe-keep-together="true"] {
+  display: block;
+  break-inside: avoid;
+  page-break-inside: avoid;
+}
+
+.pcf-html-editor-root .hwe-page [data-hwe-keep-with-next="true"] {
+  break-after: avoid;
+  page-break-after: avoid;
+}
+
+.pcf-html-editor-root .hwe-page [data-hwe-user-blank="true"] {
+  min-height: 1em;
+}
+
+.pcf-html-editor-root .hwe-manual-page-break,
+.pcf-html-editor-root .hwe-page [data-hwe-manual-page-break="true"] {
+  display: block;
+  height: 0;
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+  border: 0;
+}
+
+.pcf-html-editor-root .hwe-page img {
+  display: block;
+  max-width: 100% !important;
+  height: auto;
+  break-inside: avoid;
+  page-break-inside: avoid;
+}
+
+.pcf-html-editor-root .hwe-page img.hwe-image-selected {
+  outline: 2px solid #0078d4;
+  outline-offset: 2px;
+}
+
+.pcf-html-editor-root .hwe-image-resize-overlay {
+  position: absolute;
+  z-index: 100000;
+  border: 2px solid #0078d4;
+  box-sizing: border-box;
+  pointer-events: none;
+}
+
+.pcf-html-editor-root .hwe-image-resize-handle {
+  position: absolute;
+  right: -6px;
+  bottom: -6px;
+  width: 12px;
+  height: 12px;
+  border: 2px solid #fff;
+  border-radius: 50%;
+  background: #0078d4;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.35);
+  cursor: nwse-resize;
+  pointer-events: auto;
+}
+
+.pcf-html-editor-root .hwe-image-resize-panel {
+  position: absolute;
+  z-index: 100001;
+  min-height: 30px;
+  padding: 4px 6px;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  border: 1px solid #8f8f8f;
+  border-radius: 4px;
+  background: #fff;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.22);
+  font-family: "Segoe UI", Arial, sans-serif;
+  font-size: 12px;
+}
+
+.pcf-html-editor-root .hwe-image-resize-panel button {
+  height: 22px;
+  padding: 0 6px;
+  border: 1px solid #b8b8b8;
+  border-radius: 3px;
+  background: #f8f8f8;
+  color: #1f1f1f;
+  cursor: pointer;
+  font-size: 11px;
+}
+
+.pcf-html-editor-root .hwe-image-resize-panel button:hover {
+  border-color: #0078d4;
+  background: #eef6fc;
+}
+
+.pcf-html-editor-root .hwe-image-resize-panel input[type="range"] {
+  width: 110px;
+}
+
+.pcf-html-editor-root .hwe-image-resize-value {
+  width: 34px;
+  color: #333;
+  text-align: right;
+}
+
+/* Separador visual entre paginas */
+.pcf-html-editor-root .hwe-page-divider {
+  width: var(--hwe-page-width, 210mm);
+  height: 40px;
+  zoom: var(--hwe-page-view-zoom, 1);
+  flex: 0 0 auto;
+  margin: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  pointer-events: none;
+  user-select: none;
+}
+
+.pcf-html-editor-root .hwe-page-divider::before,
+.pcf-html-editor-root .hwe-page-divider::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: #aaa;
+}
+
+.pcf-html-editor-root .hwe-page-divider span {
+  padding: 0 12px;
+  background: #d0d0d0;
+  color: #777;
+  font-family: "Segoe UI", sans-serif;
+  font-size: 10px;
+  white-space: nowrap;
+}
+
+/* Barra de estado inferior */
+.pcf-html-editor-root .hwe-statusbar {
+  height: 22px;
+  flex-shrink: 0;
+  padding: 0 12px;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  border-top: 1px solid #ddd;
+  background: #f3f3f3;
+  color: #555;
+  font-size: 11px;
+}
+
+.pcf-html-editor-root .hwe-statusbar .hwe-status-msg {
+  margin-left: auto;
+}
+
+.pcf-html-editor-root .hwe-diagnostics-btn {
+  height: 18px;
+  padding: 0 8px;
+  border: 1px solid #b8b8b8;
+  border-radius: 3px;
+  background: #fff;
+  color: #333;
+  cursor: pointer;
+  font-size: 11px;
+  line-height: 16px;
+  white-space: nowrap;
+}
+
+.pcf-html-editor-root .hwe-diagnostics-btn:hover {
+  border-color: #0078d4;
+  background: #eef6fc;
+}
+
+.pcf-html-editor-root .hwe-statusbar .hwe-status-msg.success {
+  color: #107c10;
+  font-weight: 600;
+}
+
+.pcf-html-editor-root .hwe-statusbar .hwe-status-msg.error {
+  color: #a80000;
+  font-weight: 600;
+}
+
+.pcf-html-editor-root .hwe-statusbar .hwe-status-msg.saving {
+  color: #0078d4;
+}
+
+@media print {
+  .pcf-html-editor-root .hwe-editor-header,
+  .pcf-html-editor-root .hwe-toolbar,
+  .pcf-html-editor-root .hwe-view-tabs,
+  .pcf-html-editor-root .hwe-statusbar,
+  .pcf-html-editor-root .hwe-table-selector,
+  .pcf-html-editor-root .hwe-page-divider {
+    display: none !important;
+  }
+
+  .pcf-html-editor-root .hwe-page table.hwe-table-selected {
+    outline: none;
+  }
+
+  .pcf-html-editor-root,
+  .pcf-html-editor-root .hwe-workspace {
+    display: block;
+    width: auto;
+    height: auto;
+    padding: 0;
+    overflow: visible;
+    background: #fff;
+  }
+
+  .pcf-html-editor-root .hwe-page {
+    zoom: 1;
+    box-shadow: none;
+    break-after: page;
+    page-break-after: always;
+  }
+
+  .pcf-html-editor-root .hwe-page:last-of-type {
+    break-after: auto;
+    page-break-after: auto;
+  }
+
+  @page {
+    size: A4;
+    margin: 0;
+  }
+}
