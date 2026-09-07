@@ -286,9 +286,17 @@ export class EditorComponent {
       this.loadRuntimeHeaderLogo(),
     ]);
 
-    await this.loadContent();
+    const loaded = await this.loadContent();
+
+    if (!loaded) {
+      // El documento vacío de error no es una copia válida del archivo guardado.
+      this.options.onDirtyChanged?.(true);
+      return;
+    }
 
     this.lastSavedHtml = this.documentSerializer.normalizeHtmlForDirtyCheck(this.collectHtml());
+    // Publicar también el estado inicial para reemplazar un Sí de otra sesión.
+    this.options.onDirtyChanged?.(false);
 
     } finally { this.root.inert = false; }
   }
@@ -537,7 +545,7 @@ export class EditorComponent {
     this.runtimeHeaderLogoSrc = "";
   }
 
-  private async loadContent(): Promise<void> {
+  private async loadContent(): Promise<boolean> {
     this.setStatus("Cargando contenido...", "saving");
 
     try {
@@ -549,7 +557,7 @@ export class EditorComponent {
         await this.renderAndPaginate(html || "<p><br></p>");
         this.historyController.reset();
         this.setStatus("", "");
-        return;
+        return true;
       }
 
       if (!this.baseUrl) throw new Error("No se pudo obtener la URL de Dataverse.");
@@ -574,10 +582,12 @@ export class EditorComponent {
         console.warn("[HtmlWordEditor] initial print HTML save failed:", error);
         this.setStatus(`No se pudo preparar el HTML para PDF: ${(error as Error).message}`, "error");
       }
+      return true;
     } catch (err) {
       this.setStatus(`Error al cargar: ${(err as Error).message}`, "error");
       await this.renderAndPaginate("<p><br></p>");
       this.historyController.reset();
+      return false;
     }
   }
 

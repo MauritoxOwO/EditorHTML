@@ -6,7 +6,9 @@ export class EditorHTML2 implements ComponentFramework.StandardControl<IInputs, 
 
     private editor!: EditorComponent;
     private notifyOutputChanges!: () => void;
-    private documentDirty = false;
+    // Sin estado hasta que el editor haya terminado de cargar el documento.
+    private documentDirty: boolean | undefined;
+    private destroyed = false;
 
   public init(
     context: ComponentFramework.Context<IInputs>,
@@ -32,19 +34,21 @@ export class EditorHTML2 implements ComponentFramework.StandardControl<IInputs, 
   }
 
   public getOutputs(): IOutputs {
+    if (this.documentDirty === undefined) return {};
     return {
       documentDirty: this.documentDirty,
     };
   }
 
   private setDocumentDirty(value : boolean) : void{
-    if (this.documentDirty === value) return;
+    if (this.destroyed || this.documentDirty === value) return;
 
     this.documentDirty = value;
     this.notifyOutputChanges();
   }
 
   public destroy(): void {
+    this.destroyed = true;
     this.editor?.destroy();
   }
 }
