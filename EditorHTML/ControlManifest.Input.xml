@@ -4,7 +4,7 @@
           constructor="EditorHTML2"
           version="0.0.9"
           display-name-key="EditorHTMLv0.9"
-          description-key="EditorHTML v0.9 for testing"
+          description-key="EditorHTML v0.9 para testing"
           control-type="standard"
   >
 
@@ -12,152 +12,160 @@
     </external-service-usage>
 
     <property name="htmlContent" 
-              display-name-key="HTML Content" 
-              description-key="HTML Content" 
+              display-name-key="Contenido HTML" 
+              description-key="Contenido HTML" 
               of-type="SingleLine.Text" 
               usage="bound" 
               required="false" 
     />
 
+    <property name="documentDirty"
+              display-name-key="Campo para identificar cambios pendientes"
+              description-key="Indica si el documento contiene cambios sin guardar"
+              of-type="TwoOptions"
+              usage="bound"
+              required="false"
+    />
+
     <property name="entityName"
-              display-name-key="HTML Entity Set Name"
-              description-key="Dataverse entity set name used to load and save the main HTML file"
+              display-name-key="Nombre del conjunto de la entidad HTML"
+              description-key="El nombre del conjunto de la entidad de Dataverse usado para cargar y guardar el HTML principal"
               of-type="SingleLine.Text"
               usage="input"
               required="false"
     />
 
     <property name="fieldName"
-              display-name-key="HTML File Field"
-              description-key="Dataverse file column schema name used to load and save the main HTML file"
+              display-name-key="Campo de archivo del HTML"
+              description-key="El nombre del esquema de la columna de Dataverse que guarda el archivo HTML"
               of-type="SingleLine.Text"
               usage="input"
               required="false"
     />
 
     <property name="printHtmlFieldName"
-              display-name-key="Print HTML File Field"
-              description-key="Dataverse file column schema name used to store HTML prepared for external PDF or API generation"
+              display-name-key="Campo de archivo del HTML para PDF"
+              description-key="El nombre del esquema de la columna de Dataverse que guarda el archivo preparado para la generación de PDF"
               of-type="SingleLine.Text"
               usage="input"
               required="false"
     />
 
     <property name="styleEntitySetName"
-              display-name-key="Paragraph Style Table"
-              description-key="Dataverse entity set name that stores paragraph styles"
+              display-name-key="Nombre del conjunto de tabla CSS"
+              description-key="El nombre de conjunto (Set name) de la entidad que guarda los estilos CSS"
               of-type="SingleLine.Text"
               usage="input"
               required="false"
     />
 
     <property name="styleClassField"
-              display-name-key="Style Class Field"
-              description-key="Dataverse field that stores the CSS class name"
+              display-name-key="Campo de clase de los estilos"
+              description-key="Campo de Dataverse que almacena las clases de los estilos CSS"
               of-type="SingleLine.Text"
               usage="input"
               required="false"
     />
 
     <property name="styleCssField"
-              display-name-key="Style CSS Field"
-              description-key="Dataverse field that stores the CSS rule or declarations"
+              display-name-key="Campo de estilos CSS"
+              description-key="Campo de Dataverse que almacena las declaraciones CSS"
               of-type="SingleLine.Text"
               usage="input"
               required="false"
     />
 
     <property name="styleStateField"
-              display-name-key="Style State Field"
-              description-key="Dataverse state field used to load only active style rows"
+              display-name-key="Campo de estado de estilos"
+              description-key="El campo statecode de Dataverse en la tabla CSS"
               of-type="SingleLine.Text"
               usage="input"
               required="false"
     />
 
     <property name="styleDropdownField"
-              display-name-key="Style Dropdown Field"
-              description-key="Dataverse boolean field that controls whether a style appears in the dropdown"
+              display-name-key="Campo booleano para dropdown de estilos"
+              description-key="Campo booleano para identificar que estilos aparecen en el dropdown"
               of-type="SingleLine.Text"
               usage="input"
               required="false"
     />
 
     <property name="styleDocumentTypeField"
-              display-name-key="Style Document Type Field"
-              description-key="Dataverse choice field used to filter styles shown in the dropdown"
+              display-name-key="Campo de tipo de documento de estilos"
+              description-key="Campo de tipo Choice de Dataverse para filtrar los estilos que aparecen en el dropdown"
               of-type="SingleLine.Text"
               usage="input"
               required="false"
     />
 
     <property name="styleDocumentTypeDropdownValue"
-              display-name-key="Style Document Type Dropdown Value"
-              description-key="Choice value required for styles shown in the dropdown"
+              display-name-key="Valor del campo de tipo de documento de estilos"
+              description-key="El valor numérico del campo tipo Choice requerido para que los estilos se muestren en el dropdown"
               of-type="SingleLine.Text"
               usage="input"
               required="false"
     />
 
     <property name="styleTypeField"
-              display-name-key="Style Type Field"
-              description-key="Optional Dataverse choice field that marks rows as paragraph styles or fonts"
+              display-name-key="Style Type Field Campo de tipo de estilo"
+              description-key="Campo que marca una fila de la tabla de CSS como estilo o fuente"
               of-type="SingleLine.Text"
               usage="input"
               required="false"
     />
 
     <property name="styleTypeStyleValue"
-              display-name-key="Style Type Style Value"
-              description-key="Choice value used for paragraph style rows"
+              display-name-key="Valor para campo de tipo de estilo"
+              description-key="Valor numérico que indica si la fila es de tipo estilo"
               of-type="SingleLine.Text"
               usage="input"
               required="false"
     />
 
     <property name="styleTypeFontValue"
-              display-name-key="Style Type Font Value"
-              description-key="Choice value used for font-face rows"
+              display-name-key="Valor para campo de tipo fuente"
+              description-key="Valor numérico que indica si la fila es de tipo fuente"
               of-type="SingleLine.Text"
               usage="input"
               required="false"
     />
 
     <property name="runtimeHeaderLogoEntitySetName"
-              display-name-key="Runtime Header Logo Table"
-              description-key="Dataverse entity set name that stores the BOCM runtime page header logo"
+              display-name-key="Tabla que almacena el logo"
+              description-key="Set name de la entidad que almacena el logo BOCM"
               of-type="SingleLine.Text"
               usage="input"
               required="false"
     />
 
     <property name="runtimeHeaderLogoImageField"
-              display-name-key="Runtime Header Logo Image Field"
-              description-key="Image or file column schema name used to download the BOCM runtime page header logo"
+              display-name-key="Campo que almacena la imagen del logo"
+              description-key="Nombre del esquema del campo que almacena el logo"
               of-type="SingleLine.Text"
               usage="input"
               required="false"
     />
 
     <property name="runtimeHeaderLogoIdField"
-              display-name-key="Runtime Header Logo Id Field"
-              description-key="Primary id field used to download the BOCM runtime page header logo after finding it by name"
+              display-name-key="Campo ID del logo"
+              description-key="El campo que almacena el ID del logo para descargar la imagen"
               of-type="SingleLine.Text"
               usage="input"
               required="false"
     />
 
     <property name="runtimeHeaderLogoNameField"
-              display-name-key="Runtime Header Logo Name Field"
-              description-key="Name field used to find the BOCM runtime page header logo"
+              display-name-key="Campo de nombre del logo"
+              description-key="Campo de nombre del logo utilizado para identificarlo"
               of-type="SingleLine.Text"
               usage="input"
               required="false"
     />
 
     <property name="runtimeHeaderLogoNameValue"
-              display-name-key="Runtime Header Logo Name Value"
-              description-key="Name value used to find the BOCM runtime page header logo"
+              display-name-key="Valor del campo de nombre del logo"
+              description-key="El nombre del logo almacenado en el campo de nombre para identificarlo"
               of-type="SingleLine.Text"
               usage="input"
               required="false"
