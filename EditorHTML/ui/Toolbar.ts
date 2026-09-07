@@ -35,6 +35,7 @@ export interface ToolbarOptions {
   onApplyTextCase?: (textCase: TextCase) => void;
   onApplyFontSize?: (fontSize: string) => void;
   onCommand?: (command: string) => boolean;
+  onRequestFullScreen?: () => void;
 }
 
 export class Toolbar {
@@ -185,6 +186,17 @@ export class Toolbar {
     this.toolbar.appendChild(breakBtn);
 
     this.addSep();
+
+    if (this.options.onRequestFullScreen) {
+      const fullScreenBtn = document.createElement("button");
+      fullScreenBtn.type = "button";
+      fullScreenBtn.textContent = "⛶ Pantalla completa";
+      fullScreenBtn.title = "Ampliar el editor";
+      fullScreenBtn.addEventListener("click", () => {
+        this.options.onRequestFullScreen?.();
+      });
+      this.toolbar.appendChild(fullScreenBtn);
+    }
 
     // btnGuardar
     this.saveBtn = document.createElement("button");

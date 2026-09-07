@@ -21,7 +21,10 @@ export class EditorHTML2 implements ComponentFramework.StandardControl<IInputs, 
     this.editor = new EditorComponent(container, context, {
       onDirtyChanged: (dirty: boolean) => {
         this.setDocumentDirty(dirty);
-      }
+      },
+      onRequestFullScreen: () => {
+        context.mode.setFullScreen(true);
+      },
     });
     this.editor.resize(context.mode.allocatedWidth, context.mode.allocatedHeight);
     this.editor.init().catch((err) => {

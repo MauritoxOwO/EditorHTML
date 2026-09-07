@@ -104,6 +104,7 @@ export interface EditorComponentOptions {
   paragraphStyleCatalog?: ParagraphStyleCatalog;
   runtimeHeaderLogoSrc?: string;
   onDirtyChanged?: (dirty: boolean) => void;
+  onRequestFullScreen?: () => void;
 }
 
 export class EditorComponent {
@@ -353,6 +354,7 @@ export class EditorComponent {
       onApplyParagraphStyle: (className) => this.applyParagraphStyle(className),
       onApplyTextCase: (textCase) => this.applySelectedTextCase(textCase),
       onApplyFontSize: (fontSize) => this.applyFontSize(fontSize),
+      onRequestFullScreen: this.options.onRequestFullScreen,
       onCommand: (command) =>
         this.tableSelectionController.handleToolbarCommand(command) ||
         (this.imageResizeController?.handleToolbarCommand(command) ?? false),
