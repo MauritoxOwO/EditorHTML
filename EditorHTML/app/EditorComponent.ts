@@ -355,6 +355,13 @@ export class EditorComponent {
       onApplyTextCase: (textCase) => this.applySelectedTextCase(textCase),
       onApplyFontSize: (fontSize) => this.applyFontSize(fontSize),
       onRequestFullScreen: this.options.onRequestFullScreen,
+      onZoom: (delta) => {
+        const current = parseFloat(getComputedStyle(this.root).getPropertyValue("--hwe-page-view-zoom")) || 1;
+        const zoom = Math.max(0.5, Math.min(2.5, current + delta));
+        this.root.style.setProperty("--hwe-page-view-zoom", zoom.toFixed(2));
+        this.imageResizeController.refresh();
+        this.tableSelectionController.refresh();
+      },
       onCommand: (command) =>
         this.tableSelectionController.handleToolbarCommand(command) ||
         (this.imageResizeController?.handleToolbarCommand(command) ?? false),

@@ -50,7 +50,8 @@ export class EditorLayoutService {
     const contentBottom = this.getContentBottom(inner);
     if (contentBottom === null) return scrollOverflows;
 
-    return contentBottom > this.getContentLimitBottom(inner) + 1 || scrollOverflows;
+    const scale = inner.getBoundingClientRect().height / (inner.offsetHeight || 1);
+    return contentBottom > this.getContentLimitBottom(inner, scale) + scale || scrollOverflows;
   }
 
   private getDirectFlowTable(element: HTMLElement): HTMLTableElement | null {
@@ -214,10 +215,10 @@ export class EditorLayoutService {
     });
   }
 
-  private getContentLimitBottom(inner: HTMLElement): number {
+  private getContentLimitBottom(inner: HTMLElement, scale: number): number {
     const styles = getComputedStyle(inner);
     const paddingBottom = parseFloat(styles.paddingBottom) || 0;
-    return inner.getBoundingClientRect().bottom - Math.min(paddingBottom, 12);
+    return inner.getBoundingClientRect().bottom - Math.min(paddingBottom, 12) * scale;
   }
 
   private getContentBottom(inner: HTMLElement): number | null {

@@ -283,7 +283,7 @@
   padding: 24px 16px 48px;
   display: flex;
   flex-direction: column;
-  align-items: center;
+  align-items: safe center;
   gap: 0;
   box-sizing: border-box;
   background: #d0d0d0;
@@ -293,9 +293,12 @@
 .pcf-html-editor-root .hwe-page {
   width: var(--hwe-page-width, 210mm);
   height: var(--hwe-page-height, 297mm);
-  zoom: var(--hwe-page-view-zoom, 1);
+  transform: scale(var(--hwe-page-view-zoom, 1));
+  transform-origin: top left;
   flex: 0 0 auto;
   margin: 0;
+  margin-right: calc(var(--hwe-page-width, 210mm) * (var(--hwe-page-view-zoom, 1) - 1));
+  margin-bottom: calc(var(--hwe-page-height, 297mm) * (var(--hwe-page-view-zoom, 1) - 1));
   padding: 0;
   position: relative;
   overflow: hidden;
@@ -766,9 +769,8 @@
 
 /* Separador visual entre paginas */
 .pcf-html-editor-root .hwe-page-divider {
-  width: var(--hwe-page-width, 210mm);
-  height: 40px;
-  zoom: var(--hwe-page-view-zoom, 1);
+  width: calc(var(--hwe-page-width, 210mm) * var(--hwe-page-view-zoom, 1));
+  height: calc(40px * var(--hwe-page-view-zoom, 1));
   flex: 0 0 auto;
   margin: 0;
   display: flex;
@@ -871,7 +873,8 @@
   }
 
   .pcf-html-editor-root .hwe-page {
-    zoom: 1;
+    transform: none;
+    margin: 0;
     box-shadow: none;
     break-after: page;
     page-break-after: always;

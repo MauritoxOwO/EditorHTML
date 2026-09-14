@@ -36,6 +36,7 @@ export interface ToolbarOptions {
   onApplyFontSize?: (fontSize: string) => void;
   onCommand?: (command: string) => boolean;
   onRequestFullScreen?: () => void;
+  onZoom?: (delta: number) => void;
 }
 
 export class Toolbar {
@@ -196,6 +197,17 @@ export class Toolbar {
         this.options.onRequestFullScreen?.();
       });
       this.toolbar.appendChild(fullScreenBtn);
+    }
+
+    for (const direction of [-1, 1]) {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.title = direction > 0 ? "Acercar documento" : "Alejar documento";
+      button.setAttribute("aria-label", button.title);
+      button.innerHTML = `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="10" cy="10" r="7"/><path d="m15 15 6 6M6 10h8${direction > 0 ? "M10 6v8" : ""}"/></svg>`;
+      button.addEventListener("mousedown", (event) => event.preventDefault());
+      button.addEventListener("click", () => this.options.onZoom?.(direction * 0.1));
+      this.toolbar.appendChild(button);
     }
 
     // btnGuardar
