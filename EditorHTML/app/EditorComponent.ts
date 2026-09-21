@@ -1,6 +1,7 @@
 import { Paginator, RebalanceOptions } from "../pagination/Paginator";
 import { CaretManager } from "../pagination/CaretManager";
 import { MANUAL_PAGE_BREAK_ATTR } from "../pagination/PaginatorDom";
+import { separateParagraphFlow } from "../pagination/FlowIdentity";
 import {
   CLEAR_PARAGRAPH_STYLE_VALUE,
   Toolbar,
@@ -803,7 +804,8 @@ export class EditorComponent {
       this.pendingInputTypes.set(page, event.inputType);
       if (this.isDeleteInput(event.inputType)) this.pagesNeedingPull.add(page);
     });
-    inner.addEventListener("input", () => {
+    inner.addEventListener("input", (event) => {
+      if ((event as InputEvent).inputType === "insertParagraph") separateParagraphFlow(this.root);
       this.updateToolbarSelectionState();
 
       if (!this.isComposing) {
@@ -1460,7 +1462,8 @@ export class EditorComponent {
     this.layoutService.applyOfficialTableWidths(page);
     this.scheduleRebalance(page, true, {
       compactPages: true,
-      includePreviousPage: false,
+      includePreviousPage: true,
+      force: true,
     });
     this.historyController.recordNow();
     this.updateDirtyState(this.collectHtml());

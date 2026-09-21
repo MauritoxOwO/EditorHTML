@@ -163,6 +163,9 @@ export class Paginator {
     let pageIndex = safeStart;
     for (const node of nodes) {
       pageIndex = this.appendNodeFlowing(node, pageIndex);
+      // Terminar de repartir este bloque antes de insertar el contenido siguiente.
+      this.resolveOverflow(pageIndex);
+      pageIndex = this.pages.length - 1;
     }
 
     this.stabilizeOverflow();

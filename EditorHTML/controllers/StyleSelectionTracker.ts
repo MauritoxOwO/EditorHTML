@@ -63,6 +63,12 @@ export class StyleSelectionTracker {
     const range = this.getUsableRange(root);
     if (!range) return this.getLastStyleBlock(root);
 
+    if (range.collapsed) {
+      const block = this.closestStyleBlockFromNode(range.startContainer);
+      if (block) this.lastStyleBlock = block;
+      return block ? [block] : [];
+    }
+
     const editable = this.closestEditableFromNode(range.commonAncestorContainer, root);
     const scope = range.collapsed ? this.activeEditableProvider() ?? editable ?? root : editable ?? root;
     const blocks = Array.from(
@@ -70,8 +76,12 @@ export class StyleSelectionTracker {
     ).filter((block) => this.isStyleBlock(block) && this.rangeOverlapsBlock(range, block));
 
     if (blocks.length > 0) {
-      this.lastStyleBlock = blocks[0];
-      return blocks;
+      // No aplicar tambien al padre: sus otros parrafos heredarian el estilo.
+      const paragraphs = blocks.filter((block) =>
+        !blocks.some((other) => other !== block && block.contains(other))
+      );
+      this.lastStyleBlock = paragraphs[0];
+      return paragraphs;
     }
 
     const element =
@@ -164,14 +174,14 @@ export class StyleSelectionTracker {
   }
 
   private isStyleBlock(block: HTMLElement): boolean {
-    if (block.closest("[data-hwe-api-header='true'], [data-hwe-dynamic-header='true']")) return false;
+    if (block.closest("[contenteditable='false'], [data-hwe-api-header='true'], [data-hwe-dynamic-header='true']")) return false;
     if (Array.from(block.classList).some((className) => EDITOR_CONTAINER_CLASS_NAMES.has(className))) {
       return false;
     }
 
     if (block.tagName !== "DIV") return true;
     if (block.hasAttribute("contenteditable")) return false;
-    if (Array.from(block.attributes).some((attr) => attr.name.startsWith("data-hwe-"))) {
+    if (block.matches("[data-hwe-page-break], [data-hwe-manual-page-break], [data-hwe-generated-wrapper], [data-hwe-keep-together]")) {
       return false;
     }
 

@@ -144,7 +144,10 @@ export function isSplittableContainer(
   }
   if (isKeepTogetherGroup(element)) return false;
   if (isGeneratedOrAtomicShell(element)) return false;
-  if (isSplittableTextBlock(element)) return false;
+  if (isSplittableTextBlock(element) || isEditableBlankBlock(element)) return false;
+  // Los spans de formato o del cursor no convierten un parrafo vacio en contenedor.
+  if (element.tagName === "DIV" && !hasBlockChild(element) &&
+      !element.querySelector("img, table, figure, video, canvas, svg")) return false;
   if (isTableFlowWrapper(element)) return true;
   if (!SPLITTABLE_CONTAINER_TAGS.has(element.tagName)) return false;
 

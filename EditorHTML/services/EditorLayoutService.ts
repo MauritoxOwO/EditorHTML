@@ -66,9 +66,11 @@ export class EditorLayoutService {
 
   private normalizeFlowTable(table: HTMLTableElement): void {
     table.removeAttribute("width");
-    table.style.setProperty("width", "100%", "important");
+    if (!table.hasAttribute("data-hwe-user-table-width")) {
+      table.style.setProperty("width", "100%", "important");
+      table.style.setProperty("margin-left", "0", "important");
+    }
     table.style.setProperty("max-width", "100%", "important");
-    table.style.setProperty("margin-left", "0", "important");
     table.style.setProperty("margin-right", "0", "important");
     this.normalizeColumnWidths(table);
     this.clearTableStructureHeights(table);

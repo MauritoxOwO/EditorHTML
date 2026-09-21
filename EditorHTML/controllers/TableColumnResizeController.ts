@@ -22,6 +22,7 @@ interface ColumnResizeDragState {
   startWidths: number[];
   table: HTMLTableElement;
   tableWidth: number;
+  outerBounds?: { left: number; right: number; maxWidth: number; minWidth: number };
 }
 
 const TABLE_SELECTOR = ".hwe-page-inner table";
@@ -102,7 +103,8 @@ export class TableColumnResizeController {
     event.stopPropagation();
 
     const columnCount = this.getColumnCount(hit.table);
-    if (columnCount < 2) return;
+    const isOuter = hit.boundaryIndex === -1 || hit.boundaryIndex === columnCount - 1;
+    if (columnCount < 1 || (!isOuter && columnCount < 2)) return;
 
     const tableWidth = Math.max(1, hit.table.getBoundingClientRect().width);
     const startWidths = this.readColumnWidths(hit.table, columnCount, tableWidth);
@@ -120,6 +122,15 @@ export class TableColumnResizeController {
       table: hit.table,
       tableWidth,
     };
+    if (isOuter) {
+      const parent = hit.table.parentElement!;
+      const styles = getComputedStyle(parent);
+      const scale = parent.getBoundingClientRect().width / (parent.offsetWidth || 1);
+      const paddingLeft = parseFloat(styles.paddingLeft) || 0;
+      const maxWidth = (parent.clientWidth - paddingLeft - (parseFloat(styles.paddingRight) || 0)) * scale;
+      const left = hit.table.getBoundingClientRect().left - parent.getBoundingClientRect().left - (parent.clientLeft + paddingLeft) * scale;
+      this.dragState.outerBounds = { left, right: left + tableWidth, maxWidth, minWidth: Math.min(tableWidth, MIN_COLUMN_WIDTH_PX * columnCount * scale) };
+    }
     this.setResizeCursor(true);
     this.ensureGuide();
     this.positionGuide();
@@ -155,12 +166,18 @@ export class TableColumnResizeController {
     }
 
     const { affectedTables, currentWidths, table } = this.dragState;
-    this.applyColumnWidths(affectedTables, currentWidths);
+    if (this.dragState.outerBounds) this.applyOuterBounds(this.dragState, affectedTables);
+    else this.applyColumnWidths(affectedTables, currentWidths);
     this.options.onColumnsChanged(table);
     this.clear();
   }
 
   private applyDragPreview(state: ColumnResizeDragState): void {
+    if (state.outerBounds) {
+      this.applyOuterBounds(state, [state.table]);
+      this.positionGuide();
+      return;
+    }
     const nextWidths = this.getDraggedWidths(state);
     state.hasChanged =
       state.hasChanged ||
@@ -173,6 +190,24 @@ export class TableColumnResizeController {
 
     this.applyColumnWidths([state.table], nextWidths);
     this.positionGuide();
+  }
+
+  private applyOuterBounds(state: ColumnResizeDragState, tables: HTMLTableElement[]): void {
+    const bounds = state.outerBounds!;
+    const delta = state.latestClientX - state.startClientX;
+    const left = state.boundaryIndex === -1
+      ? this.clamp(bounds.left + delta, 0, bounds.right - bounds.minWidth) : bounds.left;
+    const right = state.boundaryIndex === -1 ? bounds.right
+      : this.clamp(bounds.right + delta, bounds.left + bounds.minWidth, bounds.maxWidth);
+    if (Math.abs(left - bounds.left) <= 0.5 && Math.abs(right - bounds.right) <= 0.5 && !state.hasChanged) return;
+    state.hasChanged = true;
+    tables.forEach((table) => {
+      this.ensureColgroup(table, state.startWidths);
+      table.setAttribute("data-hwe-user-table-width", "true");
+      table.style.setProperty("width", `${((right - left) / bounds.maxWidth * 100).toFixed(3)}%`, "important");
+      table.style.setProperty("margin-left", `${(left / bounds.maxWidth * 100).toFixed(3)}%`, "important");
+      table.style.setProperty("margin-right", "0", "important");
+    });
   }
 
   private getDraggedWidths(state: ColumnResizeDragState): number[] {
@@ -195,18 +230,20 @@ export class TableColumnResizeController {
     const target = event.target as Element | null;
     if (!target?.closest || target.closest(".hwe-editor-header")) return null;
 
-    const cell = target.closest<HTMLTableCellElement>("td, th");
-    if (!cell) return null;
-
-    const table = cell.closest<HTMLTableElement>("table");
+    const table = target.closest<HTMLTableElement>("table");
     const root = this.options.rootProvider();
     if (!table || !root?.contains(table) || !table.closest(".hwe-page-inner")) return null;
 
+    const columnCount = this.getColumnCount(table);
+    const tableRect = table.getBoundingClientRect();
+    if (Math.abs(event.clientX - tableRect.left) <= HIT_ZONE_PX) return { boundaryIndex: -1, table };
+    if (Math.abs(event.clientX - tableRect.right) <= HIT_ZONE_PX) return { boundaryIndex: columnCount - 1, table };
+    const cell = target.closest<HTMLTableCellElement>("td, th");
+    if (!cell) return null;
     const rect = cell.getBoundingClientRect();
     if (event.clientY < rect.top || event.clientY > rect.bottom) return null;
     if (Math.abs(event.clientX - rect.right) > HIT_ZONE_PX) return null;
 
-    const columnCount = this.getColumnCount(table);
     const cellEndIndex = this.getCellEndColumnIndex(cell);
     if (cellEndIndex === null || cellEndIndex <= 0 || cellEndIndex >= columnCount) return null;
 
@@ -313,7 +350,9 @@ export class TableColumnResizeController {
 
   private ensureColgroup(table: HTMLTableElement, widths: number[]): void {
     table.removeAttribute("width");
-    table.style.setProperty("width", "100%", "important");
+    if (!table.hasAttribute("data-hwe-user-table-width")) {
+      table.style.setProperty("width", "100%", "important");
+    }
     table.style.setProperty("max-width", "100%", "important");
     table.style.setProperty("table-layout", "fixed", "important");
     table.setAttribute("data-hwe-user-column-widths", "true");
