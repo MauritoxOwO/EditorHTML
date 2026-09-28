@@ -53,6 +53,7 @@ import {
 } from "../controllers/TextSelectionFormatter";
 import { SelectionFormattingResolver } from "../controllers/SelectionFormattingResolver";
 import { EditorViewController } from "../ui/EditorViewController";
+import { DocumentSearch } from "../ui/DocumentSearch";
 import { RuntimePageHeaderRenderer } from "../ui/RuntimePageHeaderRenderer";
 import {
   hweDebugLog,
@@ -154,6 +155,7 @@ export class EditorComponent {
   private tableSelectionController!: TableSelectionController;
   private listCommandController!: ListCommandController;
   private viewController!: EditorViewController;
+  private documentSearch!: DocumentSearch;
   private pageSetup: PageSetup = DEFAULT_PAGE_SETUP;
   private allocatedWidth?: number;
   private allocatedHeight?: number;
@@ -390,6 +392,12 @@ export class EditorComponent {
     this.workspace = document.createElement("div");
     this.workspace.className = "hwe-workspace";
     this.root.appendChild(this.workspace);
+    this.documentSearch = new DocumentSearch(
+      this.workspace,
+      () => this.historyController.recordNow(),
+      (page, forceRebalance) => this.markEditedAndRebalance(page, forceRebalance)
+    );
+    this.editorHeader.appendChild(this.documentSearch.build());
     this.imageResizeController = new ImageResizeController({
       rootProvider: () => this.root ?? null,
       onImageChanged: (image) => this.markImageEdited(image),
@@ -1431,11 +1439,11 @@ export class EditorComponent {
     }
   }
 
-  private markEditedAndRebalance(element: HTMLElement): void {
+  private markEditedAndRebalance(element: HTMLElement, forceRebalance = false): void {
     const page = element.closest<HTMLElement>(".hwe-page");
     if (!page) return;
     this.updateToolbarSelectionState();
-    this.scheduleRebalance(page, true, { includePreviousPage: false });
+    this.scheduleRebalance(page, true, { includePreviousPage: false, force: forceRebalance });
     this.historyController.recordNow();
     this.updateDirtyState(this.collectHtml());
   }
@@ -1741,6 +1749,7 @@ export class EditorComponent {
     this.tableSelectionController?.destroy();
     this.paragraphStyleManager?.destroy();
     this.toolbar?.destroy();
+    this.documentSearch?.destroy();
     this.paginator?.destroy();
     this.revokeRuntimeHeaderLogoSrc();
     this.container.innerHTML = "";
