@@ -1,6 +1,7 @@
 export class DocumentSearch {
   private readonly input = document.createElement("input");
   private readonly caseButton = document.createElement("button");
+  private readonly wholeWordButton = document.createElement("button");
   private readonly replacement = document.createElement("input");
   private readonly counter = document.createElement("span");
   private readonly previous = document.createElement("button");
@@ -11,6 +12,7 @@ export class DocumentSearch {
   private matches: Range[] = [];
   private index = -1;
   private caseSensitive = false;
+  private wholeWord = false;
 
   constructor(
     private readonly workspace: HTMLElement,
@@ -46,7 +48,21 @@ export class DocumentSearch {
       this.caseButton.classList.toggle("hwe-active", this.caseSensitive);
       this.refresh();
     });
-    searchInput.append(this.input, this.caseButton);
+    this.wholeWordButton.type = "button";
+    this.wholeWordButton.textContent = "|ab|";
+    this.wholeWordButton.title = "Buscar palabras completas";
+    this.wholeWordButton.setAttribute("aria-label", this.wholeWordButton.title);
+    this.wholeWordButton.setAttribute("aria-pressed", "false");
+    this.wholeWordButton.addEventListener("click", () => {
+      this.wholeWord = !this.wholeWord;
+      this.wholeWordButton.setAttribute("aria-pressed", String(this.wholeWord));
+      this.wholeWordButton.classList.toggle("hwe-active", this.wholeWord);
+      this.refresh();
+    });
+    const searchOptions = document.createElement("span");
+    searchOptions.className = "hwe-search-options";
+    searchOptions.append(this.caseButton, this.wholeWordButton);
+    searchInput.append(this.input, searchOptions);
     this.counter.setAttribute("role", "status");
     this.counter.setAttribute("aria-live", "polite");
     this.previous.textContent = "Anterior";
@@ -188,7 +204,13 @@ export class DocumentSearch {
     }
 
     // Unir los nodos de texto permite encontrar palabras partidas por spans de formato.
-    const pattern = new RegExp(query.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), this.caseSensitive ? "g" : "gi");
+    const literalQuery = query.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    // Los límites Unicode incluyen tildes, ñ, marcas combinadas y números.
+    const wordCharacter = "[\\p{L}\\p{M}\\p{N}_]";
+    const expression = this.wholeWord
+      ? `(?<!${wordCharacter})${literalQuery}(?!${wordCharacter})`
+      : literalQuery;
+    const pattern = new RegExp(expression, this.caseSensitive ? "gu" : "giu");
     const matches: Range[] = [];
     let match: RegExpExecArray | null;
     while ((match = pattern.exec(text))) {

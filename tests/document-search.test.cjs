@@ -137,3 +137,45 @@ test("el reemplazo individual sigue cambiando únicamente la coincidencia selecc
   assert.equal(app.workspace.textContent, "luna sol");
   assert.equal(app.calls.rebalance[0].force, false);
 });
+
+test("palabra completa distingue fecha de fechas y actualiza el contador al alternar", (t) => {
+  const app = setup(t, ["<p>fecha fechas prefechas fechas2 fechas_ (fechas), FECHAS</p>"]);
+  const counter = app.bar.querySelector('[role="status"]');
+  app.setQuery("fechas", "días");
+  assert.equal(counter.textContent, "6 coincidencias");
+  app.button("|ab|").click();
+  assert.equal(app.button("|ab|").getAttribute("aria-pressed"), "true");
+  assert.equal(counter.textContent, "3 coincidencias");
+  app.button("Aa").click();
+  assert.equal(counter.textContent, "2 coincidencias");
+  app.button("Reemplazar todo").click();
+  assert.equal(app.workspace.textContent, "fecha días prefechas fechas2 fechas_ (días), FECHAS");
+  app.setQuery("fecha", "día");
+  assert.equal(counter.textContent, "1 coincidencias");
+  app.button("Siguiente").click();
+  app.button("Reemplazar").click();
+  assert.equal(app.workspace.textContent, "día días prefechas fechas2 fechas_ (días), FECHAS");
+  app.button("|ab|").click();
+  assert.equal(app.button("|ab|").getAttribute("aria-pressed"), "false");
+  assert.equal(counter.textContent, "3 coincidencias");
+});
+
+test("palabra completa respeta letras Unicode, puntuación y palabras partidas entre spans", (t) => {
+  const app = setup(t, ["<p>año años tamaño ñaño añoé año\u0301 (año), <b>a</b><i>ño</i></p>"]);
+  app.setQuery("año", "mes");
+  app.button("|ab|").click();
+  assert.equal(app.bar.querySelector('[role="status"]').textContent, "3 coincidencias");
+  app.button("Reemplazar todo").click();
+  assert.equal(app.workspace.textContent, "mes años tamaño ñaño añoé año\u0301 (mes), mes");
+});
+
+test("palabra completa también permite frases y mantiene literal la puntuación", (t) => {
+  const app = setup(t, ["<p>fecha de alta; fechas de alta; fecha de altas; (fecha de alta).</p><p>a.b axb a.bc</p>"]);
+  app.button("|ab|").click();
+  app.setQuery("fecha de alta", "ingreso");
+  app.button("Reemplazar todo").click();
+  assert.equal(app.workspace.querySelector("p").textContent, "ingreso; fechas de alta; fecha de altas; (ingreso).");
+  app.setQuery("a.b", "dato");
+  app.button("Reemplazar todo").click();
+  assert.equal(app.workspace.querySelectorAll("p")[1].textContent, "dato axb a.bc");
+});

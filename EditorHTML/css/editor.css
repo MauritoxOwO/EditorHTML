@@ -100,18 +100,23 @@
 .pcf-html-editor-root .hwe-search-input input {
   width: 100%;
   box-sizing: border-box;
-  padding-right: 39px;
+  padding-right: 77px;
 }
 
 .pcf-html-editor-root .hwe-search-input input::-webkit-search-cancel-button {
   display: none;
 }
 
-.pcf-html-editor-root .hwe-search-input button {
+.pcf-html-editor-root .hwe-search-options {
   position: absolute;
   right: 3px;
   top: 50%;
   transform: translateY(-50%);
+  display: inline-flex;
+  gap: 3px;
+}
+
+.pcf-html-editor-root .hwe-search-options button {
   min-width: 30px;
   padding: 1px 3px;
   border-color: transparent;
