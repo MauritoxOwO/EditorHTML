@@ -1,9 +1,13 @@
 import { getTableFlowFragments } from "../dom/TableFlow";
 import { getCellsForColumn, getColumnIndexAtClientX } from "../dom/TableGrid";
+import { getCellParagraphs } from "../dom/TableParagraphs";
+import type { TextCase } from "./TextSelectionFormatter";
 
 export interface TableSelectionControllerOptions {
   rootProvider: () => HTMLElement | null;
   onTableChanged: (table: HTMLTableElement) => void;
+  onBeforeTableDelete: () => void;
+  onTableDeleted: (page: HTMLElement) => void;
 }
 
 const SUPPORTED_COMMANDS = new Set(["bold", "underline"]);
@@ -129,6 +133,61 @@ export class TableSelectionController {
     });
     this.notifySelectedTableChanged();
     return true;
+  }
+
+  applyParagraphStyle(
+    applyToBlock: (block: HTMLElement) => void,
+    beforeApply: () => void
+  ): boolean {
+    if (this.getSelectedTables().length === 0) return false;
+
+    const cells = this.getSelectedCells().filter((cell) =>
+      !cell.closest("[contenteditable='false'], [data-hwe-api-header], [data-hwe-dynamic-header], [hidden]")
+    );
+    if (cells.length === 0) return true;
+
+    // Capturar el historial antes de crear párrafos para las celdas con texto suelto.
+    beforeApply();
+    cells.flatMap(getCellParagraphs).forEach(applyToBlock);
+    this.notifySelectedTableChanged();
+    return true;
+  }
+
+  applyTextCase(textCase: TextCase, beforeApply: () => void): boolean {
+    if (this.getSelectedTables().length === 0) return false;
+
+    const changes: { node: Text; value: string }[] = [];
+    this.getSelectedCells().forEach((cell) => {
+      const walker = document.createTreeWalker(cell, NodeFilter.SHOW_TEXT);
+      let node: Node | null;
+      while ((node = walker.nextNode())) {
+        const parent = node.parentElement;
+        if (!parent || parent.closest("td, th") !== cell || parent.closest(
+          "[contenteditable='false'], [data-hwe-api-header], [data-hwe-dynamic-header], [hidden], script, style"
+        )) continue;
+
+        const text = node as Text;
+        const value = textCase === "uppercase"
+          ? text.data.toLocaleUpperCase("es-ES")
+          : text.data.toLocaleLowerCase("es-ES");
+        if (value !== text.data) changes.push({ node: text, value });
+      }
+    });
+
+    if (changes.length === 0) return true;
+    beforeApply();
+    // Modificar solo los nodos de texto conserva estilos, enlaces y estructura.
+    changes.forEach(({ node, value }) => { node.data = value; });
+    this.notifySelectedTableChanged();
+    return true;
+  }
+
+  private getSelectedCells(): HTMLTableCellElement[] {
+    if (this.selectionMode === "column") return this.getSelectedColumnCells();
+    const rows = this.selectionMode === "row"
+      ? this.getSelectedRows()
+      : this.getSelectedTables().flatMap((table) => Array.from(table.rows));
+    return Array.from(new Set(rows.flatMap((row) => Array.from(row.cells))));
   }
 
   refresh(): void {
@@ -299,6 +358,33 @@ export class TableSelectionController {
     );
   }
 
+  private deleteSelectedTable(): void {
+    const tables = this.getSelectedTables().filter((table) =>
+      table.closest(".hwe-page-inner") && !table.closest("[contenteditable='false']")
+    );
+    const firstTable = tables[0];
+    const page = firstTable?.closest<HTMLElement>(".hwe-page");
+    const editable = firstTable?.closest<HTMLElement>(".hwe-page-inner");
+    if (!firstTable || !page || !editable) return;
+
+    this.options.onBeforeTableDelete();
+    // Conservar un lugar para escribir y eliminar todos los fragmentos paginados.
+    const paragraph = document.createElement("p");
+    paragraph.appendChild(document.createElement("br"));
+    firstTable.before(paragraph);
+    this.clearSelection();
+    tables.forEach((table) => table.remove());
+
+    editable.focus({ preventScroll: true });
+    const caret = document.createRange();
+    caret.setStart(paragraph, 0);
+    caret.collapse(true);
+    const selection = window.getSelection();
+    selection?.removeAllRanges();
+    selection?.addRange(caret);
+    this.options.onTableDeleted(page);
+  }
+
   private getVisibleHandleTable(): HTMLTableElement | null {
     if (this.hoveredTable?.isConnected) return this.hoveredTable;
     return this.getSelectedTables()[0] ?? null;
@@ -382,6 +468,19 @@ export class TableSelectionController {
       toolbar.appendChild(button);
       this.selectionToolbarButtons.set(mode, button);
     });
+
+    const deleteButton = document.createElement("button");
+    deleteButton.type = "button";
+    deleteButton.className = "hwe-table-delete";
+    deleteButton.textContent = "Eliminar tabla";
+    deleteButton.title = "Eliminar toda la tabla";
+    deleteButton.addEventListener("mousedown", (event) => event.preventDefault());
+    deleteButton.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      this.deleteSelectedTable();
+    });
+    toolbar.appendChild(deleteButton);
 
     const hint = document.createElement("span");
     hint.className = "hwe-table-selection-hint";

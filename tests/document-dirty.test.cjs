@@ -24,6 +24,28 @@ const { TablePaginator } = require("../EditorHTML/pagination/TablePaginator.ts")
 const { Paginator } = require("../EditorHTML/pagination/Paginator.ts");
 const { DEFAULT_PAGE_SETUP } = require("../EditorHTML/pagination/PageGeometry.ts");
 const serializer = new DocumentSerializer();
+test("table paragraph styles survive save/reload and PDF compaction rules", () => {
+  const root = document.createElement("div");
+  root.innerHTML = '<section class="hwe-page"><div class="hwe-page-inner"><table class="hwe-word-table hwe-table-compact"><tr><td><p class="titulo" data-hwe-paragraph-style="titulo">Título</p><p>Normal</p></td></tr></table></div></section>';
+  const pages = Array.from(root.querySelectorAll(".hwe-page"));
+  const css = ".hwe-page-inner .titulo { font-size: 16pt; line-height: 1.4; }";
+  const saved = serializer.collectHtml(root, pages, DEFAULT_PAGE_SETUP, css);
+  const reloaded = document.createElement("div");
+  reloaded.innerHTML = serializer.normalizeHtmlForPagination(saved).html;
+  assert.equal(reloaded.querySelector("p.titulo").getAttribute("data-hwe-paragraph-style"), "titulo");
+  const pdf = new JSDOM(serializer.collectPdfHtml(root, pages, DEFAULT_PAGE_SETUP, css));
+  try {
+    const paragraph = pdf.window.document.querySelector("p.titulo");
+    const compactRules = Array.from(pdf.window.document.styleSheets).flatMap(sheet => Array.from(sheet.cssRules))
+      .filter(rule => rule.selectorText?.includes("hwe-word-table") &&
+        (rule.style.getPropertyValue("font-size") === "inherit" || rule.style.getPropertyValue("line-height") === "inherit"));
+    assert.ok(compactRules.length > 0);
+    assert.ok(compactRules.every(rule => !paragraph.matches(rule.selectorText)));
+    assert.ok(compactRules.some(rule => paragraph.nextElementSibling.matches(rule.selectorText)));
+  } finally {
+    pdf.window.close();
+  }
+});
 const normalize = (html) => serializer.normalizeHtmlForDirtyCheck(html);
 const doc = (...pages) => '<div data-hwe-document="true" data-hwe-page-width="210mm">' +
   pages.map((html, index) => index === 0 ? html :

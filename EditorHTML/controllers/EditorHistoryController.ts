@@ -1,21 +1,27 @@
-export interface EditorHistoryControllerOptions {
+export interface EditorHistoryControllerOptions<ViewState = undefined> {
   maxStates?: number;
   recordDelayMs?: number;
   collectSnapshot: () => string;
-  restoreSnapshot: (snapshot: string) => Promise<void> | void;
+  collectViewState?: () => ViewState;
+  restoreSnapshot: (snapshot: string, viewState?: ViewState) => Promise<void> | void;
   onRestored?: () => void;
   onAvailabilityChanged?: (canUndo: boolean, canRedo: boolean) => void;
 }
 
-export class EditorHistoryController {
+interface HistoryEntry<ViewState> {
+  html: string;
+  viewState?: ViewState;
+}
+
+export class EditorHistoryController<ViewState = undefined> {
   private readonly maxStates: number;
   private readonly recordDelayMs: number;
-  private snapshots: string[] = [];
+  private snapshots: HistoryEntry<ViewState>[] = [];
   private index = -1;
   private recordTimer: number | undefined;
   private isRestoring = false;
 
-  constructor(private readonly options: EditorHistoryControllerOptions) {
+  constructor(private readonly options: EditorHistoryControllerOptions<ViewState>) {
     this.maxStates = Math.max(2, options.maxStates ?? 10);
     this.recordDelayMs = options.recordDelayMs ?? 650;
   }
@@ -49,7 +55,7 @@ export class EditorHistoryController {
   reset(): void {
     this.clearPendingRecord();
     const snapshot = this.options.collectSnapshot();
-    this.snapshots = [snapshot];
+    this.snapshots = [{ html: snapshot, viewState: this.options.collectViewState?.() }];
     this.index = 0;
     this.notifyAvailabilityChanged();
   }
@@ -61,6 +67,13 @@ export class EditorHistoryController {
       this.recordTimer = undefined;
       this.recordNow();
     }, this.recordDelayMs);
+  }
+
+  // Recordar el inicio de una edición sin crear otro paso ni romper la agrupación al escribir.
+  rememberViewState(): void {
+    if (this.isRestoring || this.recordTimer !== undefined) return;
+    const current = this.snapshots[this.index];
+    if (current) current.viewState = this.options.collectViewState?.();
   }
 
   flushPendingRecord(): void {
@@ -102,7 +115,9 @@ export class EditorHistoryController {
   private record(snapshot: string): boolean {
     if (!snapshot) return false;
 
-    if (this.snapshots[this.index] === snapshot) {
+    const viewState = this.options.collectViewState?.();
+    if (this.snapshots[this.index]?.html === snapshot) {
+      this.snapshots[this.index].viewState = viewState;
       return false;
     }
 
@@ -110,7 +125,7 @@ export class EditorHistoryController {
       this.snapshots = this.snapshots.slice(0, this.index + 1);
     }
 
-    this.snapshots.push(snapshot);
+    this.snapshots.push({ html: snapshot, viewState });
     if (this.snapshots.length > this.maxStates) {
       this.snapshots.shift();
     }
@@ -119,20 +134,20 @@ export class EditorHistoryController {
     return true;
   }
 
-  private popUndoSnapshot(): string | null {
+  private popUndoSnapshot(): HistoryEntry<ViewState> | null {
     if (!this.canUndo) return null;
     this.index -= 1;
     this.notifyAvailabilityChanged();
     return this.snapshots[this.index] ?? null;
   }
 
-  private async restore(snapshot: string): Promise<void> {
+  private async restore(snapshot: HistoryEntry<ViewState>): Promise<void> {
     if (this.isRestoring) return;
 
     this.clearPendingRecord();
     this.isRestoring = true;
     try {
-      await this.options.restoreSnapshot(snapshot);
+      await this.options.restoreSnapshot(snapshot.html, snapshot.viewState);
       this.options.onRestored?.();
     } finally {
       this.isRestoring = false;

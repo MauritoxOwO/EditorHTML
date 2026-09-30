@@ -255,6 +255,23 @@
   cursor: not-allowed;
 }
 
+.pcf-html-editor-root .hwe-table-selection-toolbar button.hwe-table-delete {
+  background: #c62828;
+  border-color: #b71c1c;
+  color: #fff;
+}
+
+.pcf-html-editor-root .hwe-table-selection-toolbar button.hwe-table-delete:hover,
+.pcf-html-editor-root .hwe-table-selection-toolbar button.hwe-table-delete:focus-visible {
+  background: #a51f1f;
+  border-color: #8b1717;
+}
+
+.pcf-html-editor-root .hwe-table-selection-toolbar button.hwe-table-delete:focus-visible {
+  outline: 2px solid #8b1717;
+  outline-offset: 2px;
+}
+
 .pcf-html-editor-root .hwe-table-selection-hint {
   align-self: center;
   max-width: 150px;
@@ -618,7 +635,7 @@
   max-height: none !important;
 }
 
-.pcf-html-editor-root .hwe-page table.hwe-word-table p {
+.pcf-html-editor-root .hwe-page table.hwe-word-table p:not([data-hwe-paragraph-style]) {
   min-height: 0;
   margin: 0;
   line-height: inherit;
@@ -657,25 +674,25 @@
   padding: 1pt 1.5pt !important;
 }
 
-.pcf-html-editor-root .hwe-page table.hwe-word-table.hwe-long-word-table td *:not([data-hwe-user-font-size="true"]):not([style*="font-size"]),
-.pcf-html-editor-root .hwe-page table.hwe-word-table.hwe-long-word-table th *:not([data-hwe-user-font-size="true"]):not([style*="font-size"]),
-.pcf-html-editor-root .hwe-page table.hwe-word-table.hwe-table-compact td *:not([data-hwe-user-font-size="true"]):not([style*="font-size"]),
-.pcf-html-editor-root .hwe-page table.hwe-word-table.hwe-table-compact th *:not([data-hwe-user-font-size="true"]):not([style*="font-size"]),
-.pcf-html-editor-root .hwe-page table.hwe-word-table.hwe-table-dense td *:not([data-hwe-user-font-size="true"]):not([style*="font-size"]),
-.pcf-html-editor-root .hwe-page table.hwe-word-table.hwe-table-dense th *:not([data-hwe-user-font-size="true"]):not([style*="font-size"]),
-.pcf-html-editor-root .hwe-page table.hwe-word-table.hwe-table-ultra-dense td *:not([data-hwe-user-font-size="true"]):not([style*="font-size"]),
-.pcf-html-editor-root .hwe-page table.hwe-word-table.hwe-table-ultra-dense th *:not([data-hwe-user-font-size="true"]):not([style*="font-size"]) {
+.pcf-html-editor-root .hwe-page table.hwe-word-table.hwe-long-word-table td *:not([data-hwe-user-font-size="true"]):not([data-hwe-paragraph-style]):not([style*="font-size"]),
+.pcf-html-editor-root .hwe-page table.hwe-word-table.hwe-long-word-table th *:not([data-hwe-user-font-size="true"]):not([data-hwe-paragraph-style]):not([style*="font-size"]),
+.pcf-html-editor-root .hwe-page table.hwe-word-table.hwe-table-compact td *:not([data-hwe-user-font-size="true"]):not([data-hwe-paragraph-style]):not([style*="font-size"]),
+.pcf-html-editor-root .hwe-page table.hwe-word-table.hwe-table-compact th *:not([data-hwe-user-font-size="true"]):not([data-hwe-paragraph-style]):not([style*="font-size"]),
+.pcf-html-editor-root .hwe-page table.hwe-word-table.hwe-table-dense td *:not([data-hwe-user-font-size="true"]):not([data-hwe-paragraph-style]):not([style*="font-size"]),
+.pcf-html-editor-root .hwe-page table.hwe-word-table.hwe-table-dense th *:not([data-hwe-user-font-size="true"]):not([data-hwe-paragraph-style]):not([style*="font-size"]),
+.pcf-html-editor-root .hwe-page table.hwe-word-table.hwe-table-ultra-dense td *:not([data-hwe-user-font-size="true"]):not([data-hwe-paragraph-style]):not([style*="font-size"]),
+.pcf-html-editor-root .hwe-page table.hwe-word-table.hwe-table-ultra-dense th *:not([data-hwe-user-font-size="true"]):not([data-hwe-paragraph-style]):not([style*="font-size"]) {
   font-size: inherit !important;
 }
 
-.pcf-html-editor-root .hwe-page table.hwe-word-table.hwe-long-word-table td *:not([data-hwe-user-font-size="true"]):not([style*="line-height"]),
-.pcf-html-editor-root .hwe-page table.hwe-word-table.hwe-long-word-table th *:not([data-hwe-user-font-size="true"]):not([style*="line-height"]),
-.pcf-html-editor-root .hwe-page table.hwe-word-table.hwe-table-compact td *:not([data-hwe-user-font-size="true"]):not([style*="line-height"]),
-.pcf-html-editor-root .hwe-page table.hwe-word-table.hwe-table-compact th *:not([data-hwe-user-font-size="true"]):not([style*="line-height"]),
-.pcf-html-editor-root .hwe-page table.hwe-word-table.hwe-table-dense td *:not([data-hwe-user-font-size="true"]):not([style*="line-height"]),
-.pcf-html-editor-root .hwe-page table.hwe-word-table.hwe-table-dense th *:not([data-hwe-user-font-size="true"]):not([style*="line-height"]),
-.pcf-html-editor-root .hwe-page table.hwe-word-table.hwe-table-ultra-dense td *:not([data-hwe-user-font-size="true"]):not([style*="line-height"]),
-.pcf-html-editor-root .hwe-page table.hwe-word-table.hwe-table-ultra-dense th *:not([data-hwe-user-font-size="true"]):not([style*="line-height"]) {
+.pcf-html-editor-root .hwe-page table.hwe-word-table.hwe-long-word-table td *:not([data-hwe-user-font-size="true"]):not([data-hwe-paragraph-style]):not([style*="line-height"]),
+.pcf-html-editor-root .hwe-page table.hwe-word-table.hwe-long-word-table th *:not([data-hwe-user-font-size="true"]):not([data-hwe-paragraph-style]):not([style*="line-height"]),
+.pcf-html-editor-root .hwe-page table.hwe-word-table.hwe-table-compact td *:not([data-hwe-user-font-size="true"]):not([data-hwe-paragraph-style]):not([style*="line-height"]),
+.pcf-html-editor-root .hwe-page table.hwe-word-table.hwe-table-compact th *:not([data-hwe-user-font-size="true"]):not([data-hwe-paragraph-style]):not([style*="line-height"]),
+.pcf-html-editor-root .hwe-page table.hwe-word-table.hwe-table-dense td *:not([data-hwe-user-font-size="true"]):not([data-hwe-paragraph-style]):not([style*="line-height"]),
+.pcf-html-editor-root .hwe-page table.hwe-word-table.hwe-table-dense th *:not([data-hwe-user-font-size="true"]):not([data-hwe-paragraph-style]):not([style*="line-height"]),
+.pcf-html-editor-root .hwe-page table.hwe-word-table.hwe-table-ultra-dense td *:not([data-hwe-user-font-size="true"]):not([data-hwe-paragraph-style]):not([style*="line-height"]),
+.pcf-html-editor-root .hwe-page table.hwe-word-table.hwe-table-ultra-dense th *:not([data-hwe-user-font-size="true"]):not([data-hwe-paragraph-style]):not([style*="line-height"]) {
   line-height: inherit !important;
 }
 

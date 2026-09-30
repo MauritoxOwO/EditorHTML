@@ -719,7 +719,7 @@ table {
   min-height: 0 !important;
   max-height: none !important;
 }
-.hwe-page table.hwe-word-table p {
+.hwe-page table.hwe-word-table p:not([data-hwe-paragraph-style]) {
   min-height: 0;
   margin: 0;
   line-height: inherit;
@@ -752,24 +752,24 @@ table {
 .hwe-page table.hwe-word-table.hwe-table-ultra-dense th {
   padding: 1pt 1.5pt !important;
 }
-.hwe-page table.hwe-word-table.hwe-long-word-table td *:not([data-hwe-user-font-size="true"]):not([style*="font-size"]),
-.hwe-page table.hwe-word-table.hwe-long-word-table th *:not([data-hwe-user-font-size="true"]):not([style*="font-size"]),
-.hwe-page table.hwe-word-table.hwe-table-compact td *:not([data-hwe-user-font-size="true"]):not([style*="font-size"]),
-.hwe-page table.hwe-word-table.hwe-table-compact th *:not([data-hwe-user-font-size="true"]):not([style*="font-size"]),
-.hwe-page table.hwe-word-table.hwe-table-dense td *:not([data-hwe-user-font-size="true"]):not([style*="font-size"]),
-.hwe-page table.hwe-word-table.hwe-table-dense th *:not([data-hwe-user-font-size="true"]):not([style*="font-size"]),
-.hwe-page table.hwe-word-table.hwe-table-ultra-dense td *:not([data-hwe-user-font-size="true"]):not([style*="font-size"]),
-.hwe-page table.hwe-word-table.hwe-table-ultra-dense th *:not([data-hwe-user-font-size="true"]):not([style*="font-size"]) {
+.hwe-page table.hwe-word-table.hwe-long-word-table td *:not([data-hwe-user-font-size="true"]):not([data-hwe-paragraph-style]):not([style*="font-size"]),
+.hwe-page table.hwe-word-table.hwe-long-word-table th *:not([data-hwe-user-font-size="true"]):not([data-hwe-paragraph-style]):not([style*="font-size"]),
+.hwe-page table.hwe-word-table.hwe-table-compact td *:not([data-hwe-user-font-size="true"]):not([data-hwe-paragraph-style]):not([style*="font-size"]),
+.hwe-page table.hwe-word-table.hwe-table-compact th *:not([data-hwe-user-font-size="true"]):not([data-hwe-paragraph-style]):not([style*="font-size"]),
+.hwe-page table.hwe-word-table.hwe-table-dense td *:not([data-hwe-user-font-size="true"]):not([data-hwe-paragraph-style]):not([style*="font-size"]),
+.hwe-page table.hwe-word-table.hwe-table-dense th *:not([data-hwe-user-font-size="true"]):not([data-hwe-paragraph-style]):not([style*="font-size"]),
+.hwe-page table.hwe-word-table.hwe-table-ultra-dense td *:not([data-hwe-user-font-size="true"]):not([data-hwe-paragraph-style]):not([style*="font-size"]),
+.hwe-page table.hwe-word-table.hwe-table-ultra-dense th *:not([data-hwe-user-font-size="true"]):not([data-hwe-paragraph-style]):not([style*="font-size"]) {
   font-size: inherit !important;
 }
-.hwe-page table.hwe-word-table.hwe-long-word-table td *:not([data-hwe-user-font-size="true"]):not([style*="line-height"]),
-.hwe-page table.hwe-word-table.hwe-long-word-table th *:not([data-hwe-user-font-size="true"]):not([style*="line-height"]),
-.hwe-page table.hwe-word-table.hwe-table-compact td *:not([data-hwe-user-font-size="true"]):not([style*="line-height"]),
-.hwe-page table.hwe-word-table.hwe-table-compact th *:not([data-hwe-user-font-size="true"]):not([style*="line-height"]),
-.hwe-page table.hwe-word-table.hwe-table-dense td *:not([data-hwe-user-font-size="true"]):not([style*="line-height"]),
-.hwe-page table.hwe-word-table.hwe-table-dense th *:not([data-hwe-user-font-size="true"]):not([style*="line-height"]),
-.hwe-page table.hwe-word-table.hwe-table-ultra-dense td *:not([data-hwe-user-font-size="true"]):not([style*="line-height"]),
-.hwe-page table.hwe-word-table.hwe-table-ultra-dense th *:not([data-hwe-user-font-size="true"]):not([style*="line-height"]) {
+.hwe-page table.hwe-word-table.hwe-long-word-table td *:not([data-hwe-user-font-size="true"]):not([data-hwe-paragraph-style]):not([style*="line-height"]),
+.hwe-page table.hwe-word-table.hwe-long-word-table th *:not([data-hwe-user-font-size="true"]):not([data-hwe-paragraph-style]):not([style*="line-height"]),
+.hwe-page table.hwe-word-table.hwe-table-compact td *:not([data-hwe-user-font-size="true"]):not([data-hwe-paragraph-style]):not([style*="line-height"]),
+.hwe-page table.hwe-word-table.hwe-table-compact th *:not([data-hwe-user-font-size="true"]):not([data-hwe-paragraph-style]):not([style*="line-height"]),
+.hwe-page table.hwe-word-table.hwe-table-dense td *:not([data-hwe-user-font-size="true"]):not([data-hwe-paragraph-style]):not([style*="line-height"]),
+.hwe-page table.hwe-word-table.hwe-table-dense th *:not([data-hwe-user-font-size="true"]):not([data-hwe-paragraph-style]):not([style*="line-height"]),
+.hwe-page table.hwe-word-table.hwe-table-ultra-dense td *:not([data-hwe-user-font-size="true"]):not([data-hwe-paragraph-style]):not([style*="line-height"]),
+.hwe-page table.hwe-word-table.hwe-table-ultra-dense th *:not([data-hwe-user-font-size="true"]):not([data-hwe-paragraph-style]):not([style*="line-height"]) {
   line-height: inherit !important;
 }
 .hwe-page table.hwe-word-table thead,

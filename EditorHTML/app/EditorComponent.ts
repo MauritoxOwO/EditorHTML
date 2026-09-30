@@ -37,6 +37,7 @@ import { EditorDiagnosticsController } from "../controllers/EditorDiagnosticsCon
 import { EditorLayoutService } from "../services/EditorLayoutService";
 import { PrintHtmlExportService } from "../services/PrintHtmlExportService";
 import { EditorHistoryController } from "../controllers/EditorHistoryController";
+import { captureHistoryView, restoreHistoryView, HistoryViewState } from "../controllers/HistoryViewState";
 import { ImageResizeController } from "../controllers/ImageResizeController";
 import { PageBackspaceController } from "../controllers/PageBackspaceController";
 import { ParagraphStyleManager } from "../services/ParagraphStyleManager";
@@ -130,10 +131,11 @@ export class EditorComponent {
   private readonly pasteController = new PasteController();
   private readonly layoutService = new EditorLayoutService();
   private readonly textSelectionFormatter = new TextSelectionFormatter();
-  private readonly historyController = new EditorHistoryController({
+  private readonly historyController = new EditorHistoryController<HistoryViewState>({
     maxStates: 10,
     collectSnapshot: () => this.collectHistoryHtml(),
-    restoreSnapshot: (snapshot) => this.renderAndPaginate(snapshot),
+    collectViewState: () => captureHistoryView(this.workspace),
+    restoreSnapshot: (snapshot, viewState) => this.restoreHistorySnapshot(snapshot, viewState),
     onRestored: () => {
       this.updateToolbarSelectionState();
       this.updateDirtyState(this.collectHtml());
@@ -337,6 +339,8 @@ export class EditorComponent {
     this.tableSelectionController = new TableSelectionController({
       rootProvider: () => this.root ?? null,
       onTableChanged: (table) => this.markTableTextFormattingChanged(table),
+      onBeforeTableDelete: () => this.historyController.recordNow(),
+      onTableDeleted: (page) => this.markEditedAndRebalance(page, true),
     });
     this.listCommandController = new ListCommandController({
       rootProvider: () => this.root ?? null,
@@ -370,6 +374,8 @@ export class EditorComponent {
         (this.imageResizeController?.handleToolbarCommand(command) ?? false),
     });
     const toolbarEl = this.toolbar.build();
+    toolbarEl.addEventListener("mousedown", () => this.historyController.rememberViewState(), true);
+    toolbarEl.addEventListener("change", () => this.historyController.rememberViewState(), true);
     this.toolbar.getSaveButton().addEventListener("click", () => void this.save());
     this.editorHeader.appendChild(toolbarEl);
     this.paragraphStyleManager = new ParagraphStyleManager(() => this.root, this.toolbar);
@@ -609,6 +615,19 @@ export class EditorComponent {
     }
   }
 
+  private async restoreHistorySnapshot(html: string, viewState?: HistoryViewState): Promise<void> {
+    const state = viewState ?? captureHistoryView(this.workspace);
+    // El rebalanceo pendiente pertenece a las páginas que vamos a sustituir.
+    if (this.rebalanceFrame !== undefined) window.cancelAnimationFrame(this.rebalanceFrame);
+    this.rebalanceFrame = undefined;
+    this.pendingRebalance = null;
+    this.tableSelectionController.clearSelection();
+    await this.renderAndPaginate(html);
+    restoreHistoryView(this.workspace, state);
+    this.styleSelectionTracker.rememberTextSelection();
+    this.tableCommandController.rememberSelectedTableRow();
+  }
+
   private async renderAndPaginate(html: string): Promise<void> {
     const done = hweDebugStart("editor.renderAndPaginate", {
       htmlLength: html.length,
@@ -804,6 +823,7 @@ export class EditorComponent {
     this.layoutService.applyOfficialTableWidths(inner);
 
     inner.addEventListener("beforeinput", (event: InputEvent) => {
+      this.historyController.rememberViewState();
       if (this.tableDomIntegrityController.handleBeforeInput(event, inner)) {
         this.markTableDomIntegrityChanged(page, inner);
         return;
@@ -854,6 +874,7 @@ export class EditorComponent {
       this.updateDirtyState(this.collectHtml());
     });
     inner.addEventListener("paste", (event: ClipboardEvent) => {
+      this.historyController.rememberViewState();
       if (this.tableDomIntegrityController.handlePaste(event, inner)) {
         this.markTableDomIntegrityChanged(page, inner);
         return;
@@ -862,6 +883,7 @@ export class EditorComponent {
       this.onPaste(event, page);
     });
     inner.addEventListener("drop", (event: DragEvent) => {
+      this.historyController.rememberViewState();
       if (this.tableDomIntegrityController.handleDrop(event, inner)) {
         this.markTableDomIntegrityChanged(page, inner);
       }
@@ -1330,6 +1352,11 @@ export class EditorComponent {
     const shouldClearStyle = className === CLEAR_PARAGRAPH_STYLE_VALUE;
     if (!shouldClearStyle && !this.paragraphStyleManager.hasClass(className)) return;
 
+    if (this.tableSelectionController.applyParagraphStyle(
+      (block) => this.paragraphStyleManager.applyToBlock(block, shouldClearStyle ? null : className),
+      () => this.historyController.recordNow()
+    )) return;
+
     this.styleSelectionTracker.restoreTextSelection();
     const blocks = this.styleSelectionTracker.getSelectedStyleBlocks();
     if (blocks.length === 0) {
@@ -1348,6 +1375,11 @@ export class EditorComponent {
   }
 
   private applySelectedTextCase(textCase: TextCase): void {
+    if (this.tableSelectionController.applyTextCase(
+      textCase,
+      () => this.historyController.recordNow()
+    )) return;
+
     this.styleSelectionTracker.restoreTextSelection();
     const affectedElements = this.textSelectionFormatter.transformSelectedTextCase(textCase);
     if (affectedElements.length === 0) return;
@@ -1410,6 +1442,7 @@ export class EditorComponent {
 
   private onPageKeyDown(event: KeyboardEvent): void {
     if (this.historyController.handleShortcut(event)) return;
+    if (event.key === "Backspace" || event.key === "Delete") this.historyController.rememberViewState();
 
     if (this.listCommandController.handleKeyDown(event)) return;
 
@@ -1484,6 +1517,7 @@ export class EditorComponent {
     this.scheduleRebalance(page, true, {
       compactPages: true,
       includePreviousPage: false,
+      force: true,
     });
     this.historyController.recordNow();
     this.updateDirtyState(this.collectHtml());

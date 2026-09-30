@@ -92,12 +92,16 @@ export class ParagraphStyleManager {
 
   applyToBlock(block: HTMLElement, className: string | null): void {
     this.classNames.forEach((styleClass) => block.classList.remove(styleClass));
-    if (!className) return;
+    if (!className) {
+      block.removeAttribute("data-hwe-paragraph-style");
+      return;
+    }
 
     if (this.fontFamilyClassNames.has(className)) {
       this.clearInlineFontFamily(block);
     }
     block.classList.add(className);
+    block.setAttribute("data-hwe-paragraph-style", className);
   }
 
   destroy(): void {
