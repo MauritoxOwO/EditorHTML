@@ -101,8 +101,8 @@ export class TextBlockSplitter {
       return true;
     }
 
-    target.insertBefore(clone, target.firstChild);
-    if (isEmptyNode(element, false)) element.remove();
+    if (clone.hasChildNodes()) target.insertBefore(clone, target.firstChild);
+    if (!element.hasChildNodes() || isEmptyNode(element, false)) element.remove();
     return true;
   }
 
@@ -110,11 +110,11 @@ export class TextBlockSplitter {
     const text = textNode.textContent ?? "";
 
     if (!text) {
+      textNode.remove();
       return true;
     }
 
     if (/^\s+$/.test(text)) {
-      if (target.childNodes.length > 0) return false;
       target.insertBefore(textNode, target.firstChild);
       return true;
     }
@@ -123,7 +123,9 @@ export class TextBlockSplitter {
     if (!match) return false;
 
     if (match.index <= 0) {
-      if (target.childNodes.length > 0) return false;
+      // Pagination and caret markers can leave one word per Text node. Keep
+      // moving those nodes into this fragment instead of starting a new block
+      // for each word (whose temporary margins distort page measurements).
       target.insertBefore(textNode, target.firstChild);
       return true;
     }

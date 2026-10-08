@@ -10,6 +10,7 @@ export interface SelectionFormattingInterface {
   fontSize?: string;
   fontFamily?: string;
   paragraphStyle?: string;
+  commandStates?: Partial<Record<string, boolean | "mixed">>;
 }
 
 export const CLEAR_PARAGRAPH_STYLE_VALUE = "__hwe-clear-paragraph-style";
@@ -25,8 +26,8 @@ const DEFAULT_FONT_FAMILIES = [
 export interface ToolbarOptions {
   onUndo?: () => void;
   onRedo?: () => void;
-  onToggleUnorderedList?: () => void;
-  onToggleOrderedList?: () => void;
+  // onToggleUnorderedList?: () => void;
+  // onToggleOrderedList?: () => void;
   onInsertTable?: () => void;
   onInsertRowAfter?: () => void;
   onDeleteRow?: () => void;
@@ -34,7 +35,7 @@ export interface ToolbarOptions {
   onApplyParagraphStyle?: (className: string) => void;
   onApplyTextCase?: (textCase: TextCase) => void;
   onApplyFontSize?: (fontSize: string) => void;
-  onCommand?: (command: string) => boolean;
+  onCommand?: (command: string, value?: string) => boolean;
   onRequestFullScreen?: () => void;
   onZoom?: (delta: number) => void;
 }
@@ -47,6 +48,7 @@ export class Toolbar {
   private styleSelect!: HTMLSelectElement;
   private sizeSelect!: HTMLSelectElement;
   private fontSelect!: HTMLSelectElement;
+  private selectionFormatting: SelectionFormattingInterface = {};
 
   private commandButtons = new Map<string, HTMLButtonElement>();
   private readonly handleSelectionChange = (): void => this.updateActiveStates();
@@ -76,20 +78,20 @@ export class Toolbar {
     this.addCmdButton("justifyFull",   "justifyFull",   "≡J", "Justificar");
     this.addSep();
 
-    // Listas
-    this.addStatefulActionButton(
-      "insertUnorderedList",
-      "• Lista",
-      "Lista con viñetas",
-      () => this.options.onToggleUnorderedList?.()
-    );
-    this.addStatefulActionButton(
-      "insertOrderedList",
-      "1. Lista",
-      "Lista numerada",
-      () => this.options.onToggleOrderedList?.()
-    );
-    this.addSep();
+    // Botones y tooltip de listas desactivados.
+    // this.addStatefulActionButton(
+    //   "insertUnorderedList",
+    //   "• Lista",
+    //   "Lista con viñetas",
+    //   () => this.options.onToggleUnorderedList?.()
+    // );
+    // this.addStatefulActionButton(
+    //   "insertOrderedList",
+    //   "1. Lista",
+    //   "Lista numerada",
+    //   () => this.options.onToggleOrderedList?.()
+    // );
+    // this.addSep();
 
     // Transformacion del texto seleccionado
     this.addActionButton("ABC", "Convertir texto seleccionado a mayusculas", () =>
@@ -116,7 +118,7 @@ export class Toolbar {
     this.fontSelect = this.makeSelect(
       "Fuente",
       this.makeFontFamilyOptions(DEFAULT_FONT_FAMILIES),
-      (value) => document.execCommand("fontName", false, value)
+      (value) => this.dispatchCommand("fontName", value)
     );
     this.toolbar.appendChild(this.fontSelect);
 
@@ -128,7 +130,7 @@ export class Toolbar {
         label: String(s),
         selected: s === "",
       })),
-      (value) => this.options.onApplyFontSize?.(value + "pt")
+      (value) => this.dispatchCommand("fontSize", value + "pt", (size) => this.options.onApplyFontSize?.(size ?? ""))
     );
     this.toolbar.appendChild(this.sizeSelect);
 
@@ -145,9 +147,7 @@ export class Toolbar {
     colorInput.value = "#000000";
     colorInput.style.cssText =
       "position:absolute;top:0;left:0;width:100%;height:100%;opacity:0;cursor:pointer;";
-    colorInput.addEventListener("input", () => {
-      document.execCommand("foreColor", false, colorInput.value);
-    });
+    colorInput.addEventListener("change", () => this.dispatchCommand("foreColor", colorInput.value));
     colorBtn.appendChild(colorInput);
     this.toolbar.appendChild(colorBtn);
 
@@ -162,9 +162,7 @@ export class Toolbar {
     highlightInput.value = "#ffff00";
     highlightInput.style.cssText =
       "position:absolute;top:0;left:0;width:100%;height:100%;opacity:0;cursor:pointer;";
-    highlightInput.addEventListener("input", () => {
-      document.execCommand("hiliteColor", false, highlightInput.value);
-    });
+    highlightInput.addEventListener("change", () => this.dispatchCommand("hiliteColor", highlightInput.value));
     highlightBtn.appendChild(highlightInput);
     this.toolbar.appendChild(highlightBtn);
 
@@ -179,11 +177,8 @@ export class Toolbar {
     const breakBtn = document.createElement("button");
     breakBtn.title = "Insertar salto de página manual";
     breakBtn.textContent = "⊞ Salto";
-    breakBtn.addEventListener("mousedown", (e) => {
-      e.preventDefault();
-
-      this.options.onInsertPageBreak?.();
-    });
+    breakBtn.addEventListener("mousedown", (e) => e.preventDefault());
+    breakBtn.addEventListener("click", () => this.options.onInsertPageBreak?.());
     this.toolbar.appendChild(breakBtn);
 
     this.addSep();
@@ -222,6 +217,7 @@ export class Toolbar {
   }
 
   setSelectionFormatting(state: SelectionFormattingInterface): void {
+    this.selectionFormatting = state;
     const fontSize = this.getCleanFontSizeValue(state.fontSize);
     this.setSelectValue(this.sizeSelect, fontSize);
     this.setSelectValue(this.fontSelect, state.fontFamily);
@@ -229,6 +225,7 @@ export class Toolbar {
     const paragraphStyle =
       state.paragraphStyle === "" ? CLEAR_PARAGRAPH_STYLE_VALUE : state.paragraphStyle;
     this.setSelectValue(this.styleSelect, paragraphStyle);
+    this.updateActiveStates();
   }
 
   setHistoryAvailability(canUndo: boolean, canRedo: boolean): void {
@@ -288,9 +285,18 @@ export class Toolbar {
 
   updateActiveStates(): void {
     this.commandButtons.forEach((btn, command) => {
+      const state = this.selectionFormatting.commandStates?.[command];
+      if (state !== undefined) {
+        btn.classList.toggle("hwe-active", state === true);
+        btn.classList.toggle("hwe-mixed", state === "mixed");
+        btn.setAttribute("aria-pressed", state === "mixed" ? "mixed" : String(state));
+        return;
+      }
       try {
         const active = document.queryCommandState(command);
         btn.classList.toggle("hwe-active", active);
+        btn.classList.remove("hwe-mixed");
+        btn.setAttribute("aria-pressed", String(active));
       } catch (error) {
         console.log(error);
       }
@@ -312,11 +318,8 @@ export class Toolbar {
     btn.innerHTML = html;
     btn.title = title;
 
-    btn.addEventListener("mousedown", (e) => {
-      e.preventDefault();
-      if (this.options.onCommand?.(command)) return;
-      document.execCommand(command, false);
-    });
+    btn.addEventListener("mousedown", (e) => e.preventDefault());
+    btn.addEventListener("click", () => this.dispatchCommand(command));
 
     this.commandButtons.set(command, btn);
     this.toolbar.appendChild(btn);
@@ -330,35 +333,42 @@ export class Toolbar {
     const btn = document.createElement("button");
     btn.textContent = label;
     btn.title = title;
-    btn.addEventListener("mousedown", (e) => {
-      e.preventDefault();
-      onAction();
-    });
+    btn.addEventListener("mousedown", (e) => e.preventDefault());
+    btn.addEventListener("click", onAction);
     this.toolbar.appendChild(btn);
     return btn;
   }
 
-  private addStatefulActionButton(
-    command: string,
-    label: string,
-    title: string,
-    onAction: () => void
-  ): void {
-    const btn = document.createElement("button");
-    btn.textContent = label;
-    btn.title = title;
-    btn.addEventListener("mousedown", (event) => {
-      event.preventDefault();
-      onAction();
-    });
-    this.commandButtons.set(command, btn);
-    this.toolbar.appendChild(btn);
-  }
+  // private addStatefulActionButton(
+  //   command: string,
+  //   label: string,
+  //   title: string,
+  //   onAction: () => void
+  // ): void {
+  //   const btn = document.createElement("button");
+  //   btn.textContent = label;
+  //   btn.title = title;
+  //   btn.addEventListener("mousedown", (event) => {
+  //     event.preventDefault();
+  //     onAction();
+  //   });
+  //   this.commandButtons.set(command, btn);
+  //   this.toolbar.appendChild(btn);
+  // }
 
   private addSep(): void {
     const sep = document.createElement("div");
     sep.className = "hwe-sep";
     this.toolbar.appendChild(sep);
+  }
+
+  private dispatchCommand(command: string, value?: string, fallback?: (value?: string) => void): void {
+    if (this.options.onCommand?.(command, value)) return;
+    if (fallback) {
+      fallback(value);
+      return;
+    }
+    document.execCommand(command, false, value);
   }
 
   private makeSelect(

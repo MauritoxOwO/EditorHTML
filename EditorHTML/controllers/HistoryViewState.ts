@@ -16,7 +16,7 @@ export interface HistoryViewState {
 interface ContentUnit { node: Node; length: number }
 interface DomPoint { node: Node; offset: number }
 
-const EXCLUDED = "[contenteditable='false'], [hidden], [data-hwe-api-header], [data-hwe-dynamic-header], [data-hwe-runtime-page-header], style, script";
+const EXCLUDED = "[contenteditable='false'], [hidden], [data-hwe-api-header], [data-hwe-dynamic-header], [data-hwe-runtime-page-header], [data-hwe-page-divider], [data-hwe-caret], [data-hwe-paste-marker], style, script";
 
 // Las posiciones cuentan contenido, no nodos: paginar puede dividir textos y clonar contenedores.
 function contentUnits(root: HTMLElement): ContentUnit[] {
@@ -33,7 +33,7 @@ function contentUnits(root: HTMLElement): ContentUnit[] {
             seenHeaders.add(id);
           }
         }
-        return node.matches("br, img, hr, p:empty, div:empty, td:empty, th:empty, li:empty")
+        return node.matches("br, img, hr, [data-hwe-manual-page-break='true'], p:empty, div:empty, td:empty, th:empty, li:empty")
           ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_SKIP;
       }
       const parent = node.parentElement;
@@ -121,9 +121,11 @@ export function captureHistoryView(workspace: HTMLElement): HistoryViewState {
     scrollTop: workspace.scrollTop,
     scrollLeft: workspace.scrollLeft,
   };
-  if (selection?.anchorNode && selection.focusNode && workspace.contains(selection.anchorNode) &&
-      workspace.contains(selection.focusNode) && focusElement?.closest(".hwe-page-inner") &&
-      !focusElement.closest(EXCLUDED)) {
+  const anchorElement = selection?.anchorNode instanceof HTMLElement ? selection.anchorNode : selection?.anchorNode?.parentElement;
+  const anchorInWorkspace = !!selection?.anchorNode && workspace.contains(selection.anchorNode);
+  const focusInWorkspace = !!selection?.focusNode && workspace.contains(selection.focusNode);
+  if (selection?.anchorNode && selection.focusNode && anchorInWorkspace && focusInWorkspace &&
+      !focusElement?.closest(EXCLUDED) && !anchorElement?.closest(EXCLUDED)) {
     state.anchor = capturePoint(workspace, selection.anchorNode, selection.anchorOffset);
     state.focus = capturePoint(workspace, selection.focusNode, selection.focusOffset);
     const top = caretTop(selection.focusNode, selection.focusOffset);
@@ -136,15 +138,18 @@ export function restoreHistoryView(workspace: HTMLElement, state: HistoryViewSta
   const anchor = state.anchor ? resolvePoint(workspace, state.anchor) : null;
   const focus = state.focus ? resolvePoint(workspace, state.focus) : null;
   if (anchor && focus) {
-    const element = focus.node instanceof HTMLElement ? focus.node : focus.node.parentElement;
-    element?.closest<HTMLElement>(".hwe-page-inner")?.focus({ preventScroll: true });
+    workspace.focus({ preventScroll: true });
     window.getSelection()?.setBaseAndExtent(anchor.node, anchor.offset, focus.node, focus.offset);
   } else {
     const editables = workspace.querySelectorAll<HTMLElement>(".hwe-page-inner");
     const editable = editables[Math.min(state.pageIndex, editables.length - 1)];
     if (editable) {
-      editable.focus({ preventScroll: true });
-      window.getSelection()?.collapse(editable, 0);
+      workspace.focus({ preventScroll: true });
+      const range = document.createRange();
+      range.selectNodeContents(editable);
+      range.collapse(true);
+      window.getSelection()?.removeAllRanges();
+      window.getSelection()?.addRange(range);
     }
   }
   workspace.scrollTop = state.scrollTop;

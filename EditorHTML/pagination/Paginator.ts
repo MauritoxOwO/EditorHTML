@@ -226,6 +226,10 @@ export class Paginator {
     const merged: ChildNode[] = [];
 
     nodes.forEach((node) => {
+      if (node.nodeType === Node.ELEMENT_NODE &&
+          (node as HTMLElement).classList.contains("hwe-text-flow-column")) {
+        this.mergeFlowFragments(Array.from(node.childNodes));
+      }
       const previous = merged[merged.length - 1];
       if (this.shouldMergeTableFragments(previous, node)) {
         this.mergeTableRows(previous as HTMLElement, node as HTMLElement);
@@ -283,8 +287,15 @@ export class Paginator {
     const currentElement = current as HTMLElement;
     if (previousElement.tagName !== currentElement.tagName) return false;
 
-    const previousId = previousElement.getAttribute("data-hwe-text-flow-id");
-    const currentId = currentElement.getAttribute("data-hwe-text-flow-id");
+    if (previousElement.getAttribute("class") !== currentElement.getAttribute("class") ||
+        previousElement.getAttribute("style") !== currentElement.getAttribute("style")) return false;
+    if (currentElement.classList.contains("hwe-text-flow-column") &&
+        previousElement.lastElementChild && currentElement.firstElementChild &&
+        this.shouldMergeTextFragments(previousElement.lastElementChild, currentElement.firstElementChild)) return true;
+    const attribute = currentElement.classList.contains("hwe-text-flow-column")
+      ? CONTAINER_FLOW_ID : "data-hwe-text-flow-id";
+    const previousId = previousElement.getAttribute(attribute);
+    const currentId = currentElement.getAttribute(attribute);
     return !!previousId && previousId === currentId;
   }
 
@@ -295,6 +306,9 @@ export class Paginator {
 
     targetBlock.removeAttribute("data-hwe-text-fragment");
     sourceBlock.remove();
+    if (targetBlock.classList.contains("hwe-text-flow-column")) {
+      this.mergeFlowFragments(Array.from(targetBlock.childNodes));
+    }
   }
 
   private getOrCreateTableBody(table: HTMLElement): HTMLElement {
@@ -372,6 +386,13 @@ export class Paginator {
     }
 
     if (pageHadContent) {
+      if (node.nodeType === Node.ELEMENT_NODE &&
+          (node as HTMLElement).classList.contains("hwe-text-flow-column")) {
+        const nextInner = getInner(this.getOrCreateNextPage(currentIndex));
+        if (nextInner && this.splitContainerPreservingShell(node as HTMLElement, nextInner, currentPage)) {
+          return currentIndex + 1;
+        }
+      }
       if (isTableElement(node)) {
         const nextPage = this.getOrCreateNextPage(currentIndex);
         const nextInner = getInner(nextPage);
@@ -757,7 +778,7 @@ export class Paginator {
     if (existingPage) return existingPage;
 
     const previousPage = this.pages[afterIndex] ?? null;
-    const newPage = this.pageFactory();
+    const newPage = this.pageFactory("");
     this.pages.splice(afterIndex + 1, 0, newPage);
     if (this.onPageCreated) {
       this.onPageCreated(newPage, previousPage);
@@ -785,6 +806,10 @@ export class Paginator {
   }
 
   private removeEmptyPages(): void {
+    this.pages.forEach((page) => {
+      const inner = getInner(page);
+      if (inner) this.mergeFlowFragments(Array.from(inner.childNodes));
+    });
     if (this.pages.length <= 1) {
       this.ensureSinglePageHasEditableBlank();
       return;

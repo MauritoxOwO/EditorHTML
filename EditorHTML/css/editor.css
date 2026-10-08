@@ -554,12 +554,18 @@
   padding-left: 24pt;
 }
 
-.pcf-html-editor-root .hwe-page .hwe-text-flow-block {
+.pcf-html-editor-root .hwe-page .hwe-text-flow-column {
   display: block !important;
   width: var(--hwe-text-width, 140mm) !important;
   max-width: 100%;
   margin-left: auto !important;
   margin-right: auto !important;
+}
+
+.pcf-html-editor-root .hwe-page .hwe-text-flow-block {
+  display: block !important;
+  width: auto !important;
+  max-width: 100%;
 }
 
 .pcf-html-editor-root .hwe-page [data-hwe-api-header="true"],
@@ -741,6 +747,8 @@
 
 .pcf-html-editor-root .hwe-page [data-hwe-user-blank="true"] {
   min-height: 1em;
+  margin-top: 0;
+  margin-bottom: 0;
 }
 
 .pcf-html-editor-root .hwe-manual-page-break,

@@ -20,6 +20,7 @@ import { unwrapGeneratedKeepTogetherGroups } from "../pagination/KeepTogetherCon
 import { addOcrTextLayers } from "../ocr/PdfOcrLayer";
 import { hweDebugLog, hweDebugStart } from "../debug/DebugLogger";
 import { normalizeDirtyHtml } from "./DirtyHtmlNormalizer";
+import { EditorLayoutService } from "./EditorLayoutService";
 
 export interface NormalizedDocument {
   html: string;
@@ -189,6 +190,8 @@ ${content}
     const clone = page.cloneNode(true) as HTMLElement;
     unwrapGeneratedKeepTogetherGroups(clone);
     this.removeRuntimeOnlyState(clone);
+    const inner = clone.querySelector<HTMLElement>(".hwe-page-inner");
+    if (inner) new EditorLayoutService().applyTextFlowLayout(inner);
     clone.querySelectorAll<HTMLElement>("[contenteditable]").forEach((element) => {
       element.removeAttribute("contenteditable");
     });
@@ -604,6 +607,12 @@ body {
   min-height: 1em;
   margin: 0 0 8pt;
 }
+
+.hwe-page [data-hwe-user-blank="true"] {
+  min-height: 1em;
+  margin-top: 0;
+  margin-bottom: 0;
+}
 .hwe-page h1 {
   margin: 12pt 0 6pt;
   font-size: 20pt;
@@ -635,12 +644,17 @@ body {
   margin: 2pt 0 0;
   padding-left: 24pt;
 }
-.hwe-page .hwe-text-flow-block {
+.hwe-page .hwe-text-flow-column {
   display: block !important;
   width: 140mm !important;
   max-width: 100%;
   margin-left: auto !important;
   margin-right: auto !important;
+}
+.hwe-page .hwe-text-flow-block {
+  display: block !important;
+  width: auto !important;
+  max-width: 100%;
 }
 .hwe-page [data-hwe-api-header="true"],
 .hwe-page [data-hwe-dynamic-header="true"] {

@@ -11,18 +11,25 @@ export interface PasteResult {
 export class PasteController {
   private readonly wordPasteImporter = new WordPasteImporter();
 
-  handlePaste(event: ClipboardEvent, fallbackPage: HTMLElement): PasteResult {
+  handlePaste(
+    event: ClipboardEvent,
+    fallbackPage: HTMLElement,
+    targetEditable: HTMLElement = fallbackPage.querySelector<HTMLElement>(".hwe-page-inner") ?? fallbackPage,
+    forceHtml = false
+  ): PasteResult {
     const done = hweDebugStart("paste.handlePaste");
     const html = event.clipboardData?.getData("text/html") ?? "";
-    if (!html || !this.wordPasteImporter.isWordHtml(html)) {
+    const isWordHtml = !!html && this.wordPasteImporter.isWordHtml(html);
+    if (!html || (!isWordHtml && !forceHtml)) {
       done({ handled: false, htmlLength: html.length });
       return { handled: false };
     }
 
     event.preventDefault();
 
-    const targetEditable = event.currentTarget as HTMLElement;
-    const imported = this.wordPasteImporter.importFromHtml(html);
+    const imported = isWordHtml
+      ? this.wordPasteImporter.importFromHtml(html)
+      : { html: this.cleanClipboardHtml(html), pageSetup: undefined };
     const insertAsBlock = this.shouldInsertAsBlock(imported.html);
     const insertionMarker = this.createPasteInsertionMarker(targetEditable, insertAsBlock);
     const affectedPage =
@@ -45,6 +52,21 @@ export class PasteController {
     };
   }
 
+  private cleanClipboardHtml(html: string): string {
+    const template = document.createElement("template");
+    template.innerHTML = html;
+    template.content.querySelectorAll("script, style, iframe, object, embed, meta, link").forEach((node) => node.remove());
+    template.content.querySelectorAll<HTMLElement>("*").forEach((element) => {
+      Array.from(element.attributes).forEach((attribute) => {
+        const name = attribute.name.toLowerCase();
+        if (name.startsWith("on") || name === "contenteditable" || name.startsWith("data-hwe-")) {
+          element.removeAttribute(attribute.name);
+        }
+      });
+    });
+    return template.innerHTML;
+  }
+
   private createPasteInsertionMarker(
     targetEditable: HTMLElement,
     insertAsBlock: boolean
@@ -54,7 +76,7 @@ export class PasteController {
     marker.style.cssText = "display:inline-block;width:0;height:0;overflow:hidden;line-height:0;";
 
     const selection = window.getSelection();
-    targetEditable.focus({ preventScroll: true });
+    (targetEditable.closest<HTMLElement>(".hwe-workspace") ?? targetEditable).focus({ preventScroll: true });
 
     if (!selection || selection.rangeCount === 0) {
       targetEditable.appendChild(marker);
@@ -100,7 +122,7 @@ export class PasteController {
       const nextRange = document.createRange();
       nextRange.setStartAfter(lastInserted);
       nextRange.collapse(true);
-      targetEditable.focus({ preventScroll: true });
+      (targetEditable.closest<HTMLElement>(".hwe-workspace") ?? targetEditable).focus({ preventScroll: true });
       selection.removeAllRanges();
       selection.addRange(nextRange);
     }

@@ -69,13 +69,9 @@ export function isEditableBlankBlock(element: HTMLElement): boolean {
   if (!BLANK_BLOCK_TAGS.has(element.tagName)) return false;
   if ((element.textContent ?? "").replace(/\u00a0/g, " ").trim() !== "") return false;
 
-  return Array.from(element.childNodes).every((child) => {
-    if (child.nodeType === Node.TEXT_NODE) {
-      return (child.textContent ?? "").replace(/\u00a0/g, " ").trim() === "";
-    }
-
-    return child.nodeType === Node.ELEMENT_NODE && (child as HTMLElement).tagName === "BR";
-  });
+  return Array.from(element.querySelectorAll("*")).every((child) =>
+    child.matches("br, span, strong, b, em, i, u, s, strike, sub, sup, font, a, code, mark")
+  );
 }
 
 export function isSplittableContainer(element: HTMLElement): boolean {

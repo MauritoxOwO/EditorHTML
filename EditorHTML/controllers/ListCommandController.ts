@@ -1,3 +1,4 @@
+// Controlador conservado sin uso: sus botones y conexiones están comentados en Toolbar y EditorComponent.
 import { CaretManager } from "../pagination/CaretManager";
 
 type ListElement = HTMLUListElement | HTMLOListElement;

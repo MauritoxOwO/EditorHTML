@@ -1,4 +1,4 @@
-import { getMeaningfulChildren } from "../dom/EditableDom";
+import { getMeaningfulChildren, unwrapElement } from "../dom/EditableDom";
 
 const TEXT_FLOW_SELECTOR = "p, h1, h2, h3, h4, h5, h6, blockquote, pre, ul, ol";
 const LONG_TABLE_MIN_ROWS = 60;
@@ -24,7 +24,7 @@ export class EditorLayoutService {
       : Array.from(root.querySelectorAll<HTMLElement>(".hwe-page-inner"));
 
     inners.forEach((inner) => {
-      this.refreshFlowClasses(inner);
+      this.applyTextFlowLayout(inner);
 
       inner.querySelectorAll<HTMLElement>(".hwe-table-flow-wrapper").forEach((wrapper) => {
         if (!this.getDirectFlowTable(wrapper)) wrapper.classList.remove("hwe-table-flow-wrapper");
@@ -197,7 +197,7 @@ export class EditorLayoutService {
     return amount;
   }
 
-  private refreshFlowClasses(inner: HTMLElement): void {
+  applyTextFlowLayout(inner: HTMLElement): void {
     inner
       .querySelectorAll<HTMLElement>(".hwe-text-flow-block, .hwe-image-flow-block")
       .forEach((element) => {
@@ -214,6 +214,20 @@ export class EditorLayoutService {
     inner.querySelectorAll<HTMLImageElement>("img").forEach((image) => {
       if (image.closest("td, th")) return;
       image.classList.add("hwe-image-flow-block");
+    });
+
+    inner.querySelectorAll<HTMLElement>(".hwe-text-flow-column").forEach((column) => {
+      if (!column.children.length || Array.from(column.children).some(
+        (child) => !child.classList.contains("hwe-text-flow-block")
+      )) unwrapElement(column);
+    });
+    inner.querySelectorAll<HTMLElement>(".hwe-text-flow-block").forEach((element) => {
+      if (element.parentElement?.closest(".hwe-text-flow-block, .hwe-text-flow-column")) return;
+      const column = document.createElement("div");
+      column.className = "hwe-text-flow-column";
+      column.setAttribute("data-hwe-generated-wrapper", "true");
+      element.before(column);
+      column.appendChild(element);
     });
   }
 
