@@ -1,3 +1,5 @@
+import { getPageContentBounds } from "../pagination/PageContentGeometry";
+
 export type HweDebugEvent = {
   data?: unknown;
   durationMs?: number;
@@ -144,7 +146,8 @@ function getPageReport(page: HTMLElement, index: number): unknown {
     const rect = child.getBoundingClientRect();
     return bottom === null ? rect.bottom : Math.max(bottom, rect.bottom);
   }, null);
-  const limitBottom = inner ? getContentLimitBottom(inner) : null;
+  const bounds = inner ? getPageContentBounds(inner) : null;
+  const limitBottom = bounds?.bottom ?? null;
   const scrollOverflows = inner ? inner.scrollHeight > inner.clientHeight + 1 : false;
 
   return {
@@ -163,7 +166,7 @@ function getPageReport(page: HTMLElement, index: number): unknown {
       : null,
     overflows:
       contentBottom !== null && limitBottom !== null
-        ? contentBottom > limitBottom + 1 || scrollOverflows
+        ? contentBottom > limitBottom + (bounds?.scale ?? 1) || scrollOverflows
         : scrollOverflows,
     page: getRect(page),
     userBlankCount: inner?.querySelectorAll("[data-hwe-user-blank='true']").length ?? 0,
@@ -208,12 +211,6 @@ function getTableReport(table: HTMLTableElement, index: number): unknown {
     rect: getRect(table),
     rows: table.querySelectorAll("tr").length,
   };
-}
-
-function getContentLimitBottom(inner: HTMLElement): number {
-  const styles = getComputedStyle(inner);
-  const paddingBottom = parseFloat(styles.paddingBottom) || 0;
-  return inner.getBoundingClientRect().bottom - Math.min(paddingBottom, 12);
 }
 
 function getMeaningfulChildElements(inner: HTMLElement): HTMLElement[] {

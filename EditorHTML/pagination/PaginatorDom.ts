@@ -1,3 +1,5 @@
+import { getPageContentBounds } from "./PageContentGeometry";
+
 const SPLITTABLE_CONTAINER_TAGS = new Set([
   "DIV",
   "SECTION",
@@ -65,23 +67,19 @@ export function pageOverflows(page: HTMLElement): boolean {
   const contentBottom = getContentBottom(inner);
   if (contentBottom === null) return scrollOverflows;
 
-  return contentBottom > getContentLimitBottom(inner) + 1 || scrollOverflows;
+  const bounds = getPageContentBounds(inner);
+  return contentBottom > bounds.bottom + bounds.scale || scrollOverflows;
 }
 
 export function getContentLimitBottom(inner: HTMLElement): number {
-  const styles = getComputedStyle(inner);
-  const paddingBottom = parseFloat(styles.paddingBottom) || 0;
-  return inner.getBoundingClientRect().bottom - Math.min(paddingBottom, 12);
+  return getPageContentBounds(inner).bottom;
 }
 
 export function getContentHeight(page: HTMLElement): number {
   const inner = getInner(page);
   if (!inner) return page.clientHeight;
 
-  const styles = getComputedStyle(inner);
-  const paddingTop = parseFloat(styles.paddingTop) || 0;
-  const paddingBottom = parseFloat(styles.paddingBottom) || 0;
-  return Math.max(0, inner.clientHeight - paddingTop - paddingBottom);
+  return getPageContentBounds(inner).contentHeight;
 }
 
 export function getContentBottom(inner: HTMLElement): number | null {

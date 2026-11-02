@@ -1,4 +1,6 @@
 import { getMeaningfulChildren, unwrapElement } from "../dom/EditableDom";
+import { getTableFlowFragments } from "../dom/TableFlow";
+import { getPageContentBounds } from "../pagination/PageContentGeometry";
 
 const TEXT_FLOW_SELECTOR = "p, h1, h2, h3, h4, h5, h6, blockquote, pre, ul, ol";
 const LONG_TABLE_MIN_ROWS = 60;
@@ -50,8 +52,8 @@ export class EditorLayoutService {
     const contentBottom = this.getContentBottom(inner);
     if (contentBottom === null) return scrollOverflows;
 
-    const scale = inner.getBoundingClientRect().height / (inner.offsetHeight || 1);
-    return contentBottom > this.getContentLimitBottom(inner, scale) + scale || scrollOverflows;
+    const bounds = getPageContentBounds(inner);
+    return contentBottom > bounds.bottom + bounds.scale || scrollOverflows;
   }
 
   private getDirectFlowTable(element: HTMLElement): HTMLTableElement | null {
@@ -100,7 +102,13 @@ export class EditorLayoutService {
   }
 
   private normalizeTableDensity(table: HTMLTableElement): void {
-    const rowCount = table.querySelectorAll("tbody tr, tfoot tr").length;
+    // Density belongs to the complete table, not to each page fragment.
+    // Otherwise splitting a long table removes its compact style and increases row heights.
+    const scope = table.closest(".hwe-workspace, .pcf-html-editor-root");
+    const rowCount = getTableFlowFragments(scope, table).reduce(
+      (count, fragment) => count + fragment.querySelectorAll("tbody tr, tfoot tr").length,
+      0
+    );
     const columnCount = this.getColumnCount(table);
     const minColumnPercent = this.getMinimumColumnPercent(table);
     const density = this.getTableDensity(rowCount, columnCount, minColumnPercent);
@@ -229,12 +237,6 @@ export class EditorLayoutService {
       element.before(column);
       column.appendChild(element);
     });
-  }
-
-  private getContentLimitBottom(inner: HTMLElement, scale: number): number {
-    const styles = getComputedStyle(inner);
-    const paddingBottom = parseFloat(styles.paddingBottom) || 0;
-    return inner.getBoundingClientRect().bottom - Math.min(paddingBottom, 12) * scale;
   }
 
   private getContentBottom(inner: HTMLElement): number | null {

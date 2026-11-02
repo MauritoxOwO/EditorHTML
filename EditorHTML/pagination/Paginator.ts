@@ -1,6 +1,7 @@
 import { KeepTogetherController } from "./KeepTogetherController";
 import { TablePaginator } from "./TablePaginator";
 import { TextBlockSplitter } from "./TextBlockSplitter";
+import { getPageContentBounds } from "./PageContentGeometry";
 import { hweDebugLog, hweDebugStart } from "../debug/DebugLogger";
 import {
   AUTO_IMAGE_MAX_HEIGHT,
@@ -214,6 +215,7 @@ export class Paginator {
       const inner = getInner(page);
       if (!inner) return;
 
+      this.keepTogetherController.preserveTitleBlankBarriers(inner);
       getMeaningfulChildren(inner).forEach((node) => {
         nodes.push(...this.flattenFlowNode(node));
       });
@@ -331,6 +333,10 @@ export class Paginator {
     if (node.nodeType !== Node.ELEMENT_NODE) return [node];
 
     const element = node as HTMLElement;
+    // Rebuild title associations after edits or style changes, and before merging continuations.
+    if (this.keepTogetherController.isTitleGroup(element)) {
+      return getMeaningfulChildren(element).flatMap((child) => this.flattenFlowNode(child));
+    }
     if (!this.isSplittableContainer(element) || shouldPreserveContainerShell(element)) {
       return [node];
     }
@@ -461,12 +467,10 @@ export class Paginator {
     const inner = getInner(page);
     if (!inner) return false;
 
-    const styles = getComputedStyle(inner);
-    const paddingTop = parseFloat(styles.paddingTop) || 0;
-    const availableHeight =
-      getContentLimitBottom(inner) - (inner.getBoundingClientRect().top + paddingTop);
+    const bounds = getPageContentBounds(inner);
+    const availableHeight = bounds.bottom - bounds.top;
 
-    return element.getBoundingClientRect().height <= availableHeight + 1;
+    return element.getBoundingClientRect().height <= availableHeight + bounds.scale;
   }
 
   private resolveOverflow(index: number): boolean {
@@ -583,6 +587,10 @@ export class Paginator {
         return true;
       }
 
+      if (this.keepTogetherController.isTitleGroup(lastChild as HTMLElement) &&
+          this.splitOversizedTitleGroup(lastChild as HTMLElement, targetInner, page)) {
+        return true;
+      }
       this.keepTogetherController.unwrapGeneratedGroup(lastChild as HTMLElement);
       return true;
     }
@@ -617,6 +625,45 @@ export class Paginator {
 
     this.prepareNodeForPage(lastChild, targetPage);
     targetInner.insertBefore(lastChild, targetInner.firstChild);
+    return true;
+  }
+
+  private splitOversizedTitleGroup(
+    group: HTMLElement,
+    targetInner: HTMLElement,
+    page: HTMLElement
+  ): boolean {
+    const paragraphContainer = group.lastElementChild as HTMLElement | null;
+    const paragraph = paragraphContainer && this.keepTogetherController.getFlowTextBlock(paragraphContainer);
+    if (!paragraphContainer || !paragraph) return false;
+
+    // Clone only the paragraph's container path, preserving its text width and flow identities.
+    let source = paragraphContainer;
+    let continuation: HTMLElement | null = null;
+    let target: HTMLElement = targetInner;
+    while (source !== paragraph) {
+      ensureFlowIdentity(source, CONTAINER_FLOW_ID);
+      const clone = source.cloneNode(false) as HTMLElement;
+      if (!continuation) {
+        continuation = clone;
+        targetInner.insertBefore(clone, targetInner.firstChild);
+      } else {
+        target.appendChild(clone);
+      }
+      target = clone;
+      source = source.firstElementChild as HTMLElement;
+    }
+
+    const moved = this.textBlockSplitter.splitTextBlock(paragraph, target, page);
+    if (!moved) {
+      continuation?.remove();
+      return false;
+    }
+    if (!paragraph.parentNode) {
+      // The headings leave no room even for the paragraph's first line.
+      if (paragraphContainer !== paragraph) paragraphContainer.remove();
+      hweDebugLog("paginator.titleGroup.noRoomForParagraph", {});
+    }
     return true;
   }
 
@@ -968,12 +1015,12 @@ export class Paginator {
     const inner = getInner(page);
     if (!inner) return false;
 
-    const contentBottom = getContentLimitBottom(inner);
+    const bounds = getPageContentBounds(inner);
     let changed = false;
 
     inner.querySelectorAll<HTMLImageElement>("img").forEach((image) => {
       const imageTop = image.getBoundingClientRect().top;
-      const availableHeight = Math.floor(contentBottom - imageTop);
+      const availableHeight = Math.floor((bounds.bottom - imageTop) / bounds.scale);
       if (availableHeight < 120) return;
 
       const currentMaxHeight = parseFloat(image.style.maxHeight || "0");
