@@ -121,6 +121,8 @@ export class EditorComponent {
   private workspace!: HTMLElement;
   private statusMsg!: HTMLElement;
   private pageCountEl!: HTMLElement;
+  private loadingOverlay!: HTMLElement;
+  private loadingOperations = 0;
 
   private pages: HTMLElement[] = [];
   private paginator!: Paginator;
@@ -287,41 +289,68 @@ export class EditorComponent {
   async init(): Promise<void> {
     this.buildShell();
 
-    this.root.inert = true;
+    await this.withDocumentLoading(async () => {
+      this.paginator = new Paginator(
+        (html?: string) => this.createPageElement(html),
+        (pages: HTMLElement[]) => this.onPagesChanged(pages),
+        (page: HTMLElement, afterPage: HTMLElement | null) =>
+          this.attachPageForMeasurement(page, afterPage)
+      );
 
-    try{
-    this.paginator = new Paginator(
-      (html?: string) => this.createPageElement(html),
-      (pages: HTMLElement[]) => this.onPagesChanged(pages),
-      (page: HTMLElement, afterPage: HTMLElement | null) =>
-        this.attachPageForMeasurement(page, afterPage)
-    );
+      await Promise.all([
+        this.loadParagraphStyles(),
+        this.loadDynamicHeader(),
+        this.loadRuntimeHeaderLogo(),
+      ]);
 
-    await Promise.all([
-      this.loadParagraphStyles(),
-      this.loadDynamicHeader(),
-      this.loadRuntimeHeaderLogo(),
-    ]);
+      const loaded = await this.loadContent();
 
-    const loaded = await this.loadContent();
+      if (!loaded) {
+        // El documento vacío de error no es una copia válida del archivo guardado.
+        this.options.onDirtyChanged?.(true);
+        return;
+      }
 
-    if (!loaded) {
-      // El documento vacío de error no es una copia válida del archivo guardado.
-      this.options.onDirtyChanged?.(true);
-      return;
+      this.lastSavedHtml = this.documentSerializer.normalizeHtmlForDirtyCheck(this.collectHtml());
+      // Publicar también el estado inicial para reemplazar un Sí de otra sesión.
+      this.options.onDirtyChanged?.(false);
+    });
+  }
+
+  private async withDocumentLoading(action: () => Promise<void>): Promise<void> {
+    this.loadingOperations++;
+    this.updateLoadingState();
+    try {
+      // Dejar que el navegador pinte la pantalla antes de procesar el HTML.
+      await this.waitForLoadingPaint();
+      await action();
+    } catch (error) {
+      this.deferredRenderHtml = null;
+      this.setStatus(`Error al cargar: ${(error as Error).message}`, "error");
+      throw error;
+    } finally {
+      this.loadingOperations--;
+      this.updateLoadingState();
     }
+  }
 
-    this.lastSavedHtml = this.documentSerializer.normalizeHtmlForDirtyCheck(this.collectHtml());
-    // Publicar también el estado inicial para reemplazar un Sí de otra sesión.
-    this.options.onDirtyChanged?.(false);
+  private updateLoadingState(): void {
+    const loading = this.loadingOperations > 0 || this.deferredRenderHtml !== null;
+    this.root.inert = loading;
+    this.root.setAttribute("aria-busy", String(loading));
+    this.loadingOverlay.hidden = !loading;
+  }
 
-    } finally { this.root.inert = false; }
+  private waitForLoadingPaint(): Promise<void> {
+    return new Promise((resolve) => {
+      window.requestAnimationFrame(() => window.requestAnimationFrame(() => resolve()));
+    });
   }
 
   private buildShell(): void {
     this.container.innerHTML = "";
     this.container.style.cssText =
-      "width:100%;height:100%;min-height:0;overflow:hidden;display:flex;flex-direction:column;";
+      "width:100%;height:100%;min-height:0;overflow:hidden;display:flex;flex-direction:column;position:relative;isolation:isolate;";
     this.applyAllocatedSize();
 
     this.root = document.createElement("div");
@@ -374,6 +403,7 @@ export class EditorComponent {
       onApplyTextCase: (textCase) => this.applySelectedTextCase(textCase),
       onApplyFontSize: (fontSize) => this.applyFontSize(fontSize),
       onRequestFullScreen: this.options.onRequestFullScreen,
+      onGoToPage: (pageNumber) => this.goToPage(pageNumber),
       onZoom: (delta) => {
         const current = parseFloat(getComputedStyle(this.root).getPropertyValue("--hwe-page-view-zoom")) || 1;
         const zoom = Math.max(0.5, Math.min(2.5, current + delta));
@@ -456,6 +486,21 @@ export class EditorComponent {
 
     this.root.appendChild(statusBar);
     this.container.appendChild(this.root);
+    // Fuera de la raíz inert para que el lector de pantalla anuncie la carga.
+    this.loadingOverlay = document.createElement("div");
+    this.loadingOverlay.className = "hwe-loading-overlay";
+    this.loadingOverlay.hidden = true;
+    this.loadingOverlay.setAttribute("role", "status");
+    this.loadingOverlay.setAttribute("aria-live", "polite");
+    this.loadingOverlay.setAttribute("aria-atomic", "true");
+    this.loadingOverlay.innerHTML = `
+      <div class="hwe-loading-content">
+        <span class="hwe-loading-spinner" aria-hidden="true"></span>
+        <p class="hwe-loading-title">Preparando el documento</p>
+        <p class="hwe-loading-description">Espera un momento mientras se carga el contenido y se ajustan las páginas.</p>
+      </div>
+    `;
+    this.container.appendChild(this.loadingOverlay);
     this.diagnosticsController.start();
 
     if (typeof ResizeObserver !== "undefined") {
@@ -698,7 +743,7 @@ export class EditorComponent {
     this.syncWorkspace();
     this.updatePageCount();
     this.imageResizeController.refresh();
-    this.startDetachedImageHydration();
+    await this.startDetachedImageHydration();
     done({
       pages: this.pages.length,
     });
@@ -1266,9 +1311,9 @@ export class EditorComponent {
     this.workspace.insertBefore(page, reference);
   }
 
-  private startDetachedImageHydration(): void {
+  private async startDetachedImageHydration(): Promise<void> {
     const runId = ++this.imageHydrationRun;
-    void this.assetLayoutManager.hydrateDetachedImages(
+    await this.assetLayoutManager.hydrateDetachedImages(
       this.workspace,
       (id) => this.documentSerializer.getDetachedLargeImageSrc(id),
       async (image) => {
@@ -1287,6 +1332,10 @@ export class EditorComponent {
         });
       }
     );
+    // La última imagen puede haber programado un ajuste de páginas para el siguiente frame.
+    if (runId === this.imageHydrationRun && this.rebalanceFrame !== undefined) {
+      await this.waitForLoadingPaint();
+    }
   }
 
   private syncWorkspace(): void {
@@ -1929,6 +1978,18 @@ export class EditorComponent {
 
   private updatePageCount(): void {
     this.pageCountEl.textContent = `Paginas: ${this.pages.length}`;
+    this.toolbar.setPageCount(this.pages.length);
+  }
+
+  private goToPage(pageNumber: number): void {
+    if (this.root.inert || !Number.isInteger(pageNumber)) return;
+    const page = this.pages[pageNumber - 1];
+    if (!page) return;
+
+    // Desplazar solo el documento; las coordenadas ya incluyen el zoom del editor.
+    const pageRect = page.getBoundingClientRect();
+    const workspaceRect = this.workspace.getBoundingClientRect();
+    this.workspace.scrollTop += pageRect.top - workspaceRect.top - this.workspace.clientTop - 12;
   }
 
   private setStatus(message: string, type: StatusType): void {
@@ -2129,10 +2190,12 @@ export class EditorComponent {
   }
 
   async loadHtml(html: string): Promise<void> {
-    this.styleSelectionTracker.clear();
-    await this.renderAndPaginate(html || "<p><br></p>");
-    this.historyController.reset();
-    this.setStatus("", "");
+    await this.withDocumentLoading(async () => {
+      this.styleSelectionTracker.clear();
+      await this.renderAndPaginate(html || "<p><br></p>");
+      this.historyController.reset();
+      this.setStatus("", "");
+    });
   }
 
   resize(width?: number, height?: number): void {
@@ -2197,7 +2260,9 @@ export class EditorComponent {
       hweDebugLog("editor.renderDeferredWhenVisible", {
         htmlLength: html.length,
       });
-      void this.renderAndPaginate(html);
+      void this.withDocumentLoading(() => this.renderAndPaginate(html)).catch((error) => {
+        console.error("[HtmlWordEditor] deferred render error:", error);
+      });
     });
   }
 

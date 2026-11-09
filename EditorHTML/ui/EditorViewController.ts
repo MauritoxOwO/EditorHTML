@@ -11,7 +11,7 @@ export class EditorViewController {
 
     const versionLabel = document.createElement("span");
     versionLabel.className = "hwe-version-label";
-    versionLabel.textContent = `v1.10`;
+    versionLabel.textContent = "1.23";
     
 
     viewTabs.appendChild(this.visualTabBtn);

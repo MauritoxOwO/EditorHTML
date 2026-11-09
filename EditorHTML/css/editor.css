@@ -30,6 +30,67 @@
   background: #ededed;
 }
 
+/* Pantalla de carga: hermana de la raíz para permanecer accesible durante inert. */
+.pcf-html-editor-root + .hwe-loading-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 300000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  padding: 24px;
+  background: #faf9f8;
+  color: #323130;
+  font-family: "Segoe UI", sans-serif;
+  cursor: wait;
+  user-select: none;
+  touch-action: none;
+}
+
+.pcf-html-editor-root + .hwe-loading-overlay[hidden] {
+  display: none;
+}
+
+.pcf-html-editor-root + .hwe-loading-overlay .hwe-loading-content {
+  max-width: 360px;
+  text-align: center;
+}
+
+.pcf-html-editor-root + .hwe-loading-overlay .hwe-loading-spinner {
+  display: inline-block;
+  box-sizing: border-box;
+  width: 36px;
+  height: 36px;
+  border: 3px solid #d9e5ef;
+  border-top-color: #0078d4;
+  border-radius: 50%;
+  animation: hwe-loading-spin 0.9s linear infinite;
+}
+
+.pcf-html-editor-root + .hwe-loading-overlay .hwe-loading-title {
+  margin: 16px 0 8px;
+  font-size: 18px;
+  font-weight: 600;
+  line-height: 1.4;
+}
+
+.pcf-html-editor-root + .hwe-loading-overlay .hwe-loading-description {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+@keyframes hwe-loading-spin {
+  to { transform: rotate(360deg); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pcf-html-editor-root + .hwe-loading-overlay .hwe-loading-spinner {
+    animation: none;
+  }
+}
+
 /* Toolbar */
 .pcf-html-editor-root .hwe-toolbar {
   flex-shrink: 0;
@@ -79,6 +140,22 @@
 
 .pcf-html-editor-root .hwe-toolbar .hwe-style-select {
   min-width: 120px;
+}
+
+.pcf-html-editor-root .hwe-toolbar .hwe-page-input {
+  box-sizing: border-box;
+  width: 140px;
+  height: 26px;
+  padding: 3px 6px;
+  border: 1px solid #bbb;
+  border-radius: 3px;
+  background: #fff;
+  font-family: inherit;
+  font-size: 12px;
+}
+
+.pcf-html-editor-root .hwe-toolbar .hwe-page-input[aria-invalid="true"] {
+  border-color: #a80000;
 }
 
 .pcf-html-editor-root .hwe-search-bar input {
@@ -920,6 +997,10 @@
 }
 
 @media print {
+  .pcf-html-editor-root + .hwe-loading-overlay {
+    display: none !important;
+  }
+
   .pcf-html-editor-root .hwe-editor-header,
   .pcf-html-editor-root .hwe-toolbar,
   .pcf-html-editor-root .hwe-view-tabs,

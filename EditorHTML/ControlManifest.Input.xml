@@ -2,7 +2,7 @@
 <manifest>
   <control namespace="EditorHTMLPBOC" 
           constructor="EditorHTML2"
-          version="0.0.9"
+          version="0.0.15"
           display-name-key="EditorHTMLv0.9"
           description-key="EditorHTML v0.9 for testing"
           control-type="standard"

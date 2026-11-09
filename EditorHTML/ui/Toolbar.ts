@@ -38,6 +38,7 @@ export interface ToolbarOptions {
   onCommand?: (command: string, value?: string) => boolean;
   onRequestFullScreen?: () => void;
   onZoom?: (delta: number) => void;
+  onGoToPage?: (pageNumber: number) => void;
 }
 
 export class Toolbar {
@@ -48,6 +49,9 @@ export class Toolbar {
   private styleSelect!: HTMLSelectElement;
   private sizeSelect!: HTMLSelectElement;
   private fontSelect!: HTMLSelectElement;
+  private pageInput!: HTMLInputElement;
+  private pageNavigationTimer: number | undefined;
+  private pageCount = 0;
   private selectionFormatting: SelectionFormattingInterface = {};
 
   private commandButtons = new Map<string, HTMLButtonElement>();
@@ -205,6 +209,31 @@ export class Toolbar {
       this.toolbar.appendChild(button);
     }
 
+    this.pageInput = document.createElement("input");
+    this.pageInput.type = "text";
+    this.pageInput.inputMode = "numeric";
+    this.pageInput.className = "hwe-page-input";
+    this.pageInput.placeholder = "Ir a página…";
+    this.pageInput.title = "Escribe el número de página para ir automáticamente";
+    this.pageInput.setAttribute("aria-label", "Ir a página");
+    this.pageInput.disabled = true;
+    this.pageInput.addEventListener("focus", () => this.pageInput.select());
+    this.pageInput.addEventListener("mousedown", (event) => event.stopPropagation());
+    this.pageInput.addEventListener("input", (event) => {
+      window.clearTimeout(this.pageNavigationTimer);
+      this.pageInput.removeAttribute("aria-invalid");
+      if ((event as InputEvent).isComposing) return;
+      // Esperar a que termine de escribir números de varias cifras.
+      this.pageNavigationTimer = window.setTimeout(() => this.goToEnteredPage(), 400);
+    });
+    this.pageInput.addEventListener("keydown", (event) => {
+      if (event.key !== "Enter" || event.isComposing) return;
+      event.preventDefault();
+      event.stopPropagation();
+      this.goToEnteredPage();
+    });
+    this.toolbar.appendChild(this.pageInput);
+
     // btnGuardar
     this.saveBtn = document.createElement("button");
     this.saveBtn.className = "hwe-save-btn";
@@ -235,6 +264,29 @@ export class Toolbar {
 
   getSaveButton(): HTMLButtonElement {
     return this.saveBtn;
+  }
+
+  setPageCount(pageCount: number): void {
+    if (!this.pageInput || this.pageCount === pageCount) return;
+    this.pageCount = pageCount;
+    this.pageInput.disabled = pageCount === 0;
+    this.pageInput.placeholder = "Ir a página…";
+    this.pageInput.title = pageCount > 0
+      ? "Escribe el número de página. Pulsa Enter para ir de inmediato."
+      : "El documento todavía no tiene páginas";
+    this.pageInput.removeAttribute("aria-invalid");
+  }
+
+  private goToEnteredPage(): void {
+    window.clearTimeout(this.pageNavigationTimer);
+    this.pageNavigationTimer = undefined;
+    const value = this.pageInput.value.trim();
+    if (!value || this.pageInput.disabled) return;
+    const pageNumber = Number(value);
+    const valid = /^\d+$/.test(value) && Number.isSafeInteger(pageNumber)
+      && pageNumber >= 1 && pageNumber <= this.pageCount;
+    this.pageInput.setAttribute("aria-invalid", String(!valid));
+    if (valid) this.options.onGoToPage?.(pageNumber);
   }
 
   setParagraphStyles(styles: ParagraphStyleOption[]): void {
@@ -304,6 +356,7 @@ export class Toolbar {
   }
 
   destroy(): void {
+    window.clearTimeout(this.pageNavigationTimer);
     document.removeEventListener("selectionchange", this.handleSelectionChange);
   }
 

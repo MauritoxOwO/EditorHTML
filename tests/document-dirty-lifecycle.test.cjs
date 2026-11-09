@@ -18,7 +18,7 @@ function loadSource(relativePath, dependencies) {
     exports,
     require: (name) => dependencies[name] || {},
     console: { error() {}, warn() {} },
-    window: { setTimeout() {} },
+    window: { setTimeout() {}, requestAnimationFrame(callback) { queueMicrotask(callback); } },
   }, { filename });
   return exports;
 }
@@ -50,7 +50,10 @@ function setup(initialValue = true, options = {}) {
         lastSavedHtml: null,
         baseUrl: "https://example.invalid",
         entityId: "test-record",
-        root: { inert: false },
+        root: { inert: false, setAttribute() {} },
+        loadingOverlay: { hidden: true },
+        loadingOperations: 0,
+        deferredRenderHtml: null,
         buildShell() {},
         loadParagraphStyles: async () => {},
         loadDynamicHeader: async () => {},
