@@ -53,8 +53,21 @@
 }
 
 .pcf-html-editor-root + .hwe-loading-overlay .hwe-loading-content {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  width: 100%;
   max-width: 360px;
   text-align: center;
+}
+
+.pcf-html-editor-root + .hwe-loading-overlay .hwe-loading-title,
+.pcf-html-editor-root + .hwe-loading-overlay .hwe-loading-description {
+  box-sizing: border-box;
+  width: 100%;
+  padding: 0;
+  text-align: center;
+  text-indent: 0;
 }
 
 .pcf-html-editor-root + .hwe-loading-overlay .hwe-loading-spinner {
