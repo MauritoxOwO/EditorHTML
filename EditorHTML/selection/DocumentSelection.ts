@@ -115,6 +115,9 @@ export class DocumentSelection {
 
   getAffectedPages(range: Range): HTMLElement[] {
     const root = this.rootProvider();
+    const startPage = this.getContainingInner(range.startContainer)?.closest<HTMLElement>(".hwe-page");
+    const endPage = this.getContainingInner(range.endContainer)?.closest<HTMLElement>(".hwe-page");
+    if (startPage && startPage === endPage && root.contains(startPage)) return [startPage];
     return Array.from(root.querySelectorAll<HTMLElement>(".hwe-page")).filter((page) => {
       try {
         return range.intersectsNode(page);
@@ -125,9 +128,8 @@ export class DocumentSelection {
   }
 
   getSelectedTextTargets(range: Range): SelectedTextTarget[] {
-    const root = this.rootProvider();
     const targets: SelectedTextTarget[] = [];
-    const pages = Array.from(root.querySelectorAll<HTMLElement>(".hwe-page"));
+    const pages = this.getAffectedPages(range);
 
     for (const page of pages) {
       const inner = page.querySelector<HTMLElement>(".hwe-page-inner");
@@ -159,14 +161,17 @@ export class DocumentSelection {
   }
 
   getSelectedParagraphs(range: Range): HTMLElement[] {
-    const root = this.rootProvider();
-    const blocks = Array.from(root.querySelectorAll<HTMLElement>(FLOW_BLOCKS));
+    const blocks = this.getAffectedPages(range).flatMap((page) =>
+      Array.from(page.querySelectorAll<HTMLElement>(FLOW_BLOCKS))
+    );
+    // Reuse one Range. Thousands of live ranges make subsequent DOM mutations
+    // (including history snapshots) expensive in a long, selected document.
+    const blockRange = document.createRange();
     return blocks.filter((block) => {
       if (!block.closest(".hwe-page-inner") || this.isExcluded(block)) return false;
       if (block.matches(".hwe-page, .hwe-page-inner, .hwe-workspace, [data-hwe-generated-wrapper], [data-hwe-keep-together]")) return false;
       if (!this.hasContent(block)) return false;
 
-      const blockRange = document.createRange();
       blockRange.selectNodeContents(block);
       const startsBeforeBlockEnds = range.compareBoundaryPoints(Range.START_TO_END, blockRange) > 0;
       const endsAfterBlockStarts = range.compareBoundaryPoints(Range.END_TO_START, blockRange) < 0;

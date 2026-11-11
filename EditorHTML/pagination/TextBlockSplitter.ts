@@ -1,5 +1,6 @@
 import { hweDebugLog } from "../debug/DebugLogger";
 import { ensureFlowIdentity, INLINE_FLOW_ID } from "./FlowIdentity";
+import { getPageContentBounds } from "./PageContentGeometry";
 import {
   isAtomicElement,
   isEmptyNode,
@@ -19,6 +20,16 @@ export class TextBlockSplitter {
   ): boolean {
     if (!isSplittableTextBlock(block)) return false;
 
+    const inner = page.querySelector<HTMLElement>(".hwe-page-inner");
+    if (inner) {
+      const bounds = getPageContentBounds(inner);
+      const rect = block.getBoundingClientRect();
+      if (rect.height > 0 && rect.top >= bounds.bottom) {
+        targetInner.insertBefore(block, targetInner.firstChild);
+        return true;
+      }
+    }
+
     const startedAt = performance.now();
     const flowId = this.ensureTextFlowId(block);
     const overflowBlock = block.cloneNode(false) as HTMLElement;
@@ -26,7 +37,11 @@ export class TextBlockSplitter {
     overflowBlock.setAttribute("data-hwe-text-fragment", "true");
     targetInner.insertBefore(overflowBlock, targetInner.firstChild);
 
-    let movedAny = false;
+    let movedAny = this.moveMeasuredTail(block, overflowBlock, page);
+    if (movedAny && isEmptyNode(block, false)) {
+      block.remove();
+      return true;
+    }
     let safety = 0;
 
     while (pageOverflows(page) && safety++ < 300) {
@@ -66,6 +81,46 @@ export class TextBlockSplitter {
     block.setAttribute("data-hwe-text-flow-id", id);
     block.setAttribute("data-hwe-text-fragment", "true");
     return id;
+  }
+
+  private moveMeasuredTail(block: HTMLElement, target: HTMLElement, page: HTMLElement): boolean {
+    const inner = page.querySelector<HTMLElement>(".hwe-page-inner");
+    const probe = document.createRange();
+    if (!inner || typeof probe.getBoundingClientRect !== "function") return false;
+    const words: { node: Text; start: number; end: number }[] = [];
+    const walker = document.createTreeWalker(block, NodeFilter.SHOW_TEXT);
+    let node: Node | null;
+    while ((node = walker.nextNode())) {
+      const text = node as Text;
+      for (const match of text.data.matchAll(/\S+\s*/g)) {
+        words.push({ node: text, start: match.index!, end: match.index! + match[0].length });
+      }
+    }
+    if (words.length < 8) return false;
+    const bounds = getPageContentBounds(inner);
+    let low = 0;
+    let high = words.length;
+    // Read the existing line layout without mutating it word by word. A single
+    // extracted tail retains nested formatting, images, markers and text order.
+    while (low < high) {
+      const middle = (low + high) >>> 1;
+      const word = words[middle];
+      probe.selectNodeContents(block);
+      probe.setEnd(word.node, word.end);
+      const rect = probe.getBoundingClientRect();
+      if (!rect.height) return false;
+      if (rect.bottom <= bounds.bottom + bounds.scale) low = middle + 1;
+      else high = middle;
+    }
+    if (low === words.length) return false;
+    const firstOverflow = words[low];
+    for (let ancestor = firstOverflow.node.parentElement; ancestor && ancestor !== block; ancestor = ancestor.parentElement) {
+      ensureFlowIdentity(ancestor, INLINE_FLOW_ID);
+    }
+    probe.selectNodeContents(block);
+    probe.setStart(firstOverflow.node, firstOverflow.start);
+    target.appendChild(probe.extractContents());
+    return true;
   }
 
   private moveLastInlinePiece(source: HTMLElement, target: HTMLElement): boolean {

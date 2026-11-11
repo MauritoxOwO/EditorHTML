@@ -251,7 +251,7 @@ ${content}
   }
 
   private prepareContentForSave(element: HTMLElement): string {
-    const clone = element.cloneNode(true) as HTMLElement;
+    const clone = this.cloneSnapshot(element);
     unwrapGeneratedKeepTogetherGroups(clone);
     this.removeRuntimeOnlyState(clone);
     this.removeManagedDocumentStyles(clone);
@@ -261,12 +261,19 @@ ${content}
   }
 
   private prepareContentForHistory(element: HTMLElement): string {
-    const clone = element.cloneNode(true) as HTMLElement;
+    const clone = this.cloneSnapshot(element);
     unwrapGeneratedKeepTogetherGroups(clone);
     this.removeRuntimeOnlyState(clone);
     this.removeManagedDocumentStyles(clone);
     this.removeDynamicDocumentHeader(clone);
     return clone.innerHTML;
+  }
+
+  private cloneSnapshot(element: HTMLElement): HTMLElement {
+    // Work in an inert document: snapshot cleanup must not update the live
+    // editor's selection ranges or start image/resource loads in the PCF host.
+    const inertDocument = document.createElement("template").content.ownerDocument;
+    return inertDocument.importNode(element, true) as HTMLElement;
   }
 
   getDetachedLargeImageSrc(id: string): string | undefined {

@@ -156,6 +156,67 @@ test("actual inline splitting restores nested styled runs", () => {
   assert.equal(normalize(doc(source.outerHTML, overflow.outerHTML)), normalize(doc(original)));
 });
 
+test("inline splitting consumes empty text nodes without creating empty bold clones", () => {
+  const source = element('<p><strong>Parrafo 21.</strong></p>');
+  source.querySelector("strong").appendChild(document.createTextNode(""));
+  const target = element("<p></p>");
+  const splitter = new TextBlockSplitter();
+  for (let index = 0; index < 10 && source.firstChild; index++) {
+    splitter.moveLastInlinePiece(source, target);
+  }
+  assert.equal(source.childNodes.length, 0);
+  assert.equal(target.textContent, "Parrafo 21.");
+  assert.equal(target.querySelectorAll("strong:empty").length, 0);
+});
+
+test("text column continuations reunite their paragraph without merging a new paragraph", () => {
+  const root = element('<div>' +
+    '<div class="hwe-text-flow-column" data-hwe-container-flow-id="column"><p data-hwe-text-flow-id="p">Uno</p></div>' +
+    '<div class="hwe-text-flow-column" data-hwe-container-flow-id="column"><p data-hwe-text-flow-id="p"> dos</p><p data-hwe-text-flow-id="new">Nuevo</p></div>' +
+    '</div>');
+  const paginator = new Paginator(() => document.createElement("div"), () => {});
+  paginator.mergeFlowFragments(Array.from(root.childNodes));
+  assert.equal(root.children.length, 1);
+  assert.deepEqual(Array.from(root.querySelectorAll("p"), p => p.textContent), ["Uno dos", "Nuevo"]);
+});
+
+test("text columns split an overflowing paragraph while preserving its text and formatting", () => {
+  const page = element('<section class="hwe-page"><div class="hwe-page-inner"><p>Antes</p>' +
+    '<div class="hwe-text-flow-column"><p><strong>Parrafo 21.</strong> Texto completo.</p></div></div></section>');
+  const inner = page.firstElementChild;
+  const column = inner.lastElementChild;
+  const original = column.innerHTML;
+  const target = document.createElement("div");
+  Object.defineProperty(inner, "scrollHeight", { get: () => column.textContent.length > 12 ? 200 : 0 });
+  Object.defineProperty(inner, "clientHeight", { value: 100 });
+  const paginator = new Paginator(() => page, () => {});
+  assert.equal(paginator.splitContainerPreservingShell(column, target, page), true);
+  assert.ok(column.textContent.length > 0, "the first lines remain on the source page");
+  assert.ok(target.textContent.length > 0, "the overflow continues on the next page");
+  paginator.mergeFlowFragments(Array.from(target.childNodes));
+  assert.equal(target.querySelectorAll("p").length, 1);
+  assert.equal(normalize(doc(column.innerHTML, target.firstElementChild.innerHTML)), normalize(doc(original)));
+});
+
+test("reuniting text fragments retains formatting changes in individual fragments", () => {
+  const root = element('<div><p data-hwe-text-flow-id="p">Uno</p>' +
+    '<p data-hwe-text-flow-id="p" style="color: red"> dos</p></div>');
+  const paginator = new Paginator(() => document.createElement("div"), () => {});
+  paginator.mergeFlowFragments(Array.from(root.childNodes));
+  assert.equal(root.children.length, 2);
+  assert.equal(root.lastElementChild.style.color, "red");
+});
+
+test("continuation pages do not introduce extra blank paragraphs", () => {
+  const paginator = new Paginator(html => {
+    const page = element('<section class="hwe-page"><div class="hwe-page-inner"></div></section>');
+    page.firstElementChild.innerHTML = html ?? "<p><br></p>";
+    return page;
+  }, () => {});
+  const continuation = paginator.getOrCreateNextPage(-1);
+  assert.equal(continuation.querySelectorAll("p").length, 0);
+});
+
 test("actual table splitter round-trip", () => {
   const original = table(rows("A", "B", "C"), 'data-hwe-repeat-header="true"', columns + header);
   const source = element(original);

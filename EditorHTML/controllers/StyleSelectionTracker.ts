@@ -27,7 +27,7 @@ export class StyleSelectionTracker {
     }
   ) {}
 
-  rememberTextSelection(): void {
+  rememberTextSelection(captureBookmark = true): void {
     const root = this.rootProvider();
     const selection = window.getSelection();
     if (!selection || selection.rangeCount === 0) return;
@@ -52,7 +52,9 @@ export class StyleSelectionTracker {
       backward: !selection.isCollapsed &&
         !(range.startContainer === selection.anchorNode && range.startOffset === selection.anchorOffset),
     };
-    this.lastBookmark = this.bookmarkProvider?.capture(this.getBookmarkWorkspace(root)) ?? null;
+    this.lastBookmark = captureBookmark
+      ? this.bookmarkProvider?.capture(this.getBookmarkWorkspace(root)) ?? null
+      : null;
     if (block) this.lastStyleBlock = block;
   }
 
@@ -65,15 +67,16 @@ export class StyleSelectionTracker {
 
   restoreTextSelection(): void {
     const root = this.rootProvider();
-    if (this.hasTextBookmark()) {
+    const stored = this.getStoredSelection(root);
+    if (!stored && this.hasTextBookmark()) {
       this.bookmarkProvider!.restore(this.getBookmarkWorkspace(root), this.lastBookmark!);
       return;
     }
-    const stored = this.getStoredSelection(root);
     if (!stored) return;
 
     const selection = window.getSelection();
     try {
+      this.getBookmarkWorkspace(root).focus({ preventScroll: true });
       const range = document.createRange();
       selection?.removeAllRanges();
       if (stored.collapsed) {
@@ -157,6 +160,9 @@ export class StyleSelectionTracker {
       if (!this.hasTextBookmark()) this.clear();
       return null;
     }
+    const length = (node: Node): number => node.nodeType === Node.TEXT_NODE
+      ? (node as Text).length : node.childNodes.length;
+    if (stored.anchorOffset > length(stored.anchorNode) || stored.focusOffset > length(stored.focusNode)) return null;
     return stored;
   }
 

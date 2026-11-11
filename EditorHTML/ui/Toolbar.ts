@@ -55,7 +55,6 @@ export class Toolbar {
   private selectionFormatting: SelectionFormattingInterface = {};
 
   private commandButtons = new Map<string, HTMLButtonElement>();
-  private readonly handleSelectionChange = (): void => this.updateActiveStates();
 
   constructor(private readonly options: ToolbarOptions = {}) {}
 
@@ -240,7 +239,6 @@ export class Toolbar {
     this.saveBtn.textContent = "💾 Guardar";
     this.toolbar.appendChild(this.saveBtn);
 
-    document.addEventListener("selectionchange", this.handleSelectionChange);
 
     return this.toolbar;
   }
@@ -357,7 +355,6 @@ export class Toolbar {
 
   destroy(): void {
     window.clearTimeout(this.pageNavigationTimer);
-    document.removeEventListener("selectionchange", this.handleSelectionChange);
   }
 
 // Funciones auxiliares

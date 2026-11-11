@@ -31,6 +31,8 @@ export type OnPagesChanged = (pages: HTMLElement[]) => void;
 export type OnPageCreated = (page: HTMLElement, afterPage: HTMLElement | null) => void;
 
 export interface RebalanceOptions {
+  /** Last page edited by a local operation; enables convergence at an unchanged boundary. */
+  affectedThroughPage?: HTMLElement;
   includePreviousPage?: boolean;
   compactPages?: boolean;
   force?: boolean;
@@ -108,7 +110,12 @@ export class Paginator {
 
     this.rebalancing = true;
     try {
-      this.repaginateFromIndex(includePreviousPage ? Math.max(0, index - 1) : index, options);
+      const start = includePreviousPage ? Math.max(0, index - 1) : index;
+      if (options.affectedThroughPage && this.pages.includes(options.affectedThroughPage)) {
+        this.repaginateUntilStable(start, options);
+      } else {
+        this.repaginateFromIndex(start, options);
+      }
       this.onPagesChanged(this.pages);
     } finally {
       this.rebalancing = false;
@@ -182,6 +189,37 @@ export class Paginator {
       nodes: nodes.length,
       pages: this.pages.length,
     });
+  }
+
+  private repaginateUntilStable(startIndex: number, options: RebalanceOptions): void {
+    const original = [...this.pages];
+    const affectedEnd = Math.max(startIndex, original.indexOf(options.affectedThroughPage!));
+    let end = Math.min(original.length, affectedEnd + 3);
+    let start = startIndex;
+    // Keep unvisited pages intact. Include two following pages so a title or
+    // split paragraph at the edit boundary can settle before testing convergence.
+    this.pages = original.slice(0, end);
+    while (true) {
+      const boundary = getInner(original[end - 1])?.innerHTML;
+      try {
+        this.repaginateFromIndex(start, options);
+      } catch (error) {
+        this.pages.push(...original.slice(end));
+        throw error;
+      }
+      const last = this.pages[this.pages.length - 1];
+      const stable = boundary !== undefined && getInner(last)?.innerHTML === boundary && !pageOverflows(last);
+      if (stable || end === original.length) {
+        this.pages.push(...original.slice(end));
+        return;
+      }
+      // Revisit the last two generated pages, then consume another small batch.
+      // Earlier pages have already been compacted and no longer need rebuilding.
+      start = Math.max(startIndex, this.pages.length - 2);
+      const nextEnd = Math.min(original.length, end + 2);
+      this.pages.push(...original.slice(end, nextEnd));
+      end = nextEnd;
+    }
   }
 
   private stabilizeOverflow(): void {

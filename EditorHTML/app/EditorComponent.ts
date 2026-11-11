@@ -66,7 +66,8 @@ import {
 type PcfContext = ComponentFramework.Context<IInputs>;
 type RuntimeParameters = Record<string, { raw?: string | null }>;
 type StatusType = "success" | "error" | "saving" | "";
-type QueuedRebalance = Required<RebalanceOptions> & {
+type QueuedRebalance = Required<Omit<RebalanceOptions, "affectedThroughPage">> & {
+  affectedThroughPage?: HTMLElement;
   page: HTMLElement;
   pullFromNextPages: boolean;
 };
@@ -154,6 +155,7 @@ export class EditorComponent {
   private readonly pageBackspaceController = new PageBackspaceController();
   private readonly handleWorkspacePointerUp = (): void => {
     this.isDraggingSelection = false;
+    this.handleSelectionChange();
     if (this.pendingRebalance && !this.isComposing) {
       const pending = this.pendingRebalance;
       this.scheduleRebalance(pending.page, pending.pullFromNextPages, pending);
@@ -161,6 +163,7 @@ export class EditorComponent {
   };
   private diagnosticsController!: EditorDiagnosticsController;
   private paragraphStyleManager!: ParagraphStyleManager;
+  private keepWithNextStyleClasses = new Set<string>();
   private styleSelectionTracker!: StyleSelectionTracker;
   private selectionFormattingResolver!: SelectionFormattingResolver;
   private tableColumnResizeController!: TableColumnResizeController;
@@ -195,9 +198,17 @@ export class EditorComponent {
   private pendingRebalance: QueuedRebalance | null = null;
   private readonly pagesNeedingPull = new WeakSet<HTMLElement>();
   private readonly pendingInputTypes = new WeakMap<HTMLElement, string>();
+  private selectionFrame: number | undefined;
   private readonly handleSelectionChange = (): void => {
-    this.styleSelectionTracker.rememberTextSelection();
-    this.updateToolbarSelectionState();
+    const selection = window.getSelection();
+    if (!selection?.anchorNode || !selection.focusNode ||
+        !this.workspace.contains(selection.anchorNode) || !this.workspace.contains(selection.focusNode)) return;
+    this.styleSelectionTracker.rememberTextSelection(false);
+    if (this.isDraggingSelection || this.selectionFrame !== undefined) return;
+    this.selectionFrame = window.requestAnimationFrame(() => {
+      this.selectionFrame = undefined;
+      if (!this.isDraggingSelection) this.updateToolbarSelectionState();
+    });
   };
   private isComposing = false;
   private isDraggingSelection = false;
@@ -564,12 +575,15 @@ export class EditorComponent {
             };
 
       this.paragraphStyleManager.setCatalog(catalog);
+      this.keepWithNextStyleClasses = new Set(catalog.styles.filter((style) => style.keepWithNext === true)
+        .map((style) => style.className));
       this.paginator.setKeepWithNextStyles(
-        catalog.styles.filter((style) => style.keepWithNext === true).map((style) => style.className)
+        [...this.keepWithNextStyleClasses]
       );
     } catch (error) {
       console.warn("[HtmlWordEditor] paragraph styles:", error);
       this.paragraphStyleManager.setCatalog({ styles: [], fonts: [] });
+      this.keepWithNextStyleClasses.clear();
       this.paginator.setKeepWithNextStyles([]);
     }
   }
@@ -898,9 +912,8 @@ export class EditorComponent {
     this.layoutService.applyOfficialTableWidths(inner);
 
     inner.addEventListener("keyup", () => {
-      this.styleSelectionTracker.rememberTextSelection();
       this.tableCommandController.rememberSelectedTableRow();
-      this.updateToolbarSelectionState();
+      this.handleSelectionChange();
     });
     inner.addEventListener("click", (event) => {
       this.tableCommandController.rememberTableRowFromEvent(event);
@@ -908,9 +921,8 @@ export class EditorComponent {
     });
     inner.addEventListener("mouseup", (event) => {
       this.styleSelectionTracker.rememberStyleBlockFromEvent(event);
-      this.styleSelectionTracker.rememberTextSelection();
       this.tableCommandController.rememberSelectedTableRow();
-      this.updateToolbarSelectionState();
+      this.handleSelectionChange();
     });
 
     this.runtimePageHeaderRenderer.ensureHeader(page);
@@ -1215,6 +1227,17 @@ export class EditorComponent {
         this.pages = this.paginator.getPages();
         const fallbackPageIndex = Math.max(0, Math.min(pageIndex, this.pages.length - 1));
         const fallbackPage = this.pages[fallbackPageIndex];
+        if (resolved) {
+          // The paginator has a per-frame budget. Continue at the first page
+          // still overflowing instead of leaving the document half reflowed.
+          const continuation = this.pages.slice(fallbackPageIndex + 1)
+            .find((currentPage) => this.layoutService.pageOverflows(currentPage));
+          if (continuation) this.scheduleRebalance(continuation, false, {
+            compactPages: false,
+            includePreviousPage: false,
+            overflowOnly: true,
+          });
+        }
         if (!resolved && fallbackPage && this.layoutService.pageOverflows(fallbackPage)) {
           hweDebugLog("editor.scheduleRebalance.overflowFallback", {
             fallbackPageIndex,
@@ -1232,6 +1255,7 @@ export class EditorComponent {
         this.paginator.rebalanceFromPage(startPage, {
           includePreviousPage: false,
           compactPages: pending.compactPages,
+          affectedThroughPage: pending.affectedThroughPage,
         });
       }
       this.pages = this.paginator.getPages();
@@ -1239,9 +1263,6 @@ export class EditorComponent {
         const inner = currentPage.querySelector<HTMLElement>(".hwe-page-inner");
         if (inner) this.blankLineController.syncEditableBlankBlocks(inner, false);
       });
-      this.syncWorkspace();
-      this.updatePageCount();
-      this.imageResizeController.refresh();
       const fallbackEditable = this.getEditableForPageIndex(pageIndex) ?? activeEditable;
       this.restoreCaretViewport(marker, caretViewportTop);
       CaretManager.restoreMarker(marker, fallbackEditable);
@@ -1267,6 +1288,7 @@ export class EditorComponent {
       compactPages: options.compactPages ?? true,
       force: options.force ?? false,
       overflowOnly: options.overflowOnly ?? false,
+      affectedThroughPage: options.affectedThroughPage,
     };
 
     if (!this.pendingRebalance) {
@@ -1291,6 +1313,10 @@ export class EditorComponent {
         ? true
         : this.pendingRebalance.compactPages && nextRebalance.compactPages,
       force: this.pendingRebalance.force || nextRebalance.force,
+      affectedThroughPage: this.pendingRebalance.affectedThroughPage && nextRebalance.affectedThroughPage
+        ? this.pages[Math.max(this.pages.indexOf(this.pendingRebalance.affectedThroughPage),
+          this.pages.indexOf(nextRebalance.affectedThroughPage))]
+        : undefined,
       overflowOnly:
         !mergedPullFromNextPages &&
         this.pendingRebalance.overflowOnly &&
@@ -1303,7 +1329,6 @@ export class EditorComponent {
     this.pages.forEach((page) => this.layoutService.applyOfficialTableWidths(page));
     this.syncWorkspace();
     this.updatePageCount();
-    this.imageResizeController?.refresh();
   }
 
   private attachPageForMeasurement(page: HTMLElement, afterPage: HTMLElement | null): void {
@@ -1645,12 +1670,16 @@ export class EditorComponent {
       return;
     }
 
+    const regroupTitles = this.keepWithNextStyleClasses.has(className) || blocks.some((block) =>
+      block.closest("[data-hwe-title-group]") ||
+      Array.from(block.classList).some((name) => this.keepWithNextStyleClasses.has(name))
+    );
     blocks.forEach((block) => {
       this.paragraphStyleManager.applyToBlock(block, shouldClearStyle ? null : className);
     });
 
     this.styleSelectionTracker.rememberTextSelection();
-    this.markEditedAfterStyleChange(blocks);
+    this.markEditedAfterStyleChange(blocks, regroupTitles);
     this.historyController.recordNow();
     this.updateDirtyState(this.collectHtml());
   }
@@ -1689,24 +1718,45 @@ export class EditorComponent {
     if (affectedPages.length === 0) return;
 
     this.updateToolbarSelectionState();
+    const overflow = affectedPages.find((page) => this.layoutService.pageOverflows(page));
+    if (overflow && affectedPages.length <= 2 && !elements.some((element) => element.closest("[data-hwe-title-group]"))) {
+      this.scheduleRebalance(overflow, false, {
+        compactPages: false,
+        includePreviousPage: false,
+        overflowOnly: true,
+      });
+      return;
+    }
     this.scheduleRebalance(affectedPages[0], true, {
       compactPages: true,
       force: true,
       includePreviousPage: false,
+      affectedThroughPage: affectedPages[affectedPages.length - 1],
     });
   }
 
-  private markEditedAfterStyleChange(blocks: HTMLElement[]): void {
+  private markEditedAfterStyleChange(blocks: HTMLElement[], regroupTitles = false): void {
     const affectedPages = this.getAffectedPagesForBlocks(blocks);
     if (affectedPages.length === 0) return;
 
     this.updateToolbarSelectionState();
+
+    if (regroupTitles) {
+      this.scheduleRebalance(affectedPages[0], true, {
+        force: true,
+        includePreviousPage: true,
+        affectedThroughPage: affectedPages[affectedPages.length - 1],
+      });
+      return;
+    }
 
     const firstOverflowPage = affectedPages.find((page) => this.layoutService.pageOverflows(page));
     if (firstOverflowPage) {
       this.scheduleRebalance(firstOverflowPage, false, {
         includePreviousPage: false,
         compactPages: false,
+        overflowOnly: affectedPages.length <= 2,
+        affectedThroughPage: affectedPages[affectedPages.length - 1],
       });
     }
   }
@@ -2002,7 +2052,6 @@ export class EditorComponent {
   }
 
   private updateToolbarSelectionState(): void {
-    this.toolbar.updateActiveStates();
     this.toolbar.setSelectionFormatting(this.selectionFormattingResolver.resolve());
   }
 
@@ -2219,6 +2268,9 @@ export class EditorComponent {
     this.diagnosticsController?.destroy();
     if (this.rebalanceFrame !== undefined) {
       window.cancelAnimationFrame(this.rebalanceFrame);
+    }
+    if (this.selectionFrame !== undefined) {
+      window.cancelAnimationFrame(this.selectionFrame);
     }
     if (this.deferredRenderFrame !== undefined) {
       window.cancelAnimationFrame(this.deferredRenderFrame);
