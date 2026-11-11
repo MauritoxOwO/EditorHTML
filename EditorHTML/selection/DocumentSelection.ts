@@ -645,7 +645,7 @@ export class DocumentSelection {
       }
     });
     caret.insertNode(fragment);
-    const last = inserted.at(-1);
+    const last = inserted[inserted.length - 1];
     if (last?.parentNode) {
       if (last.nodeType === Node.TEXT_NODE) caret.setStart(last, last.textContent?.length ?? 0);
       else caret.setStartAfter(last);
