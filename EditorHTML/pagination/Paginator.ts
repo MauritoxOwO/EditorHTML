@@ -66,6 +66,10 @@ export class Paginator {
     this.onPagesChanged(this.pages);
   }
 
+  setKeepWithNextStyles(classNames: readonly string[]): void {
+    this.keepTogetherController.setKeepWithNextStyles(classNames);
+  }
+
   getPages(): HTMLElement[] {
     return [...this.pages];
   }

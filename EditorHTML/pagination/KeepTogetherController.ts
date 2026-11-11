@@ -1,10 +1,13 @@
 import { isEditableBlankBlock, isManualPageBreak, isSplittableTextBlock } from "./PaginatorDom";
 
-export function esEstiloTitulo(nombreEstilo: string): boolean {
-  return /(?:^|[-_])tit(?:$|[-_])/i.test(nombreEstilo.trim());
-}
-
 export class KeepTogetherController {
+  private readonly keepWithNextStyles = new Set<string>();
+
+  setKeepWithNextStyles(classNames: readonly string[]): void {
+    this.keepWithNextStyles.clear();
+    classNames.forEach((className) => this.keepWithNextStyles.add(className));
+  }
+
   groupFlowNodes(nodes: ChildNode[]): ChildNode[] {
     const grouped: ChildNode[] = [];
     let index = 0;
@@ -109,8 +112,8 @@ export class KeepTogetherController {
     if (!block) return false;
     const appliedStyle = block.getAttribute("data-hwe-paragraph-style");
     return appliedStyle !== null
-      ? esEstiloTitulo(appliedStyle)
-      : Array.from(block.classList).some(esEstiloTitulo);
+      ? this.keepWithNextStyles.has(appliedStyle)
+      : Array.from(block.classList).some((className) => this.keepWithNextStyles.has(className));
   }
 
   private findTitleGroupEnd(nodes: ChildNode[], start: number): number {

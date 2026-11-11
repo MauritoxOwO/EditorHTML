@@ -10,17 +10,19 @@ require.extensions[".ts"] = (module, filename) => {
   });
   module._compile(outputText, filename);
 };
-const { esEstiloTitulo, KeepTogetherController } = require("../EditorHTML/pagination/KeepTogetherController.ts");
+const { KeepTogetherController } = require("../EditorHTML/pagination/KeepTogetherController.ts");
+const { mapRowsToStyleCatalog, fetchParagraphStyleCatalog } = require("../EditorHTML/services/dataverse/styleApi.ts");
 const { DocumentSerializer } = require("../EditorHTML/services/DocumentSerializer.ts");
 const { DEFAULT_PAGE_SETUP } = require("../EditorHTML/pagination/PageGeometry.ts");
 
-function setup(t, html) {
+function setup(t, html, keepWithNextStyles = ["art-tit", "art-TIT", "cap-tit", "art_TIT"]) {
   const dom = new JSDOM(`<main>${html}</main>`);
   t.after(() => dom.window.close());
   for (const name of ["window", "document", "Node", "HTMLElement", "DOMParser"]) global[name] = dom.window[name];
   global.getComputedStyle = dom.window.getComputedStyle.bind(dom.window);
   const root = document.querySelector("main");
   const controller = new KeepTogetherController();
+  controller.setKeepWithNextStyles(keepWithNextStyles);
   const group = () => {
     const nodes = controller.groupFlowNodes([...root.childNodes]);
     root.replaceChildren(...nodes);
@@ -29,12 +31,43 @@ function setup(t, html) {
   return { root, controller, group };
 }
 
-for (const name of ["tit", "art-tit", "art-Tit", "art-TIT", "art_tit", "tit-general", "art-tit-2", "  art-TIT  "]) {
-  test(`reconoce el estilo de título ${JSON.stringify(name)}`, () => assert.equal(esEstiloTitulo(name), true));
+for (const name of ["encabezado", "art-tit"]) {
+  for (const flag of [true, false, null, undefined]) {
+    test(`el campo Dataverse ${String(flag)} decide la unión del estilo ${name}`, t => {
+      const catalog = mapRowsToStyleCatalog([
+        { ays_nombre: name, ays_contenido: "font-weight:bold", ays_unidoaparrafosiguiente: flag },
+      ], { entitySetName: "ays_parametrocsses", classField: "ays_nombre", cssField: "ays_contenido" });
+      assert.equal(catalog.styles[0].keepWithNext, flag === true);
+      const classes = catalog.styles.filter(style => style.keepWithNext).map(style => style.className);
+      const app = setup(t, `<p class="${name}">Título</p><p>Cuerpo</p>`, classes);
+      const nodes = app.group();
+      assert.equal(app.controller.isTitleGroup(nodes[0]), flag === true);
+    });
+  }
 }
-for (const name of ["", "art-texto", "art-titular", "arttit", "art-tit2"]) {
-  test(`no confunde ${JSON.stringify(name)} con un título`, () => assert.equal(esEstiloTitulo(name), false));
-}
+
+test("consulta el campo Sí/No junto con el catálogo de estilos", async t => {
+  const originalFetch = global.fetch;
+  t.after(() => { global.fetch = originalFetch; });
+  let requestUrl;
+  global.fetch = async url => {
+    requestUrl = new URL(url);
+    return { ok: true, json: async () => ({ value: [] }) };
+  };
+  await fetchParagraphStyleCatalog("https://example.invalid", {
+    entitySetName: "ays_parametrocsses", classField: "ays_nombre", cssField: "ays_contenido",
+  });
+  assert.ok(requestUrl.searchParams.get("$select").split(",").includes("ays_unidoaparrafosiguiente"));
+});
+
+test("retira la unión cuando el mismo estilo deja de estar marcado", t => {
+  const app = setup(t, '<p class="art-tit">Título</p><p>Cuerpo</p>');
+  assert.equal(app.controller.isTitleGroup(app.group()[0]), true);
+  const group = app.root.firstElementChild;
+  app.controller.unwrapGeneratedGroup(group);
+  app.controller.setKeepWithNextStyles([]);
+  assert.equal(app.group().length, 2);
+});
 
 test("agrupa el título aplicado y el párrafo inmediato sin incluir los demás", t => {
   const app = setup(t, '<p data-hwe-paragraph-style="art-TIT">Título</p><p>Cuerpo</p><p>Después</p>');

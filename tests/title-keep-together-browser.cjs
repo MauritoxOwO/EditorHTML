@@ -62,10 +62,14 @@ test("títulos y párrafos permanecen unidos al paginar, editar y exportar", asy
           const workspace = root.firstElementChild;
           const layout = new EditorLayoutService();
           const styles = new ParagraphStyleManager(() => root, { setParagraphStyles() {}, setFontFamilies() {} });
-          styles.setStyles([
-            { label: "Artículo", className: "art-TIT", cssText: "font-size:12px;line-height:20px;margin:0" },
+          const catalog = [
+            ...["art-TIT", "art-tit", "art_tit", "cap-tit"].map(className => ({
+              label: className, className, keepWithNext: true,
+              cssText: "font-size:12px;line-height:20px;margin:0",
+            })),
             { label: "Cuerpo", className: "cuerpo", cssText: "font-size:12px;line-height:20px;margin:0" },
-          ]);
+          ];
+          styles.setStyles(catalog);
           let pages = [];
           const factory = () => {
             const p = document.createElement("section");p.className = "hwe-page";
@@ -77,6 +81,7 @@ test("títulos y párrafos permanecen unidos al paginar, editar y exportar", asy
             for (const p of next) if (p.parentElement !== workspace) workspace.append(p);
             pages.forEach(p => layout.applyOfficialTableWidths(p));
           }, (p, after) => after.after(p));
+          paginator.setKeepWithNextStyles(catalog.filter(style => style.keepWithNext).map(style => style.className));
           function render(html, available = 30) {
             workspace.innerHTML = "";
             const first = factory();workspace.append(first);

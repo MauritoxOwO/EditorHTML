@@ -564,9 +564,13 @@ export class EditorComponent {
             };
 
       this.paragraphStyleManager.setCatalog(catalog);
+      this.paginator.setKeepWithNextStyles(
+        catalog.styles.filter((style) => style.keepWithNext === true).map((style) => style.className)
+      );
     } catch (error) {
       console.warn("[HtmlWordEditor] paragraph styles:", error);
       this.paragraphStyleManager.setCatalog({ styles: [], fonts: [] });
+      this.paginator.setKeepWithNextStyles([]);
     }
   }
 

@@ -3,6 +3,7 @@ export interface ParagraphStyleDefinition {
   className: string;
   cssText: string;
   showInDropdown?: boolean;
+  keepWithNext?: boolean;
 }
 
 export interface ParagraphFontFaceDefinition {
@@ -35,6 +36,8 @@ const EMPTY_STYLE_CATALOG: ParagraphStyleCatalog = {
   fonts: [],
 };
 
+const KEEP_WITH_NEXT_FIELD = "ays_unidoaparrafosiguiente";
+
 export async function fetchParagraphStyles(
   baseUrl: string,
   config: ParagraphStyleTableConfig
@@ -46,7 +49,7 @@ export async function fetchParagraphStyleCatalog(
   baseUrl: string,
   config: ParagraphStyleTableConfig
 ): Promise<ParagraphStyleCatalog> {
-  const selectFields = [config.classField, config.cssField];
+  const selectFields = [config.classField, config.cssField, KEEP_WITH_NEXT_FIELD];
   if (config.stateField) selectFields.push(config.stateField);
   if (config.dropdownField) selectFields.push(config.dropdownField);
   if (config.documentTypeField) selectFields.push(config.documentTypeField);
@@ -116,6 +119,7 @@ export function mapRowsToStyleCatalog(
       className: label.replace(/^\./, ""),
       cssText,
       showInDropdown: shouldShowInDropdown(row, config),
+      keepWithNext: readBoolean(row[KEEP_WITH_NEXT_FIELD]) === true,
     });
   });
 
