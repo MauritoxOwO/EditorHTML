@@ -118,3 +118,70 @@ test('261 páginas: formato local, selección, scroll, historial y aislamiento d
     assert.ok(result.styleMs < Number(process.env.FORMAT_BUDGET_MS || 1000), `Estilo: ${result.styleMs}ms`);
   }
 });
+
+test('4000 filas: carga completa y Enter antes y dentro de una tabla conserva contenido e historial', { timeout: 180000 }, async t => {
+  const browser = await chromium.launch({ headless: true,
+    executablePath: process.env.BROWSER_PATH || 'C:/Program Files/Google/Chrome/Application/chrome.exe' });
+  t.after(() => browser.close());
+  const page = await browser.newPage({ viewport: { width: 1400, height: 1000 } });
+  const errors = []; page.on('pageerror', error => errors.push(error.message));
+  await page.setContent('<style>html,body{height:100%;margin:0}#host{height:900px}</style><div id="host"></div>');
+  await page.addStyleTag({ content: fs.readFileSync(path.join(source, 'css/editor.css'), 'utf8') });
+  await page.addScriptTag({ content: runtime() });
+  await page.evaluate(async () => {
+    const body = Array.from({length:4000}, (_,i) => `<tr data-row="${i}"><td><p>Fila ${i+1}</p></td><td><p>Contenido de la tabla, para comprobar su edición.</p></td><td><p>Dato ${i+1}</p></td></tr>`).join('');
+    window.editor = new EditorComponent(document.querySelector('#host'), {}, {
+      initialHtml: `<p id="before">Antes de la tabla.</p><table class="hwe-word-table" data-hwe-repeat-header="true"><colgroup><col style="width:20%"><col style="width:60%"><col style="width:20%"></colgroup><thead><tr><th>Fila</th><th>Texto</th><th>Dato</th></tr></thead><tbody>${body}</tbody></table><p>Después de la tabla.</p>`,
+      paragraphStyleCatalog: { styles: [], fonts: [] }
+    });
+    await editor.init();
+    window.flush = async () => {
+      for (let i=0; i<100; i++) {
+        await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
+        if (editor.rebalanceFrame === undefined && !editor.pendingRebalance && !editor.historyController.isRestoring) return;
+      }
+      throw new Error('La paginación no converge');
+    };
+    window.originalRows = [...editor.workspace.querySelectorAll('tbody tr')].map(row => row.textContent);
+  });
+  assert.equal(await page.evaluate(() => editor.pages.filter(pageOverflows).length), 0, 'la carga termina con toda la tabla paginada');
+  const measurements = [];
+  for (const position of ['before', 'cell']) {
+    await page.evaluate(async position => {
+      const p = document.querySelector(position === 'before' ? '#before' : '.hwe-page-inner tbody td p');
+      p.scrollIntoView({block:'center'}); editor.workspace.focus(); getSelection().setPosition(p.firstChild,0);
+      await flush();
+      editor.workspace.addEventListener('beforeinput', () => { window.enterStart = performance.now(); }, {once:true,capture:true});
+    }, position);
+    await page.keyboard.press('Enter');
+    const result = await page.evaluate(async () => {
+      await flush();
+      const elapsed = performance.now() - enterStart;
+      const rows = [...editor.workspace.querySelectorAll('tbody tr')];
+      const tables = [...editor.workspace.querySelectorAll('table')];
+      const focus = getSelection().focusNode;
+      return {elapsed, overflow:editor.pages.filter(pageOverflows).length,
+        text:JSON.stringify(rows.map(row => row.textContent)) === JSON.stringify(originalRows),
+        order:rows.every((row,i) => row.dataset.row === String(i)),
+        headers:tables.every(table => table.querySelectorAll('thead').length === 1),
+        caret:editor.workspace.contains(focus),
+        inCell:!!(focus.nodeType === Node.ELEMENT_NODE ? focus : focus.parentElement).closest('td')};
+    });
+    measurements.push({position,ms:result.elapsed});
+    assert.equal(result.overflow,0); assert.equal(result.text,true); assert.equal(result.order,true);
+    assert.equal(result.headers,true); assert.equal(result.caret,true); assert.equal(result.inCell,position === 'cell');
+    assert.ok(result.elapsed < Number(process.env.ENTER_BUDGET_MS || 1000), `Enter ${position}: ${result.elapsed} ms`);
+    await page.evaluate(async () => { editor.historyController.undo(); await flush(); });
+    const restored = await page.evaluate(() => {
+      const focus = getSelection().focusNode;
+      const element = focus.nodeType === Node.ELEMENT_NODE ? focus : focus.parentElement;
+      return { rows:JSON.stringify([...editor.workspace.querySelectorAll('tbody tr')].map(row => row.textContent)) === JSON.stringify(originalRows),
+        offset:getSelection().focusOffset, inCell:!!element.closest('td'), overflow:editor.pages.filter(pageOverflows).length };
+    });
+    assert.equal(restored.rows,true); assert.equal(restored.offset,0);
+    assert.equal(restored.inCell,position === 'cell'); assert.equal(restored.overflow,0);
+  }
+  console.log(JSON.stringify({tableEnter:measurements}));
+  await page.evaluate(() => editor.destroy());
+  assert.deepEqual(errors,[]);
+});

@@ -19,7 +19,7 @@ interface DomPoint { node: Node; offset: number }
 const EXCLUDED = "[contenteditable='false'], [hidden], [data-hwe-api-header], [data-hwe-dynamic-header], [data-hwe-runtime-page-header], [data-hwe-page-divider], [data-hwe-caret], [data-hwe-paste-marker], style, script";
 
 // Las posiciones cuentan contenido, no nodos: paginar puede dividir textos y clonar contenedores.
-function contentUnits(root: HTMLElement): ContentUnit[] {
+function* contentUnits(root: HTMLElement): IterableIterator<ContentUnit> {
   const seenHeaders = new Set<string>();
   const walker = document.createTreeWalker(root, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_TEXT, {
     acceptNode: (node) => {
@@ -44,12 +44,11 @@ function contentUnits(root: HTMLElement): ContentUnit[] {
       return NodeFilter.FILTER_ACCEPT;
     },
   });
-  const units: ContentUnit[] = [];
   let node: Node | null;
   while ((node = walker.nextNode())) {
-    units.push({ node, length: node.nodeType === Node.TEXT_NODE ? (node as Text).length : 1 });
+    // Capturing a caret near the beginning must not traverse the rest of a large table.
+    yield { node, length: node.nodeType === Node.TEXT_NODE ? (node as Text).length : 1 };
   }
-  return units;
 }
 
 function headers(workspace: HTMLElement, flowId: string): HTMLElement[] {
@@ -86,7 +85,7 @@ function resolvePoint(workspace: HTMLElement, point: ContentPoint): DomPoint | n
   const candidates = point.header ? headers(workspace, point.header.flowId) : [];
   const scope = point.header ? candidates[Math.min(point.header.index, candidates.length - 1)] : workspace;
   if (!scope) return null;
-  const units = contentUnits(scope);
+  const units = Array.from(contentUnits(scope));
   let remaining = point.offset;
   for (let index = 0; index < units.length; index++) {
     const { node, length } = units[index];
@@ -127,7 +126,9 @@ export function captureHistoryView(workspace: HTMLElement): HistoryViewState {
   if (selection?.anchorNode && selection.focusNode && anchorInWorkspace && focusInWorkspace &&
       !focusElement?.closest(EXCLUDED) && !anchorElement?.closest(EXCLUDED)) {
     state.anchor = capturePoint(workspace, selection.anchorNode, selection.anchorOffset);
-    state.focus = capturePoint(workspace, selection.focusNode, selection.focusOffset);
+    state.focus = selection.isCollapsed
+      ? state.anchor
+      : capturePoint(workspace, selection.focusNode, selection.focusOffset);
     const top = caretTop(selection.focusNode, selection.focusOffset);
     if (top !== undefined) state.caretTop = top - workspace.getBoundingClientRect().top;
   }

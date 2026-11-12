@@ -210,3 +210,38 @@ test("no habilita un editor inicialmente oculto hasta paginar al hacerse visible
   await assertReady(page);
   assert.ok(await page.locator(".hwe-page").count() > 1);
 });
+
+test("una fila indivisible más alta que una página no deja bloqueada la carga", {timeout:30000}, async t => {
+  const page = await open(t);
+  await page.evaluate(async () => {
+    window.editor = new EditorComponent(document.querySelector('#host'), undefined, {
+      initialHtml:'<table><tbody><tr><td><p>Fila indivisible</p><div style="height:1500px">Contenido alto</div></td></tr></tbody></table>',
+      paragraphStyleCatalog:{styles:[],fonts:[]}
+    });
+    await editor.init();
+  });
+  await assertReady(page);
+  assert.equal(await page.locator('tbody tr').count(), 1);
+  await page.evaluate(() => editor.destroy());
+});
+
+test("cancelar durante una tanda pendiente no continúa paginando", async t => {
+  const page = await open(t);
+  const result = await page.evaluate(async () => {
+    const editor = new EditorComponent(document.querySelector('#host'), undefined, {
+      initialHtml:'<p>Documento</p>', paragraphStyleCatalog:{styles:[],fonts:[]}
+    });
+    await editor.init();
+    let resume;
+    editor.waitForLoadingPaint = () => new Promise(resolve => { resume = resolve; });
+    editor.layoutService.pageOverflows = () => true;
+    let pushes = 0;
+    editor.paginator.pushOverflowForwardFromPage = () => { pushes++; };
+    const pending = editor.finishInitialPagination();
+    editor.destroy();
+    resume();
+    await pending;
+    return pushes;
+  });
+  assert.equal(result,0);
+});

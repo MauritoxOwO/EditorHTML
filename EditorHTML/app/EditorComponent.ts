@@ -722,7 +722,7 @@ export class EditorComponent {
     const done = hweDebugStart("editor.renderAndPaginate", {
       htmlLength: html.length,
     });
-    this.imageHydrationRun++;
+    const run = ++this.imageHydrationRun;
     this.workspace.innerHTML = "";
 
     const normalizedDocument = this.documentSerializer.normalizeHtmlForPagination(html);
@@ -754,17 +754,37 @@ export class EditorComponent {
 
     this.deferredRenderHtml = null;
     await this.assetLayoutManager.waitForStableLayout(this.workspace);
+    if (run !== this.imageHydrationRun || !this.workspace.isConnected) return;
 
     this.paginator.repaginateAll();
     this.pages = this.paginator.getPages();
-    this.pages.forEach((page) => this.layoutService.applyOfficialTableWidths(page));
-    this.syncWorkspace();
-    this.updatePageCount();
-    this.imageResizeController.refresh();
+    await this.finishInitialPagination();
+    if (run !== this.imageHydrationRun || !this.workspace.isConnected) return;
     await this.startDetachedImageHydration();
     done({
       pages: this.pages.length,
     });
+  }
+
+  private async finishInitialPagination(): Promise<void> {
+    const run = this.imageHydrationRun;
+    const unsplittable = new Set<HTMLElement>();
+    while (run === this.imageHydrationRun && this.workspace.isConnected) {
+      const page = this.pages.find((candidate) => !unsplittable.has(candidate) && this.layoutService.pageOverflows(candidate));
+      if (!page) return;
+      // Large tables can exhaust the synchronous pagination budget. Finish
+      // those batches while loading, rather than leaving the first Enter to
+      // paginate thousands of rows. Yield so the loading screen stays responsive.
+      await this.waitForLoadingPaint();
+      if (run !== this.imageHydrationRun || !this.workspace.isConnected) return;
+      const before = page.innerHTML;
+      this.paginator.pushOverflowForwardFromPage(page);
+      this.pages = this.paginator.getPages();
+      if (page.innerHTML === before && this.layoutService.pageOverflows(page)) {
+        // An indivisible object/row taller than a page must not trap loading.
+        unsplittable.add(page);
+      }
+    }
   }
 
   private withDynamicHeaderHtml(html: string): string {
@@ -1326,7 +1346,7 @@ export class EditorComponent {
 
   private onPagesChanged(pages: HTMLElement[]): void {
     this.pages = pages;
-    this.pages.forEach((page) => this.layoutService.applyOfficialTableWidths(page));
+    this.layoutService.applyOfficialTableWidthsToPages(this.pages);
     this.syncWorkspace();
     this.updatePageCount();
   }

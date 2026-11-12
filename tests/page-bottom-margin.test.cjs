@@ -116,3 +116,19 @@ test("una tabla larga conserva la densidad al fragmentarse y la recalcula al bor
   layout.applyOfficialTableWidths(root);
   assert.ok(tables.every(table => !table.classList.contains("hwe-table-compact")));
 });
+
+test("el cálculo por páginas conserva la densidad global y se actualiza tras borrar filas", t => {
+  const { root, inner } = setup(t, 1);
+  root.className = "pcf-html-editor-root";
+  const table = count => `<table class="hwe-word-table" data-hwe-table-flow-id="a"><tbody>${'<tr><td>Fila</td></tr>'.repeat(count)}</tbody></table>`;
+  inner.innerHTML = table(30);
+  root.insertAdjacentHTML('beforeend', `<section class="hwe-page"><div class="hwe-page-inner">${table(30)}</div></section>`);
+  const pages = [...root.querySelectorAll('.hwe-page')];
+  const tables = [...root.querySelectorAll('table')];
+  const layout = new EditorLayoutService();
+  layout.applyOfficialTableWidthsToPages(pages);
+  assert.ok(tables.every(table => table.classList.contains('hwe-table-compact')));
+  tables[1].querySelector('tr').remove();
+  layout.applyOfficialTableWidthsToPages(pages);
+  assert.ok(tables.every(table => !table.classList.contains('hwe-table-compact')));
+});

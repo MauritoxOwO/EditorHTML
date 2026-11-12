@@ -550,6 +550,19 @@ export class Paginator {
 
       const moved = this.moveOverflowPiece(inner, nextInner, page, nextPage);
       movedAny = movedAny || moved;
+      if (moved) {
+        // The next page may already contain a continuation of this table.
+        // Merge before measuring it, otherwise duplicate headers temporarily
+        // displace more rows and trigger another overflow pass through the document.
+        let previous: ChildNode | undefined;
+        Array.from(nextInner.childNodes).forEach((node) => {
+          if (this.shouldMergeTableFragments(previous, node)) {
+            this.mergeTableRows(previous as HTMLElement, node as HTMLElement);
+          } else {
+            previous = node;
+          }
+        });
+      }
       if (!moved) {
         hweDebugLog("paginator.resolveOverflow.noMove", {
           childCount: getMeaningfulChildren(inner).length,

@@ -20,7 +20,18 @@ const TABLE_DENSITY_CLASSES = [
 type TableDensity = "compact" | "dense" | "ultra-dense" | null;
 
 export class EditorLayoutService {
-  applyOfficialTableWidths(root: HTMLElement): void {
+  applyOfficialTableWidthsToPages(pages: HTMLElement[]): void {
+    // Density depends on the entire table. Count each flow once per layout
+    // update rather than scanning every fragment again for every page.
+    const rowCounts = new Map<string, number>();
+    pages.forEach((page) => page.querySelectorAll<HTMLTableElement>("table[data-hwe-table-flow-id]").forEach((table) => {
+      const id = table.getAttribute("data-hwe-table-flow-id")!;
+      rowCounts.set(id, (rowCounts.get(id) ?? 0) + table.querySelectorAll("tbody tr, tfoot tr").length);
+    }));
+    pages.forEach((page) => this.applyOfficialTableWidths(page, rowCounts));
+  }
+
+  applyOfficialTableWidths(root: HTMLElement, rowCounts?: ReadonlyMap<string, number>): void {
     const inners = root.classList.contains("hwe-page-inner")
       ? [root]
       : Array.from(root.querySelectorAll<HTMLElement>(".hwe-page-inner"));
@@ -39,7 +50,7 @@ export class EditorLayoutService {
         if ((child as HTMLElement) !== table) {
           (child as HTMLElement).classList.add("hwe-table-flow-wrapper");
         }
-        this.normalizeFlowTable(table);
+        this.normalizeFlowTable(table, rowCounts);
       });
     });
   }
@@ -66,7 +77,7 @@ export class EditorLayoutService {
     return this.getDirectFlowTable(onlyChild);
   }
 
-  private normalizeFlowTable(table: HTMLTableElement): void {
+  private normalizeFlowTable(table: HTMLTableElement, rowCounts?: ReadonlyMap<string, number>): void {
     table.removeAttribute("width");
     if (!table.hasAttribute("data-hwe-user-table-width")) {
       table.style.setProperty("width", "100%", "important");
@@ -76,7 +87,7 @@ export class EditorLayoutService {
     table.style.setProperty("margin-right", "0", "important");
     this.normalizeColumnWidths(table);
     this.clearTableStructureHeights(table);
-    this.normalizeTableDensity(table);
+    this.normalizeTableDensity(table, rowCounts);
   }
 
   private normalizeColumnWidths(table: HTMLTableElement): void {
@@ -101,11 +112,12 @@ export class EditorLayoutService {
     return this.parseCssLength(styleWidth) ?? this.parseCssLength(attrWidth);
   }
 
-  private normalizeTableDensity(table: HTMLTableElement): void {
+  private normalizeTableDensity(table: HTMLTableElement, rowCounts?: ReadonlyMap<string, number>): void {
     // Density belongs to the complete table, not to each page fragment.
     // Otherwise splitting a long table removes its compact style and increases row heights.
     const scope = table.closest(".hwe-workspace, .pcf-html-editor-root");
-    const rowCount = getTableFlowFragments(scope, table).reduce(
+    const id = table.getAttribute("data-hwe-table-flow-id");
+    const rowCount = (id ? rowCounts?.get(id) : undefined) ?? getTableFlowFragments(scope, table).reduce(
       (count, fragment) => count + fragment.querySelectorAll("tbody tr, tfoot tr").length,
       0
     );
