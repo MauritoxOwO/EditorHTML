@@ -13,6 +13,18 @@ const MAX_SPLIT_MS = 180;
 export class TextBlockSplitter {
   private static textFlowCounter = 0;
 
+  /** Extract a measured tail without intermediate layout reads after mutation. */
+  extractMeasuredOverflow(block: HTMLElement, page: HTMLElement): HTMLElement | null {
+    if (!isSplittableTextBlock(block)) return null;
+    const flowId = this.ensureTextFlowId(block);
+    const overflow = block.cloneNode(false) as HTMLElement;
+    overflow.setAttribute("data-hwe-text-flow-id", flowId);
+    overflow.setAttribute("data-hwe-text-fragment", "true");
+    if (!this.moveMeasuredTail(block, overflow, page)) return null;
+    if (isEmptyNode(block, false)) block.remove();
+    return overflow;
+  }
+
   splitTextBlock(
     block: HTMLElement,
     targetInner: HTMLElement,
@@ -35,11 +47,11 @@ export class TextBlockSplitter {
     const overflowBlock = block.cloneNode(false) as HTMLElement;
     overflowBlock.setAttribute("data-hwe-text-flow-id", flowId);
     overflowBlock.setAttribute("data-hwe-text-fragment", "true");
-    targetInner.insertBefore(overflowBlock, targetInner.firstChild);
 
     let movedAny = this.moveMeasuredTail(block, overflowBlock, page);
     if (movedAny && isEmptyNode(block, false)) {
       block.remove();
+      targetInner.insertBefore(overflowBlock, targetInner.firstChild);
       return true;
     }
     let safety = 0;
@@ -70,6 +82,7 @@ export class TextBlockSplitter {
       return false;
     }
 
+    targetInner.insertBefore(overflowBlock, targetInner.firstChild);
     return true;
   }
 

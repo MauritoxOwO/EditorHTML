@@ -218,22 +218,31 @@ export class EditorLayoutService {
   }
 
   applyTextFlowLayout(inner: HTMLElement): void {
-    inner
-      .querySelectorAll<HTMLElement>(".hwe-text-flow-block, .hwe-image-flow-block")
-      .forEach((element) => {
-        element.classList.remove("hwe-text-flow-block", "hwe-image-flow-block");
-      });
-
+    const textBlocks = new Set<HTMLElement>();
     inner.querySelectorAll<HTMLElement>(TEXT_FLOW_SELECTOR).forEach((element) => {
       if (element.closest("td, th")) return;
       if (element.closest("li")) return;
       if (element.querySelector("img, table, tr, td, th, figure, video, canvas, svg")) return;
-      element.classList.add("hwe-text-flow-block");
+      textBlocks.add(element);
     });
-
+    const images = new Set<HTMLElement>();
     inner.querySelectorAll<HTMLImageElement>("img").forEach((image) => {
       if (image.closest("td, th")) return;
-      image.classList.add("hwe-image-flow-block");
+      images.add(image);
+    });
+    // Keep unchanged classes intact: removing and adding them invalidates style
+    // and layout throughout a long document on every pagination callback.
+    inner.querySelectorAll<HTMLElement>(".hwe-text-flow-block").forEach((element) => {
+      if (!textBlocks.has(element)) element.classList.remove("hwe-text-flow-block");
+    });
+    inner.querySelectorAll<HTMLElement>(".hwe-image-flow-block").forEach((element) => {
+      if (!images.has(element)) element.classList.remove("hwe-image-flow-block");
+    });
+    textBlocks.forEach((element) => {
+      if (!element.classList.contains("hwe-text-flow-block")) element.classList.add("hwe-text-flow-block");
+    });
+    images.forEach((image) => {
+      if (!image.classList.contains("hwe-image-flow-block")) image.classList.add("hwe-image-flow-block");
     });
 
     inner.querySelectorAll<HTMLElement>(".hwe-text-flow-column").forEach((column) => {

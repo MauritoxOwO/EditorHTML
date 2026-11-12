@@ -132,3 +132,22 @@ test("el cálculo por páginas conserva la densidad global y se actualiza tras b
   layout.applyOfficialTableWidthsToPages(pages);
   assert.ok(tables.every(table => !table.classList.contains('hwe-table-compact')));
 });
+
+test("reaplicar el layout no modifica párrafos intactos y retira el layout al moverlos a una celda", t => {
+  const { inner } = setup(t, 1);
+  const layout = new EditorLayoutService();
+  layout.applyTextFlowLayout(inner);
+  const paragraph = inner.querySelector('p');
+  const column = paragraph.parentElement;
+  const observer = new window.MutationObserver(() => {});
+  observer.observe(inner, {subtree:true,attributes:true,childList:true});
+  layout.applyTextFlowLayout(inner);
+  assert.deepEqual(observer.takeRecords(), [], 'sin invalidaciones de estilo innecesarias');
+  assert.equal(paragraph.parentElement,column);
+  inner.insertAdjacentHTML('beforeend','<table><tbody><tr><td></td></tr></tbody></table>');
+  inner.querySelector('td').appendChild(paragraph);
+  layout.applyTextFlowLayout(inner);
+  assert.equal(paragraph.classList.contains('hwe-text-flow-block'),false);
+  assert.equal(inner.querySelector('.hwe-text-flow-column'),null);
+  observer.disconnect();
+});

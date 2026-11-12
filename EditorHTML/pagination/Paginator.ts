@@ -588,6 +588,7 @@ export class Paginator {
     page: HTMLElement,
     targetPage: HTMLElement
   ): boolean {
+    if (this.moveMeasuredTextOverflow(sourceInner, targetInner, page)) return true;
     const lastChild = this.getLastMeaningfulChild(sourceInner);
     if (!lastChild) return false;
 
@@ -680,6 +681,49 @@ export class Paginator {
 
     this.prepareNodeForPage(lastChild, targetPage);
     targetInner.insertBefore(lastChild, targetInner.firstChild);
+    return true;
+  }
+
+  private moveMeasuredTextOverflow(
+    sourceInner: HTMLElement, targetInner: HTMLElement, page: HTMLElement
+  ): boolean {
+    const bounds = getPageContentBounds(sourceInner);
+    const children = getMeaningfulChildren(sourceInner);
+    const whole: HTMLElement[] = [];
+    let partial: HTMLElement | undefined;
+    // Read the existing layout first. Measuring after moving each column and
+    // splitting its paragraph forces several document layouts per page.
+    for (let index = children.length - 1; index >= 0; index--) {
+      const node = children[index];
+      if (!(node instanceof HTMLElement) ||
+          !node.classList.contains("hwe-text-flow-column") ||
+          node.getAttribute("data-hwe-generated-wrapper") !== "true" ||
+          node.children.length !== 1 || node.firstElementChild?.tagName !== "P" ||
+          node.querySelector("img, table, svg, [data-hwe-keep-with-next]")) return false;
+      const rect = node.getBoundingClientRect();
+      if (rect.height <= 0) return false;
+      if (rect.top >= bounds.bottom) {
+        whole.unshift(node);
+        continue;
+      }
+      if (rect.bottom > bounds.bottom + bounds.scale) partial = node;
+      break;
+    }
+    if (!partial && whole.length === 0) return false;
+    const fragment = document.createDocumentFragment();
+    if (partial) {
+      const tail = this.textBlockSplitter.extractMeasuredOverflow(partial.firstElementChild as HTMLElement, page);
+      if (!tail) return false;
+      ensureFlowIdentity(partial, CONTAINER_FLOW_ID);
+      const continuation = partial.cloneNode(false) as HTMLElement;
+      continuation.appendChild(tail);
+      fragment.appendChild(continuation);
+      if (isEmptyNode(partial, false)) partial.remove();
+    }
+    whole.forEach((node) => fragment.appendChild(node));
+    // Both pages are invalidated together; resolveOverflow verifies the source
+    // afterwards and retains its general fallback for unusual paragraph layout.
+    targetInner.insertBefore(fragment, targetInner.firstChild);
     return true;
   }
 
@@ -1104,6 +1148,15 @@ export class Paginator {
     page: HTMLElement
   ): boolean {
     if (!this.isSplittableContainer(element) || !element.parentNode) return false;
+    const inner = getInner(page);
+    if (inner) {
+      const bounds = getPageContentBounds(inner);
+      const rect = element.getBoundingClientRect();
+      if (rect.height > 0 && rect.top >= bounds.bottom) {
+        targetInner.insertBefore(element, targetInner.firstChild);
+        return true;
+      }
+    }
     if (shouldPreserveContainerShell(element)) {
       return this.splitContainerPreservingShell(element, targetInner, page);
     }
@@ -1124,7 +1177,6 @@ export class Paginator {
     const startedAt = performance.now();
     ensureFlowIdentity(container, CONTAINER_FLOW_ID);
     const overflowContainer = container.cloneNode(false) as HTMLElement;
-    targetInner.insertBefore(overflowContainer, targetInner.firstChild);
 
     let movedAny = false;
     let safety = 0;
@@ -1177,6 +1229,9 @@ export class Paginator {
       return false;
     }
 
+    // Build the continuation off-document. Empty intermediate shells otherwise
+    // invalidate the following page before every measurement of the source page.
+    targetInner.insertBefore(overflowContainer, targetInner.firstChild);
     return true;
   }
 

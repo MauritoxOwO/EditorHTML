@@ -116,6 +116,7 @@ test('261 páginas: formato local, selección, scroll, historial y aislamiento d
     assert.ok(result.localUpdates <= 2); assert.equal(result.foreignUpdates, 0);
     assert.ok(result.selectionMs < 100);
     assert.ok(result.styleMs < Number(process.env.FORMAT_BUDGET_MS || 1000), `Estilo: ${result.styleMs}ms`);
+    assert.ok(result.sizeMs < Number(process.env.FORMAT_BUDGET_MS || 1000), `Tamaño: ${result.sizeMs}ms`);
   }
 });
 
